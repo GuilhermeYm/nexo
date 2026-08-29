@@ -422,30 +422,43 @@ export function CommandBar({ onOpenNote, onUploaded }: CommandBarProps) {
         )}
       </div>
 
-      <p
-        id={`${listboxId}-ai`}
-        className="mt-2.5 px-1 text-xs text-subtle-foreground"
-      >
-        {upload.phase === "sending" ? (
-          <span className="text-muted-foreground">
-            Enviando {upload.filename}… a Nexo classifica assim que chegar.
-          </span>
-        ) : upload.phase === "done" ? (
-          <span className="text-muted-foreground">
-            {upload.filename} chegou. A classificação aparece em Tarefas.
-          </span>
-        ) : upload.phase === "error" ? (
-          <span className="flex items-center gap-1.5 text-error">
-            <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-            {upload.message}
-          </span>
-        ) : (
-          <>
-            Busca e envio estão no ar. Pedir à IA chega junto com os créditos —
-            e vai responder sobre workspaces, pastas e tags.
-          </>
-        )}
-      </p>
+      {/* A linha de rodapé da barra: o que está acontecendo à esquerda, a
+          atribuição do modelo à direita.
+
+          O crédito fica aqui, e não colado no botão "Pedir à IA": a Groq já
+          classifica cada arquivo enviado hoje, enquanto o botão continua
+          esperando os créditos. Preso ao botão, o crédito diria a coisa errada
+          — que a IA ainda não está em uso. */}
+      <div className="mt-2.5 flex items-baseline justify-between gap-3 px-1">
+        <p
+          id={`${listboxId}-ai`}
+          className="min-w-0 text-xs text-subtle-foreground"
+        >
+          {upload.phase === "sending" ? (
+            <span className="text-muted-foreground">
+              Enviando {upload.filename}… a Nexo classifica assim que chegar.
+            </span>
+          ) : upload.phase === "done" ? (
+            <span className="text-muted-foreground">
+              {upload.filename} chegou. A classificação aparece em Tarefas.
+            </span>
+          ) : upload.phase === "error" ? (
+            <span className="flex items-center gap-1.5 text-error">
+              <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+              {upload.message}
+            </span>
+          ) : (
+            <>
+              Busca e envio estão no ar. Pedir à IA chega junto com os créditos
+              — e vai responder sobre workspaces, pastas e tags.
+            </>
+          )}
+        </p>
+
+        <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] whitespace-nowrap text-subtle-foreground/70 uppercase">
+          Powered by Groq
+        </span>
+      </div>
     </div>
   );
 }

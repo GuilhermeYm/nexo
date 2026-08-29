@@ -13,7 +13,7 @@ export default function PrivacidadePage() {
     <LegalDocument
       title="Privacidade"
       summary="A Nexo vende a ideia de que privacidade é estrutura, não selo. Esta página descreve a estrutura — o que é guardado, onde, por quanto tempo e quem alcança."
-      updatedAt="28 de agosto de 2026"
+      updatedAt="29 de agosto de 2026"
     >
       <section>
         <h2>1. Quem trata os seus dados</h2>
@@ -89,9 +89,9 @@ export default function PrivacidadePage() {
             <strong>Stripe</strong> — processamento de pagamento da assinatura.
           </li>
           <li>
-            <strong>Provedor de modelo de linguagem</strong> — recebe o texto
-            extraído da captura para produzir o resumo, o tipo e as tags daquele
-            item, e nada além disso.
+            <strong>Groq</strong> — o provedor de modelo de linguagem. Recebe o
+            texto extraído da captura para produzir o resumo, o tipo e as tags
+            daquele item, e nada além disso. A seção 5 detalha o que sai daqui.
           </li>
         </ul>
         <p>
@@ -104,9 +104,37 @@ export default function PrivacidadePage() {
       <section>
         <h2>5. Inteligência artificial</h2>
         <p>
-          A Nexo <strong>não treina modelos com o seu conteúdo</strong>. O texto
-          enviado ao provedor de modelo serve exclusivamente para gerar a
-          classificação daquela captura, e o resultado volta para a sua conta.
+          A classificação automática é feita por um provedor de modelo de
+          linguagem — hoje a <strong>Groq</strong>. Isso significa que uma parte
+          do que você captura <strong>sai da nossa infraestrutura</strong>, e
+          vale dizer exatamente qual:
+        </p>
+        <ul>
+          <li>
+            <strong>O que é enviado:</strong> o nome do arquivo, o tipo dele e
+            o texto extraído do documento, cortado nos primeiros 8.000
+            caracteres.
+          </li>
+          <li>
+            <strong>O que não é enviado:</strong> nada que identifique você. A
+            requisição não leva o seu e-mail, o seu nome nem o identificador da
+            sua conta — do lado do provedor, aquele texto não tem dono.
+          </li>
+          <li>
+            <strong>Quando acontece:</strong> só no envio de um arquivo, uma
+            vez por captura. Nem a busca, nem as notas que você escreve à mão,
+            nem o que já está guardado são enviados para lá.
+          </li>
+        </ul>
+        <p>
+          <strong>Nós não usamos o seu conteúdo para nada além de devolvê-lo
+          organizado para você:</strong> não treinamos modelos com ele, não o
+          vendemos e não o usamos para publicidade. Mas o trecho enviado é
+          processado pela Groq, nos servidores e sob os termos dela — é um
+          tratamento que acontece fora daqui, e a política deles vale sobre
+          aquele trecho enquanto ele estiver lá. Se um documento for sensível
+          demais para atravessar essa fronteira, ele não deve ser enviado para
+          classificação.
         </p>
         <p>
           A classificação é sempre identificada como automática e sempre
