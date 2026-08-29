@@ -13,7 +13,8 @@
     "shots:upload": "node --env-file=.env.local --env-file=.env scripts/shot-upload.mjs",
     "shots:file": "node --env-file=.env.local --env-file=.env scripts/shot-attachment.mjs",
     "shots:tags": "node --env-file=.env scripts/shot-tags.mjs",
-    "shots:eraser": "node --env-file=.env scripts/shot-eraser.mjs"
+    "shots:eraser": "node --env-file=.env scripts/shot-eraser.mjs",
+    "shots:links": "node --env-file=.env scripts/shot-connections.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

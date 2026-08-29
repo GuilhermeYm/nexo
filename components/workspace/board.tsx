@@ -1070,6 +1070,10 @@ export function Board({
                                 })
                             : undefined
                         }
+                        onLink={() => {
+                          setTool("link");
+                          setLinkingFrom(item.id);
+                        }}
                         onRaise={() => bringToFront(item.id)}
                         onToggleState={() =>
                           updateWindow(item.id, {
@@ -1261,45 +1265,70 @@ export function Board({
           </div>
         )}
 
-        {/* O aviso do modo. Ele diz as três coisas que a pessoa precisa
-            saber para não se assustar: que a borracha está ligada, o que
-            acontece com o que ela apaga, e como sair. */}
-        {eraserOn && (
+        {/* O aviso da ferramenta. Ele diz as três coisas que a pessoa precisa
+            saber para não se assustar: qual ferramenta está na mão, o que ela
+            faz com o que encosta, e como sair. */}
+        {usingTool && (
           <div className="absolute top-3 left-1/2 z-30 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/95 py-1.5 pr-1.5 pl-3.5 backdrop-blur-sm">
-            <Eraser className="size-4 shrink-0 text-error" aria-hidden="true" />
+            {tool === "link" ? (
+              <Spline
+                className="size-4 shrink-0 text-accent"
+                aria-hidden="true"
+              />
+            ) : (
+              <Eraser
+                className="size-4 shrink-0 text-error"
+                aria-hidden="true"
+              />
+            )}
+
             <p className="min-w-0 text-xs leading-snug text-muted-foreground">
               <span className="font-semibold text-foreground">
-                Passe por cima para tirar da lousa.
+                {tool === "link"
+                  ? linkingFrom
+                    ? "Agora toque no outro elemento."
+                    : "Toque no elemento de onde a flecha sai."
+                  : "Passe por cima para tirar da lousa."}
               </span>{" "}
               <span className="hidden sm:inline">
-                Notas e arquivos continuam na sua conta.
+                {tool === "link"
+                  ? "A flecha aponta para o segundo."
+                  : "Notas e arquivos continuam na sua conta."}
               </span>
             </p>
+
+            {tool === "eraser" && (
+              <button
+                type="button"
+                onClick={() => (armedClear ? clearBoard() : setArmedClear(true))}
+                onBlur={() => setArmedClear(false)}
+                disabled={visibleWindows.length === 0}
+                className={cn(
+                  "flex h-7 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-9",
+                  // Dois passos, como no menu do botão direito: o primeiro
+                  // clique arma, o segundo executa. Apagar a lousa inteira é
+                  // a ação mais destrutiva daqui.
+                  armedClear
+                    ? "bg-error text-white"
+                    : "text-error hover:bg-error/10"
+                )}
+              >
+                {armedClear ? "Apagar mesmo" : "Apagar tudo"}
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={() => (armedClear ? clearBoard() : setArmedClear(true))}
-              onBlur={() => setArmedClear(false)}
-              disabled={visibleWindows.length === 0}
-              className={cn(
-                "flex h-7 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-9",
-                // Dois passos, como no menu do botão direito: o primeiro
-                // clique arma, o segundo executa. Apagar a lousa inteira é a
-                // ação mais destrutiva daqui.
-                armedClear
-                  ? "bg-error text-white"
-                  : "text-error hover:bg-error/10"
-              )}
-            >
-              {armedClear ? "Apagar mesmo" : "Apagar tudo"}
-            </button>
-            <button
-              type="button"
-              onClick={stopErasing}
-              title="Guardar a borracha — Esc"
+              onClick={stopTool}
+              title={
+                tool === "link"
+                  ? "Guardar a ligação — Esc"
+                  : "Guardar a borracha — Esc"
+              }
               className="flex size-7 shrink-0 items-center justify-center rounded-full text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:size-9"
             >
               <X className="size-3.5" aria-hidden="true" />
-              <span className="sr-only">Guardar a borracha</span>
+              <span className="sr-only">Guardar a ferramenta</span>
             </button>
           </div>
         )}
@@ -1420,6 +1449,7 @@ export function Board({
  */
 function WindowMenu({
   window: item,
+  onLink,
   onRaise,
   onToggleState,
   onClose,
@@ -1427,6 +1457,8 @@ function WindowMenu({
   onOpenAttachment,
 }: {
   window: BoardWindow;
+  /** Entra na ferramenta de ligação já com esta janela como origem. */
+  onLink: () => void;
   onRaise: () => void;
   onToggleState: () => void;
   onClose: () => void;
@@ -1441,6 +1473,13 @@ function WindowMenu({
       <ContextMenuItem onSelect={onRaise}>
         <ArrowUpToLine className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
         <ContextMenuItemLabel label="Trazer para frente" />
+      </ContextMenuItem>
+      <ContextMenuItem onSelect={onLink}>
+        <Spline className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
+        <ContextMenuItemLabel
+          label="Ligar a partir daqui"
+          hint="Depois toque no elemento para onde a flecha aponta."
+        />
       </ContextMenuItem>
       <ContextMenuItem onSelect={onToggleState}>
         {minimized ? (
@@ -1691,8 +1730,37 @@ async function downloadAttachment(attachmentId: string): Promise<void> {
   }
 }
 
+/**
+ * Onde a moldura de destaque de uma janela cai na tela.
+ *
+ * O realce mora **fora** do plano transformado — ele é da ferramenta, não do
+ * arranjo —, então a conversão de coordenadas da lousa para coordenadas do
+ * contêiner é feita aqui: multiplica pelo zoom, soma o pan. Dentro do plano
+ * ele herdaria a transformação e a espessura da borda cresceria junto,
+ * ficando grossa a 200% e sumindo a 40%.
+ */
+function frameBox(
+  item: BoardWindow,
+  viewport: { x: number; y: number; zoom: number }
+): { left: number; top: number; width: number; height: number } {
+  return {
+    left: item.x * viewport.zoom + viewport.x,
+    top: item.y * viewport.zoom + viewport.y,
+    width: item.width * viewport.zoom,
+    height: frameHeightOf(item) * viewport.zoom,
+  };
+}
+
 /** O que o cartão de "apagado" diz. */
 function eraseSummary(batch: ErasedBatch): string {
+  // Só flechas: é a passada que encostou num traço sem encostar em janela
+  // nenhuma, e falar de "elementos" ali seria falar de coisa que não saiu.
+  if (batch.removed === 0) {
+    return batch.connections === 1
+      ? "1 ligação removida. Os dois elementos continuam onde estavam."
+      : `${batch.connections} ligações removidas. Os elementos continuam onde estavam.`;
+  }
+
   const what =
     batch.removed === 1
       ? "1 elemento saiu"
@@ -1711,7 +1779,16 @@ function eraseSummary(batch: ErasedBatch): string {
               : `${batch.destroyed} elementos viviam`
           } só nesta lousa.`;
 
-  return `${what} da lousa. ${fate}`;
+  // As flechas entram no fim, e só quando existem: elas caem por tabela, e
+  // quem apagou uma janela não estava pensando nelas.
+  const links =
+    batch.connections === 0
+      ? ""
+      : batch.connections === 1
+        ? " 1 ligação caiu junto."
+        : ` ${batch.connections} ligações caíram junto.`;
+
+  return `${what} da lousa. ${fate}${links}`;
 }
 
 function boundsOf(windows: BoardWindow[]) {

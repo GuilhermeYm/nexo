@@ -78,6 +78,11 @@ export function ConnectionLayer({
 
         const arrow = (
           <g
+            // Identidade no DOM. Um traço de SVG é indistinguível de
+            // qualquer ícone da tela para quem olha de fora — inclusive
+            // para o roteiro de verificação, que contava as alças de
+            // redimensionar junto com as flechas.
+            data-connection={connection.id}
             className={cn(
               "transition-colors duration-150 motion-reduce:transition-none",
               marked
