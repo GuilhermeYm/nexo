@@ -42,6 +42,12 @@ yarn-error.log*
 next-env.d.ts
 
 /.mcp.json
-# Capturas de revisão visual (scripts/shots.mjs) — geradas, não versionadas.
-.impeccable/review/
-.impeccable/critique/shots/
+# Agentes IA e arquivos de sessão — não versionados.
+.claude/
+.impeccable/
+AGENTS.md
+CLAUDE.md
+PRODUCT.md
+ondas_sinapticas_landing.html
+reference1.png
+undefined/

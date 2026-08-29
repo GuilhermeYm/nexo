@@ -3,15 +3,10 @@
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Check, Clock } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  getCheckoutHref,
-  hasCheckoutLink,
-  type BillingPeriod,
-} from "@/lib/stripe";
+import { type BillingPeriod } from "@/lib/stripe";
 import { cn } from "@/lib/utils";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -33,7 +28,6 @@ interface Plan {
   upcoming?: string[];
   /** Fecha o card mais curto com algo verdadeiro em vez de espaço vazio. */
   closingNote?: string;
-  href: Record<BillingPeriod, string>;
   featured?: boolean;
 }
 
@@ -55,15 +49,16 @@ const PLANS: Plan[] = [
     ],
     closingNote:
       "Sem cartão de crédito. Você só decide sobre o Pro depois que a Nexo já tiver virado o lugar onde tudo cai.",
-    href: { monthly: "/registro", yearly: "/registro" },
   },
   {
     name: "Pro",
     tagline: "Para quem joga tudo na Nexo e não quer pensar em limite.",
-    price: { monthly: "R$ 29", yearly: "R$ 23" },
+    // Preço provisório: R$ 50/mês enquanto finalizamos a integração com o
+    // Stripe. O anual mantém o desconto de dois meses grátis.
+    price: { monthly: "R$ 50", yearly: "R$ 42" },
     billingNote: {
       monthly: "por mês, cobrado mensalmente",
-      yearly: "por mês, cobrado R$ 276 por ano",
+      yearly: "por mês, cobrado R$ 504 por ano",
     },
     features: [
       "Capturas ilimitadas",
@@ -81,10 +76,6 @@ const PLANS: Plan[] = [
       "Busca semântica em notas, áudios e PDFs",
       "Ambiente de blocos, hierarquia e links",
     ],
-    href: {
-      monthly: getCheckoutHref("monthly"),
-      yearly: getCheckoutHref("yearly"),
-    },
     featured: true,
   },
 ];
@@ -98,9 +89,8 @@ const PERIOD_OPTIONS: { value: BillingPeriod; label: string }[] = [
  * "Planos" — a seção que fecha o argumento antes do FAQ.
  *
  * Dois planos e um seletor de período: quem chega aqui já sabe o que a Nexo
- * faz e só precisa saber quanto custa. O CTA do Pro aponta para o Payment Link
- * do Stripe (ver lib/stripe.ts) e, enquanto ele não existir, para o registro —
- * dizendo isso no rótulo, em vez de deixar o visitante descobrir clicando.
+ * faz e só precisa saber quanto custa. O CTA do Pro está desabilitado
+ * enquanto finalizamos a integração com o Stripe.
  */
 export function PricingSection() {
   const sectionRef = useRef<HTMLElement>(null);
@@ -141,8 +131,6 @@ export function PricingSection() {
 
     return () => ctx.revert();
   }, []);
-
-  const checkoutIsLive = hasCheckoutLink(period);
 
   return (
     <section
@@ -299,24 +287,20 @@ export function PricingSection() {
 
               <div className="mt-8">
                 <Button
-                  asChild
                   size="lg"
                   variant={plan.featured ? "default" : "outline"}
                   className="w-full"
+                  disabled={plan.featured}
                 >
-                  <Link href={plan.href[period]}>
-                    {plan.featured
-                      ? checkoutIsLive
-                        ? "Assinar o Pro"
-                        : "Criar conta e assinar"
-                      : "Começar agora"}
-                  </Link>
+                  {plan.featured
+                    ? "Disponível em breve"
+                    : "Começar agora"}
                 </Button>
 
-                {plan.featured && !checkoutIsLive && (
+                {plan.featured && (
                   <p className="mt-3 text-center text-xs leading-relaxed text-subtle-foreground">
-                    Você cria a conta primeiro; o pagamento acontece dentro da
-                    Nexo.
+                    O pagamento será liberado assim que finalizarmos a
+                    integração.
                   </p>
                 )}
               </div>
