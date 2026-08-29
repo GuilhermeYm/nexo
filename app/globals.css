@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* O tema do Nexo é dirigido pelo atributo data-theme (ver app/layout.tsx), não
+   por prefers-color-scheme. Sem isso, o `dark:` padrão do Tailwind v4 seguiria
+   o sistema operacional e ignoraria o botão de alternar tema. */
+@custom-variant dark ([data-theme="dark"] &);
+
 :root {
   /* Light — Papel Amarelado */
   --nx-bg-primary: #fdfbf7;
@@ -7,52 +12,245 @@
   --nx-bg-tertiary: #f0ebe2;
   --nx-text-primary: #2c2a26;
   --nx-text-secondary: #6b6356;
-  --nx-text-tertiary: #9b9080;
+  /* Terciário passa AA (4,5:1) sobre bg-primary, secondary e tertiary — o
+     valor anterior (#9b9080) reprovava nas três. É também a cor das linhas
+     do canvas (ondas e mapa), que antes sumiam no tema claro. */
+  --nx-text-tertiary: #74695a;
   --nx-border: #e8e2d9;
   --nx-accent: #3d3b36;
   --nx-accent-text: #fdfbf7;
+  /* Erros de formulário/validação — terracota rebaixado para a paleta papel */
+  --nx-error: #a6462f;
 
-  /* Tags Light */
+  /* Tags Light — 6 matizes, todas rebaixadas para conviver com o papel */
   --nx-tag-1-bg: #ede6d9;
   --nx-tag-1-text: #8b7355;
   --nx-tag-2-bg: #e0ded8;
   --nx-tag-2-text: #6b6b5e;
   --nx-tag-3-bg: #d9e0d5;
   --nx-tag-3-text: #5e6b56;
+  --nx-tag-4-bg: #d5dde6;
+  --nx-tag-4-text: #566a7d;
+  --nx-tag-5-bg: #e8dad5;
+  --nx-tag-5-text: #8b6355;
+  --nx-tag-6-bg: #e0d9e6;
+  --nx-tag-6-text: #6b5e7a;
+
+  /* Tratamento do vídeo do hero — ajuste a presença dele aqui.
+     O filtro dessatura e aquece a imagem para ela pertencer à paleta
+     "papel amarelado" em vez de brigar com ela. */
+  --nx-hero-video-opacity: 0.55;
+  --nx-hero-video-filter: saturate(0.38) sepia(0.3) contrast(1.02)
+    brightness(1.04);
 }
 
 @theme inline {
   --color-background: var(--nx-bg-primary);
   --color-foreground: var(--nx-text-primary);
+  --color-secondary: var(--nx-bg-secondary);
+  --color-tertiary: var(--nx-bg-tertiary);
+  --color-muted-foreground: var(--nx-text-secondary);
+  --color-subtle-foreground: var(--nx-text-tertiary);
+  --color-border: var(--nx-border);
+  --color-accent: var(--nx-accent);
+  --color-accent-foreground: var(--nx-accent-text);
+  --color-error: var(--nx-error);
+  --color-tag-1: var(--nx-tag-1-bg);
+  --color-tag-1-foreground: var(--nx-tag-1-text);
+  --color-tag-2: var(--nx-tag-2-bg);
+  --color-tag-2-foreground: var(--nx-tag-2-text);
+  --color-tag-3: var(--nx-tag-3-bg);
+  --color-tag-3-foreground: var(--nx-tag-3-text);
+  --color-tag-4: var(--nx-tag-4-bg);
+  --color-tag-4-foreground: var(--nx-tag-4-text);
+  --color-tag-5: var(--nx-tag-5-bg);
+  --color-tag-5-foreground: var(--nx-tag-5-text);
+  --color-tag-6: var(--nx-tag-6-bg);
+  --color-tag-6-foreground: var(--nx-tag-6-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-space-grotesk);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Dark — Noturna */
-    --nx-bg-primary: #0f0f11;
-    --nx-bg-secondary: #18181b;
-    --nx-bg-tertiary: #222228;
-    --nx-text-primary: #eaeaea;
-    --nx-text-secondary: #a0a0a8;
-    --nx-text-tertiary: #6b6b70;
-    --nx-border: #2a2a2e;
-    --nx-accent: #eaeaea;
-    --nx-accent-text: #0f0f11;
+/* Tema controlado via atributo data-theme em <html> (ver app/layout.tsx e
+   components/layout/theme-toggle.tsx) — definido por um script inline antes
+   do primeiro paint, para evitar flash. */
+[data-theme="dark"] {
+  /* Dark — Noturna */
+  --nx-bg-primary: #0f0f11;
+  --nx-bg-secondary: #18181b;
+  --nx-bg-tertiary: #222228;
+  --nx-text-primary: #eaeaea;
+  --nx-text-secondary: #a0a0a8;
+  /* Mesma correção de contraste do tema claro, na direção oposta. */
+  --nx-text-tertiary: #8c8c93;
+  --nx-border: #2a2a2e;
+  --nx-accent: #eaeaea;
+  --nx-accent-text: #0f0f11;
+  /* Erros no escuro — mais luminoso para manter contraste */
+  --nx-error: #e0856d;
 
-    /* Tags Dark */
-    --nx-tag-1-bg: #1e2a3a;
-    --nx-tag-1-text: #8ab4f8;
-    --nx-tag-2-bg: #2a1e2a;
-    --nx-tag-2-text: #d4a5d4;
-    --nx-tag-3-bg: #1a2a1e;
-    --nx-tag-3-text: #8bd48b;
-  }
+  /* Tags Dark — mesmas 6 posições, aqui com brilho */
+  --nx-tag-1-bg: #1e2a3a;
+  --nx-tag-1-text: #8ab4f8;
+  --nx-tag-2-bg: #2a1e2a;
+  --nx-tag-2-text: #d4a5d4;
+  --nx-tag-3-bg: #1a2a1e;
+  --nx-tag-3-text: #8bd48b;
+  --nx-tag-4-bg: #2a281a;
+  --nx-tag-4-text: #d8cd85;
+  --nx-tag-5-bg: #2c231c;
+  --nx-tag-5-text: #e0a87f;
+  --nx-tag-6-bg: #1a2a2a;
+  --nx-tag-6-text: #85cfd0;
+
+  /* No escuro o vídeo aparece mais, mas rebaixado para o texto continuar legível. */
+  --nx-hero-video-opacity: 0.45;
+  --nx-hero-video-filter: saturate(0.5) contrast(1.12) brightness(0.72);
 }
 
 body {
   background: var(--nx-bg-primary);
   color: var(--nx-text-primary);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+/* As superfícies que o navegador desenha por nós — seleção, cursor, barra de
+   rolagem e anel de foco — vêm com um padrão que não pertence a paleta
+   nenhuma. Aqui elas passam a seguir o tema como o resto da página. */
+
+::selection {
+  background: var(--nx-bg-tertiary);
+  color: var(--nx-text-primary);
+}
+
+:root {
+  color-scheme: light;
+  accent-color: var(--nx-accent);
+  caret-color: var(--nx-accent);
+  scrollbar-color: var(--nx-text-tertiary) var(--nx-bg-secondary);
+}
+
+/* Barra fina em toda a aplicação.
+   No `*` e não só no `:root` porque `scrollbar-width` **não é herdada** —
+   ao contrário de `scrollbar-color`, logo acima. Declarada só na raiz, ela
+   valia para a barra da página e para mais nada, e cada painel rolável ficava
+   com a barra de 15px do sistema.
+
+   Não é só estética: onde a faixa da barra é reservada
+   (`scrollbar-gutter: stable`, no painel "Trazer da conta") ela vira o
+   próprio recuo do conteúdo, e 15px abriam uma folga visível na borda
+   direita. */
+* {
+  scrollbar-width: thin;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Não existe bloco `::-webkit-scrollbar` aqui, e isso é deliberado.
+
+   Havia um — 10px de largura, polegar arredondado —, e ele nunca chegou a
+   pintar nada: desde o Chrome 121, declarar as propriedades padrão
+   (`scrollbar-color` / `scrollbar-width`) faz o navegador **ignorar** os
+   pseudoelementos `-webkit-` no mesmo elemento. Como `scrollbar-color` está
+   no `:root` e é herdada, o bloco estava morto na aplicação inteira — e a
+   barra media os 15px do sistema, não os 10 que ele pedia. As duas
+   propriedades acima fazem o trabalho, e valem também no Firefox. */
+
+/* Foco visível apenas por teclado, na cor do tema e com folga suficiente para
+   aparecer sobre fundo claro e escuro.
+
+   Envolvido em `:where()` de propósito: isso zera a especificidade da regra,
+   então ela vale como padrão para a aplicação inteira, mas qualquer
+   `outline-none` do Tailwind consegue desligá-la. Sem isso, um componente que
+   desenha o próprio anel de foco (a barra de comando desenha, na borda do
+   contêiner) ganharia os dois — o dele e um retângulo preto por cima. */
+:where(:focus-visible) {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Opt-out explícito, para os componentes em que o foco é desenhado no
+   contêiner e não no controle — a barra de comando do dashboard é assim: o
+   campo é nu por dentro de uma moldura que acende. Um `outline-none` do
+   Tailwind não basta aqui porque ele nem sempre é gerado para a variante
+   `focus-visible`; este seletor tem especificidade própria e sempre vence. */
+[data-focus-ring="container"]:focus-visible {
+  outline: none;
+}
+
+/* Sublinhado que não corta as descidas das letras. */
+a {
+  text-underline-offset: 0.2em;
+}
+
+/* Abertura e fechamento do acordeão (components/ui/accordion.tsx). A altura
+   vem da variável que o Radix mede e escreve no elemento, por isso a animação
+   funciona com qualquer tamanho de resposta. */
+@theme inline {
+  --animate-accordion-down: accordion-down 0.28s ease-out;
+  --animate-accordion-up: accordion-up 0.22s ease-out;
+  /* Menus de contexto. Curto de propósito: o menu aparece sob o ponteiro, e
+     qualquer coisa acima de ~150ms lê como atraso, não como transição. */
+  --animate-menu-in: menu-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-menu-out: menu-out 0.1s ease-in;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes menu-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+    opacity: 1;
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* Quem pediu menos movimento recebe o estado final direto, sem transição. */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="accordion-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="context-menu-sub-content"] {
+    animation: none !important;
+  }
 }

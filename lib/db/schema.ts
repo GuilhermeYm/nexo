@@ -1,0 +1,642 @@
+import {
+  pgTable,
+  uuid,
+  text,
+  timestamp,
+  boolean,
+  bigint,
+  integer,
+  jsonb,
+  primaryKey,
+  pgEnum,
+  index,
+  uniqueIndex,
+  unique,
+  foreignKey,
+  check,
+  customType,
+} from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+
+// drizzle-orm não tem tipo nativo tsvector nesta versão — definimos via customType.
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
+export const subscriptionStatusEnum = pgEnum("subscription_status", [
+  "trialing",
+  "active",
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+  "past_due",
+  "unpaid",
+  "paused",
+]);
+
+export const planEnum = pgEnum("plan", ["free", "pro", "enterprise"]);
+
+export const noteTypeEnum = pgEnum("note_type", [
+  "note",
+  "task",
+  "journal",
+  "idea",
+  "meeting",
+  "document",
+]);
+
+export const noteSourceEnum = pgEnum("note_source", ["user", "ai"]);
+
+export const noteStatusEnum = pgEnum("note_status", [
+  "active",
+  "archived",
+  "deleted",
+]);
+
+export const attachmentTypeEnum = pgEnum("attachment_type", [
+  "image",
+  "audio",
+  "video",
+  "pdf",
+  "document",
+  "other",
+]);
+
+/**
+ * Perfil do usuário vinculado ao auth.users do Supabase.
+ * Guarda dados de assinatura (Stripe) e preferências.
+ */
+export const profiles = pgTable(
+  "profiles",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    displayName: text("display_name"),
+    avatarUrl: text("avatar_url"),
+    subscriptionStatus: subscriptionStatusEnum("subscription_status").default("trialing"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    plan: planEnum("plan").default("free").notNull(),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    stripeCustomerIdx: uniqueIndex("profiles_stripe_customer_id_idx").on(
+      table.stripeCustomerId
+    ),
+  })
+);
+
+/**
+ * Workspaces são os espaços de trabalho do usuário.
+ * No futuro sustentarão a experiência tipo Notion/Obsidian.
+ */
+export const workspaces = pgTable(
+  "workspaces",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    icon: text("icon"),
+    color: text("color"),
+    isDefault: boolean("is_default").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index("workspaces_user_id_idx").on(table.userId),
+    // Alvo da chave estrangeira composta de workspace_windows. Com ela, uma
+    // janela não consegue apontar para o workspace de outra pessoa nem por
+    // bug de aplicação: o banco recusa a linha.
+    idUserKey: unique("workspaces_id_user_id_key").on(table.id, table.userId),
+  })
+);
+
+/**
+ * Notas / blocos de conteúdo do usuário.
+ * Podem ser criadas pelo usuário ou pela IA (source).
+ * Suportam hierarquia via parent_id para futuro sistema de links/blocos.
+ */
+export const notes = pgTable(
+  "notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    workspaceId: uuid("workspace_id"),
+    parentId: uuid("parent_id"),
+    title: text("title").notNull(),
+    /**
+     * Projeção em texto puro — é o que alimenta `search_vector` e os
+     * resumos. Derivada de `contentRich` pelo servidor quando o editor
+     * salva; escrita direto quando a origem é um textarea ou a IA.
+     */
+    content: text("content"),
+    /** Documento do editor (TipTap/ProseMirror). Ver drizzle/0008. */
+    contentRich: jsonb("content_rich"),
+    type: noteTypeEnum("type").default("note").notNull(),
+    source: noteSourceEnum("source").default("user").notNull(),
+    status: noteStatusEnum("status").default("active").notNull(),
+    metadata: jsonb("metadata"),
+    // Busca full-text em português (coluna gerada no banco — ver drizzle/0003).
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      sql`to_tsvector('portuguese', coalesce(title, '') || ' ' || coalesce(content, ''))`
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index("notes_user_id_idx").on(table.userId),
+    workspaceIdx: index("notes_workspace_id_idx").on(table.workspaceId),
+    parentIdx: index("notes_parent_id_idx").on(table.parentId),
+    statusIdx: index("notes_status_idx").on(table.status),
+    // Mesmo papel do índice equivalente em workspaces: alvo da FK composta.
+    idUserKey: unique("notes_id_user_id_key").on(table.id, table.userId),
+  })
+);
+
+/**
+ * Tags criadas pelo usuário para organizar notas e workspaces.
+ */
+export const tags = pgTable(
+  "tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    name: text("name").notNull(),
+    color: text("color"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index("tags_user_id_idx").on(table.userId),
+    userNameIdx: uniqueIndex("tags_user_id_name_idx").on(table.userId, table.name),
+  })
+);
+
+/**
+ * Relação N:N entre notas e tags.
+ */
+export const noteTags = pgTable(
+  "note_tags",
+  {
+    noteId: uuid("note_id").notNull(),
+    tagId: uuid("tag_id").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.noteId, table.tagId] }),
+    noteIdx: index("note_tags_note_id_idx").on(table.noteId),
+    tagIdx: index("note_tags_tag_id_idx").on(table.tagId),
+  })
+);
+
+/**
+ * Anexos (imagens, áudio, PDFs, etc.) vinculados a notas.
+ * Os arquivos em si ficam no Supabase Storage; aqui guardamos metadados.
+ */
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    noteId: uuid("note_id"),
+    type: attachmentTypeEnum("type").default("other").notNull(),
+    storagePath: text("storage_path").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    durationSeconds: integer("duration_seconds"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index("attachments_user_id_idx").on(table.userId),
+    noteIdx: index("attachments_note_id_idx").on(table.noteId),
+    // Alvo da FK composta de workspace_windows — mesmo papel dos índices
+    // equivalentes em workspaces e notes.
+    idUserKey: unique("attachments_id_user_id_key").on(table.id, table.userId),
+  })
+);
+
+/**
+ * Logs de auditoria para ações sensíveis (UPDATE/DELETE).
+ */
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id"),
+    action: text("action").notNull(),
+    tableName: text("table_name").notNull(),
+    // Nullable desde drizzle/0005: eventos sem registro associado
+    // (ex.: tentativa de login falha) não têm record_id.
+    recordId: uuid("record_id"),
+    oldData: jsonb("old_data"),
+    newData: jsonb("new_data"),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index("audit_logs_user_id_idx").on(table.userId),
+    recordIdx: index("audit_logs_record_id_idx").on(table.recordId),
+    createdAtIdx: index("audit_logs_created_at_idx").on(table.createdAt),
+  })
+);
+
+/* Relations */
+
+export const workspacesRelations = relations(workspaces, ({ many }) => ({
+  notes: many(notes),
+}));
+
+export const notesRelations = relations(notes, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [notes.workspaceId],
+    references: [workspaces.id],
+  }),
+  parent: one(notes, {
+    fields: [notes.parentId],
+    references: [notes.id],
+  }),
+  tags: many(noteTags),
+  attachments: many(attachments),
+}));
+
+export const tagsRelations = relations(tags, ({ many }) => ({
+  notes: many(noteTags),
+}));
+
+export const noteTagsRelations = relations(noteTags, ({ one }) => ({
+  note: one(notes, {
+    fields: [noteTags.noteId],
+    references: [notes.id],
+  }),
+  tag: one(tags, {
+    fields: [noteTags.tagId],
+    references: [tags.id],
+  }),
+}));
+
+export const attachmentsRelations = relations(attachments, ({ one }) => ({
+  note: one(notes, {
+    fields: [attachments.noteId],
+    references: [notes.id],
+  }),
+}));
+
+/* -------------------------------------------------------------------------
+ * Tarefas dos agentes de IA
+ * ---------------------------------------------------------------------- */
+
+/**
+ * O que o agente fez (ou tentaria fazer) com uma captura.
+ * Cada valor vira uma linha legível no feed de Tarefas do dashboard.
+ */
+export const aiJobKindEnum = pgEnum("ai_job_kind", [
+  "classify", // decidir o tipo da captura
+  "summarize", // escrever o resumo
+  "tag", // criar/atribuir tags
+  "transcribe", // áudio -> texto
+  "extract", // PDF/imagem -> texto
+  "organize", // escolher/criar o workspace
+]);
+
+/**
+ * Estados possíveis de uma tarefa.
+ *
+ * `insufficient_credits` é um estado terminal-mas-retomável: o trabalho não
+ * foi feito por falta de crédito, e a linha precisa sobreviver a qualquer
+ * limpeza de cache para o usuário poder retomá-la depois de assinar. É a
+ * razão de este feed morar no Postgres e não só em cache.
+ */
+export const aiJobStatusEnum = pgEnum("ai_job_status", [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "insufficient_credits",
+]);
+
+export const aiJobs = pgTable(
+  "ai_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    // Onde o trabalho aconteceu. Ambos opcionais: uma captura pode ser
+    // classificada antes de ter workspace, e uma tarefa pode falhar antes de
+    // existir nota alguma.
+    workspaceId: uuid("workspace_id"),
+    noteId: uuid("note_id"),
+    kind: aiJobKindEnum("kind").notNull(),
+    status: aiJobStatusEnum("status").default("queued").notNull(),
+    /** Uma linha em pt-BR, pronta para exibição: "Classificou contrato.pdf". */
+    label: text("label").notNull(),
+    /** Segunda linha opcional: o que saiu, ou por que não saiu. */
+    detail: text("detail"),
+    /** O que a tarefa produziu (tags criadas, tipo escolhido, resumo). */
+    result: jsonb("result"),
+    /** Mensagem de erro interna — nunca devolvida crua ao cliente. */
+    error: text("error"),
+    /** Custo em créditos, para a retomada saber o que cobrar. */
+    creditsCost: integer("credits_cost").default(0).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userIdx: index("ai_jobs_user_id_idx").on(table.userId),
+    statusIdx: index("ai_jobs_status_idx").on(table.status),
+    // O feed lê sempre as mais recentes do usuário: índice composto.
+    userRecentIdx: index("ai_jobs_user_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    noteIdx: index("ai_jobs_note_id_idx").on(table.noteId),
+  })
+);
+
+export const aiJobsRelations = relations(aiJobs, ({ one }) => ({
+  note: one(notes, {
+    fields: [aiJobs.noteId],
+    references: [notes.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [aiJobs.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+/* -------------------------------------------------------------------------
+ * A lousa: janelas de um workspace
+ * ---------------------------------------------------------------------- */
+
+/**
+ * O que uma janela mostra.
+ *
+ * `note` aponta para uma linha em `notes` — o conteúdo continua achável pela
+ * busca e pelas tags mesmo estando na lousa, que é o princípio nº 3 do
+ * produto. `sticky` e `text` são elementos que existem só na lousa e guardam
+ * o próprio conteúdo em `content`.
+ */
+export const workspaceWindowKindEnum = pgEnum("workspace_window_kind", [
+  "note",
+  "sticky",
+  "text",
+  // O arquivo em si — o PDF, o áudio —, não a nota que a IA escreveu sobre
+  // ele. Aponta para `attachments` e não para a nota, então um anexo pode
+  // ser aberto sozinho.
+  "attachment",
+]);
+
+export const workspaceWindowStateEnum = pgEnum("workspace_window_state", [
+  "normal",
+  "minimized",
+  "maximized",
+]);
+
+/**
+ * Uma janela na lousa de um workspace.
+ *
+ * O layout mora aqui e não no `localStorage` porque é trabalho da pessoa, e
+ * trabalho precisa atravessar dispositivos. O que é de dispositivo — para
+ * onde esta tela está olhando, ou seja pan e zoom — esse sim fica no storage
+ * local (ver `hooks/use-board-viewport.ts`).
+ *
+ * Durante o arraste nada disto é escrito: o React conduz o movimento a 60fps
+ * e a persistência acontece uma vez, depois que a pessoa solta.
+ *
+ * **Isolamento.** A RLS garante que a linha pertence a quem consulta, mas
+ * sozinha ela não impediria alguém de gravar uma janela sua apontando para o
+ * workspace de outra pessoa. Quem impede são as duas chaves estrangeiras
+ * compostas abaixo: `(workspace_id, user_id)` e `(note_id, user_id)` só
+ * fecham se as duas pontas forem do mesmo dono. Como o Postgres usa MATCH
+ * SIMPLE, a segunda simplesmente não é verificada quando `note_id` é nulo —
+ * que é o caso dos elementos próprios da lousa.
+ */
+export const workspaceWindows = pgTable(
+  "workspace_windows",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    workspaceId: uuid("workspace_id").notNull(),
+    /** Preenchido só quando `kind = 'note'`. */
+    noteId: uuid("note_id"),
+    /** Preenchido só quando `kind = 'attachment'`. */
+    attachmentId: uuid("attachment_id"),
+    kind: workspaceWindowKindEnum("kind").default("note").notNull(),
+    /**
+     * Quem pôs esta janela aqui. Reaproveita o enum de `notes.source` porque
+     * a pergunta é a mesma, e a resposta precisa continuar visível: autoria
+     * da IA nunca é apagada (princípio nº 4).
+     */
+    source: noteSourceEnum("source").default("user").notNull(),
+    /** Conteúdo dos elementos que não são nota: `{ text, tone }`. */
+    content: jsonb("content"),
+    x: integer("x").default(0).notNull(),
+    y: integer("y").default(0).notNull(),
+    width: integer("width").default(320).notNull(),
+    height: integer("height").default(220).notNull(),
+    zIndex: integer("z_index").default(0).notNull(),
+    state: workspaceWindowStateEnum("state").default("normal").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    // A lousa lê sempre todas as janelas de um workspace.
+    workspaceIdx: index("workspace_windows_workspace_id_idx").on(
+      table.workspaceId
+    ),
+    userIdx: index("workspace_windows_user_id_idx").on(table.userId),
+    noteIdx: index("workspace_windows_note_id_idx").on(table.noteId),
+    attachmentIdx: index("workspace_windows_attachment_id_idx").on(
+      table.attachmentId
+    ),
+    // A mesma nota — e o mesmo arquivo — não abrem duas vezes na mesma
+    // lousa. Nulos não colidem entre si no Postgres, então as janelas que não
+    // são daquele tipo passam à vontade.
+    oncePerBoard: uniqueIndex("workspace_windows_workspace_note_idx").on(
+      table.workspaceId,
+      table.noteId
+    ),
+    attachmentOncePerBoard: uniqueIndex(
+      "workspace_windows_workspace_attachment_idx"
+    ).on(table.workspaceId, table.attachmentId),
+
+    // Alvo das chaves estrangeiras de tres colunas de workspace_connections:
+    // uma ligacao so fecha se as duas pontas forem da mesma pessoa E da
+    // mesma lousa.
+    boardScopeKey: unique("workspace_windows_id_workspace_id_user_id_key").on(
+      table.id,
+      table.workspaceId,
+      table.userId
+    ),
+
+    workspaceFk: foreignKey({
+      columns: [table.workspaceId, table.userId],
+      foreignColumns: [workspaces.id, workspaces.userId],
+      name: "workspace_windows_workspace_fk",
+    }).onDelete("cascade"),
+
+    noteFk: foreignKey({
+      columns: [table.noteId, table.userId],
+      foreignColumns: [notes.id, notes.userId],
+      name: "workspace_windows_note_fk",
+    }).onDelete("cascade"),
+
+    attachmentFk: foreignKey({
+      columns: [table.attachmentId, table.userId],
+      foreignColumns: [attachments.id, attachments.userId],
+      name: "workspace_windows_attachment_fk",
+    }).onDelete("cascade"),
+
+    // Cada tipo aponta para exatamente o que lhe cabe: nota tem nota, anexo
+    // tem anexo, post-it e caixa de texto não apontam para nada. Sem isto, um
+    // `kind: 'sticky'` com `note_id` preenchido entraria e a leitura teria
+    // que decidir qual conteúdo vale.
+    kindMatchesTarget: check(
+      "workspace_windows_kind_matches_target",
+      sql`(kind = 'note') = (note_id IS NOT NULL)
+        AND (kind = 'attachment') = (attachment_id IS NOT NULL)`
+    ),
+
+    // Limites de sanidade. Não são regra de produto — são o que impede uma
+    // janela de 2 bilhões de pixels entrar por um cliente adulterado.
+    sane: check(
+      "workspace_windows_sane_geometry",
+      sql`width BETWEEN 160 AND 4000
+        AND height BETWEEN 96 AND 4000
+        AND x BETWEEN -200000 AND 200000
+        AND y BETWEEN -200000 AND 200000`
+    ),
+  })
+);
+
+export const workspaceWindowsRelations = relations(
+  workspaceWindows,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceWindows.workspaceId],
+      references: [workspaces.id],
+    }),
+    note: one(notes, {
+      fields: [workspaceWindows.noteId],
+      references: [notes.id],
+    }),
+    attachment: one(attachments, {
+      fields: [workspaceWindows.attachmentId],
+      references: [attachments.id],
+    }),
+  })
+);
+
+/**
+ * Uma flecha de um elemento da lousa para outro.
+ *
+ * Tabela e não coluna dentro da janela: um array não pode ser chave
+ * estrangeira, e é o `ON DELETE CASCADE` das duas FKs abaixo que faz a
+ * flecha sumir junto com a ponta que foi fechada — sem uma linha de
+ * aplicação. Ver `drizzle/0010_workspace_connections.sql`.
+ */
+export const workspaceConnections = pgTable(
+  "workspace_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    workspaceId: uuid("workspace_id").notNull(),
+    /**
+     * De onde a flecha sai e onde ela chega. A direção é a ordem destas
+     * duas colunas — uma coluna "direção" seria a mesma informação escrita
+     * duas vezes, e as duas poderiam discordar.
+     */
+    fromWindowId: uuid("from_window_id").notNull(),
+    toWindowId: uuid("to_window_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index("workspace_connections_workspace_id_idx").on(
+      table.workspaceId
+    ),
+    userIdx: index("workspace_connections_user_id_idx").on(table.userId),
+    // A ponta de chegada não é a primeira coluna do índice único abaixo,
+    // então "o que aponta para esta janela" precisa do índice dela.
+    toIdx: index("workspace_connections_to_window_id_idx").on(
+      table.toWindowId
+    ),
+
+    // A mesma flecha não sai duas vezes. A de volta (B → A) é outra linha de
+    // propósito: duas coisas podem apontar uma para a outra.
+    pair: uniqueIndex("workspace_connections_pair_idx").on(
+      table.fromWindowId,
+      table.toWindowId
+    ),
+
+    workspaceFk: foreignKey({
+      columns: [table.workspaceId, table.userId],
+      foreignColumns: [workspaces.id, workspaces.userId],
+      name: "workspace_connections_workspace_fk",
+    }).onDelete("cascade"),
+
+    // Três colunas, e não duas. `(id, user_id)` garantiria só que a ponta é
+    // da mesma pessoa — uma flecha ainda poderia ligar esta lousa a outra da
+    // mesma conta, e a leitura teria que filtrar isso para sempre.
+    fromFk: foreignKey({
+      columns: [table.fromWindowId, table.workspaceId, table.userId],
+      foreignColumns: [
+        workspaceWindows.id,
+        workspaceWindows.workspaceId,
+        workspaceWindows.userId,
+      ],
+      name: "workspace_connections_from_fk",
+    }).onDelete("cascade"),
+
+    toFk: foreignKey({
+      columns: [table.toWindowId, table.workspaceId, table.userId],
+      foreignColumns: [
+        workspaceWindows.id,
+        workspaceWindows.workspaceId,
+        workspaceWindows.userId,
+      ],
+      name: "workspace_connections_to_fk",
+    }).onDelete("cascade"),
+
+    // Uma flecha de um elemento para ele mesmo não desenha nada e não diz
+    // nada.
+    notSelf: check(
+      "workspace_connections_not_self",
+      sql`from_window_id <> to_window_id`
+    ),
+  })
+);
+
+export const workspaceConnectionsRelations = relations(
+  workspaceConnections,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceConnections.workspaceId],
+      references: [workspaces.id],
+    }),
+    from: one(workspaceWindows, {
+      fields: [workspaceConnections.fromWindowId],
+      references: [workspaceWindows.id],
+      relationName: "connection_from",
+    }),
+    to: one(workspaceWindows, {
+      fields: [workspaceConnections.toWindowId],
+      references: [workspaceWindows.id],
+      relationName: "connection_to",
+    }),
+  })
+);
