@@ -21,6 +21,11 @@ import {
   toIsoString,
 } from "@/lib/dashboard/format";
 import type { RecentNote } from "@/lib/dashboard/queries";
+import {
+  TAG_CHIP_CLASS,
+  TAG_DOT_CLASS,
+  tagTone,
+} from "@/lib/tags/palette";
 import type { TagWithUsage } from "@/lib/tags/queries";
 import { cn } from "@/lib/utils";
 
@@ -33,24 +38,11 @@ import { cn } from "@/lib/utils";
 const RECENT_TAGS_LIMIT = 12;
 const SEARCH_DEBOUNCE_MS = 220;
 
-/** Os seis matizes de tag do tema, endereçados pela posição gravada no banco. */
-const TAG_DOT: Record<string, string> = {
-  "1": "bg-tag-1-foreground",
-  "2": "bg-tag-2-foreground",
-  "3": "bg-tag-3-foreground",
-  "4": "bg-tag-4-foreground",
-  "5": "bg-tag-5-foreground",
-  "6": "bg-tag-6-foreground",
-};
-
-const TAG_PILL: Record<string, string> = {
-  "1": "bg-tag-1 text-tag-1-foreground",
-  "2": "bg-tag-2 text-tag-2-foreground",
-  "3": "bg-tag-3 text-tag-3-foreground",
-  "4": "bg-tag-4 text-tag-4-foreground",
-  "5": "bg-tag-5 text-tag-5-foreground",
-  "6": "bg-tag-6 text-tag-6-foreground",
-};
+/**
+ * A cor de cada tag vem de `tagTone`: a posição gravada em `tags.color`
+ * quando existe, ou uma derivada do nome. Sem isso a tela seria toda cinza —
+ * `color` nasce nulo e só as tags criadas na lousa o preenchem.
+ */
 
 /** Busca de tag sem tropeçar em acento: "pesquisa" encontra "pesquisa" e "Pesquisa". */
 function fold(text: string): string {
@@ -392,7 +384,7 @@ function TagCard({
         aria-hidden="true"
         className={cn(
           "size-2.5 shrink-0 rounded-full",
-          TAG_DOT[tag.color ?? ""] ?? "bg-subtle-foreground"
+          TAG_DOT_CLASS[tagTone(tag)]
         )}
       />
       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
@@ -426,7 +418,7 @@ function SelectedTagNotes({
           id="selected-tag-heading"
           className={cn(
             "flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium",
-            TAG_PILL[tag.color ?? ""] ?? "bg-secondary text-muted-foreground"
+            TAG_CHIP_CLASS[tagTone(tag)]
           )}
         >
           #{tag.name}
@@ -595,8 +587,7 @@ function NoteRow({
                   key={tag.id}
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                    TAG_PILL[tag.color ?? ""] ??
-                      "bg-secondary text-muted-foreground"
+                    TAG_CHIP_CLASS[tagTone(tag)]
                   )}
                 >
                   #{tag.name}

@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import {
   ContextMenu,
   ContextMenuContent,
@@ -33,6 +35,13 @@ import { cn } from "@/lib/utils";
  * então a 40% um traço de 2px vira 0,8px e some. Dividir devolve a mesma
  * espessura aparente em qualquer altura da escala — mesmo princípio do zoom
  * multiplicativo.
+ *
+ * **Cada flecha é memoizada.** Arrastar uma janela dispara um render por
+ * quadro na lousa inteira, e cada flecha carrega um `ContextMenu` do Radix —
+ * uma árvore de contextos, camadas e ids. Sem o `memo`, mover uma janela
+ * remontava o menu de **todas** as flechas sessenta vezes por segundo, e o
+ * arraste engasgava em proporção ao número de ligações. Com props primitivas,
+ * só as duas ou três flechas que encostam na janela arrastada re-renderizam.
  */
 
 /** Espessura aparente do traço, em pixels de tela. */
@@ -41,6 +50,22 @@ const STROKE = 1.75;
 const HEAD = 11;
 /** Faixa clicável em volta do traço — o traço sozinho é fino demais para mirar. */
 const HIT = 14;
+/**
+ * Folga aparente entre a borda da janela e a ponta da flecha.
+ *
+ * Encostada, a flecha vira parte da moldura: o olho lê um retângulo com um
+ * espeto em vez de duas coisas ligadas. Doze pixels são o bastante para a
+ * relação se separar dos objetos sem a flecha parecer solta no meio do nada.
+ */
+const GAP = 12;
+/**
+ * Distância aparente entre as duas flechas de um par recíproco.
+ *
+ * A→B e B→A são duas linhas de propósito, e sem separá-las a lousa desenhava
+ * uma em cima da outra: uma flecha só, com ponta dos dois lados, e o botão
+ * direito sempre pegando a mesma das duas.
+ */
+const SEPARATION = 9;
 
 interface ConnectionLayerProps {
   connections: BoardConnection[];
@@ -49,6 +74,8 @@ interface ConnectionLayerProps {
   /** A flecha que a borracha vai apagar se encostar agora. */
   markedId: string | null;
   onRemove: (id: string) => void;
+  /** Abre o campo de rótulo desta flecha. */
+  onLabel: (id: string) => void;
   /** Enquanto a borracha está na mão, a flecha não abre menu nem recebe clique. */
   inert: boolean;
 }
@@ -59,9 +86,10 @@ export function ConnectionLayer({
   zoom,
   markedId,
   onRemove,
+  onLabel,
   inert,
 }: ConnectionLayerProps) {
-  const drawn = drawableConnections(connections, windows);
+  const drawn = drawableConnections(connections, windows, zoom);
   if (drawn.length === 0) return null;
 
   return (
@@ -72,76 +100,170 @@ export function ConnectionLayer({
       className="pointer-events-none absolute top-0 left-0"
       aria-hidden="true"
     >
-      {drawn.map(({ connection, segment }) => {
-        const marked = markedId === connection.id;
-        const path = `M ${segment.from.x} ${segment.from.y} L ${segment.to.x} ${segment.to.y}`;
-
-        const arrow = (
-          <g
-            // Identidade no DOM. Um traço de SVG é indistinguível de
-            // qualquer ícone da tela para quem olha de fora — inclusive
-            // para o roteiro de verificação, que contava as alças de
-            // redimensionar junto com as flechas.
-            data-connection={connection.id}
-            className={cn(
-              "transition-colors duration-150 motion-reduce:transition-none",
-              marked
-                ? "text-error"
-                : "text-subtle-foreground hover:text-foreground"
-            )}
-          >
-            {/* A faixa de acerto: invisível, larga, e a única que recebe
-                ponteiro. Sem ela seria preciso mirar num traço de 1,75px. */}
-            {!inert && (
-              <path
-                d={path}
-                stroke="transparent"
-                strokeWidth={HIT / zoom}
-                fill="none"
-                className="pointer-events-auto cursor-context-menu"
-              />
-            )}
-            <path
-              d={path}
-              stroke="currentColor"
-              strokeWidth={STROKE / zoom}
-              strokeLinecap="round"
-              fill="none"
-            />
-            <path
-              d={arrowHead(segment, HEAD / zoom)}
-              stroke="currentColor"
-              strokeWidth={STROKE / zoom}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </g>
-        );
-
-        // Com a borracha na mão a flecha não abre menu: ali o gesto é passar
-        // por cima, e um menu de contexto no meio disso seria uma segunda
-        // conversa por cima da primeira.
-        if (inert) return <g key={connection.id}>{arrow}</g>;
-
-        return (
-          <ContextMenu key={connection.id}>
-            <ContextMenuTrigger asChild>{arrow}</ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem onSelect={() => onRemove(connection.id)}>
-                <UnlinkIcon />
-                <ContextMenuItemLabel
-                  label="Remover a ligação"
-                  hint="Os dois elementos continuam onde estão."
-                />
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        );
-      })}
+      {drawn.map(({ connection, segment }) => (
+        <ConnectionArrow
+          key={connection.id}
+          id={connection.id}
+          hasLabel={Boolean(connection.label)}
+          x1={segment.from.x}
+          y1={segment.from.y}
+          x2={segment.to.x}
+          y2={segment.to.y}
+          zoom={zoom}
+          marked={markedId === connection.id}
+          inert={inert}
+          onRemove={onRemove}
+          onLabel={onLabel}
+        />
+      ))}
     </svg>
   );
 }
+
+/* ---------------------------------------------------------------------- */
+
+interface ArrowProps {
+  id: string;
+  hasLabel: boolean;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  zoom: number;
+  marked: boolean;
+  inert: boolean;
+  onRemove: (id: string) => void;
+  onLabel: (id: string) => void;
+}
+
+/**
+ * Uma flecha. Props primitivas de propósito: é o que faz o `memo` valer
+ * alguma coisa — um objeto `segment` novo a cada quadro passaria por todas as
+ * comparações.
+ */
+const ConnectionArrow = memo(function ConnectionArrow({
+  id,
+  hasLabel,
+  x1,
+  y1,
+  x2,
+  y2,
+  zoom,
+  marked,
+  inert,
+  onRemove,
+  onLabel,
+}: ArrowProps) {
+  const segment: Segment = { from: { x: x1, y: y1 }, to: { x: x2, y: y2 } };
+  const path = `M ${x1} ${y1} L ${x2} ${y2}`;
+
+  const arrow = (
+    <g
+      // Identidade no DOM. Um traço de SVG é indistinguível de qualquer ícone
+      // da tela para quem olha de fora — inclusive para o roteiro de
+      // verificação, que contava as alças de redimensionar junto com as
+      // flechas.
+      data-connection={id}
+      className={cn(
+        "transition-colors duration-150 motion-reduce:transition-none",
+        marked ? "text-error" : "text-subtle-foreground hover:text-foreground"
+      )}
+    >
+      {/* A faixa de acerto: invisível, larga, e a única que recebe ponteiro.
+          Sem ela seria preciso mirar num traço de 1,75px. */}
+      {!inert && (
+        <path
+          d={path}
+          stroke="transparent"
+          strokeWidth={HIT / zoom}
+          fill="none"
+          className="pointer-events-auto cursor-context-menu"
+        />
+      )}
+      <path
+        d={path}
+        stroke="currentColor"
+        strokeWidth={STROKE / zoom}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d={arrowHead(segment, HEAD / zoom)}
+        stroke="currentColor"
+        strokeWidth={STROKE / zoom}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </g>
+  );
+
+  // Com a borracha na mão a flecha não abre menu: ali o gesto é passar por
+  // cima, e um menu de contexto no meio disso seria uma segunda conversa por
+  // cima da primeira.
+  if (inert) return arrow;
+
+  return (
+    <ConnectionMenu
+      id={id}
+      hasLabel={hasLabel}
+      onLabel={onLabel}
+      onRemove={onRemove}
+    >
+      {arrow}
+    </ConnectionMenu>
+  );
+});
+
+/**
+ * O menu do botão direito de uma ligação.
+ *
+ * Vive fora da flecha porque **o rótulo também precisa dele**. O chip é
+ * desenhado no meio do traço e recebe ponteiro; sem menu próprio, ele engolia
+ * o botão direito exatamente no ponto em que a pessoa mira quando quer mexer
+ * na ligação — e a única saída era acertar o traço ao lado da etiqueta.
+ *
+ * Um componente, e não dois blocos iguais: um item acrescentado num lugar e
+ * esquecido no outro faria a mesma flecha oferecer coisas diferentes conforme
+ * onde se clica.
+ */
+export function ConnectionMenu({
+  id,
+  hasLabel,
+  onLabel,
+  onRemove,
+  children,
+}: {
+  id: string;
+  hasLabel: boolean;
+  onLabel: (id: string) => void;
+  onRemove: (id: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onLabel(id)}>
+          <TagIcon />
+          <ContextMenuItemLabel
+            label={hasLabel ? "Mudar o texto" : "Escrever na ligação"}
+            hint="Uma palavra sobre o que liga as duas."
+          />
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => onRemove(id)}>
+          <UnlinkIcon />
+          <ContextMenuItemLabel
+            label="Remover a ligação"
+            hint="Os dois elementos continuam onde estão."
+          />
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 
 /**
  * A ponta solta de uma ligação sendo desenhada.
@@ -159,12 +281,13 @@ export function PendingConnection({
   to: Point;
   zoom: number;
 }) {
-  const segment = segmentBetween(from, {
-    ...to,
-    width: 1,
-    height: 1,
-    state: "normal",
-  });
+  const segment = segmentBetween(
+    from,
+    { ...to, width: 1, height: 1, state: "normal" },
+    // A mesma folga da flecha pronta, só na saída: a ponta livre é o ponteiro,
+    // e afastar o traço do cursor faria o desenho parecer atrasado.
+    { gap: GAP / zoom }
+  );
   if (!segment) return null;
 
   return (
@@ -189,7 +312,7 @@ export function PendingConnection({
 
 /* ---------------------------------------------------------------------- */
 
-interface DrawnConnection {
+export interface DrawnConnection {
   connection: BoardConnection;
   segment: Segment;
 }
@@ -201,19 +324,44 @@ interface DrawnConnection {
  * janela é aplicada antes de a resposta chegar, e nesse intervalo a flecha
  * ainda está na lista. Desenhar flecha para janela que não está mais aqui
  * seria pior do que não desenhar.
+ *
+ * Exportada porque três lugares precisam exatamente da mesma geometria: o
+ * desenho, os rótulos e a borracha. Calculá-la em cada um daria três versões
+ * da mesma conta, e a folga aplicada num e não no outro faria a borracha
+ * mirar onde não há traço.
  */
-function drawableConnections(
+export function drawableConnections(
   connections: BoardConnection[],
-  windows: BoardWindow[]
+  windows: BoardWindow[],
+  zoom: number
 ): DrawnConnection[] {
   const byId = new Map(windows.map((item) => [item.id, item]));
+  const pairs = new Set(
+    connections.map((item) => `${item.fromWindowId}>${item.toWindowId}`)
+  );
+
+  const gap = GAP / zoom;
 
   return connections.flatMap((connection) => {
     const from = byId.get(connection.fromWindowId);
     const to = byId.get(connection.toWindowId);
     if (!from || !to) return [];
 
-    const segment = segmentBetween(from, to);
+    // O par recíproco existe? Então as duas se afastam do eixo, meia folga
+    // cada uma.
+    //
+    // **Sem sinal.** A tentação é dar `+` a uma e `−` à outra pela ordem dos
+    // ids, e isso as devolve exatamente uma em cima da outra: o deslocamento é
+    // perpendicular à direção do **próprio** traço, e A→B e B→A apontam para
+    // lados opostos. Os dois sinais invertidos se cancelam. Deslocando as duas
+    // para a esquerda de si mesmas, elas caem em lados opostos do eixo
+    // sozinhas — e cada tela chega ao mesmo desenho sem combinar nada.
+    const reciprocal = pairs.has(
+      `${connection.toWindowId}>${connection.fromWindowId}`
+    );
+    const shift = reciprocal ? SEPARATION / zoom / 2 : 0;
+
+    const segment = segmentBetween(from, to, { gap, shift });
     return segment ? [{ connection, segment }] : [];
   });
 }
@@ -236,7 +384,8 @@ export function connectionAt(
 
   for (const { connection, segment } of drawableConnections(
     connections,
-    windows
+    windows,
+    zoom
   )) {
     const distance = distanceToSegment(point, segment);
     if (distance <= tolerance && (!best || distance < best.distance)) {
@@ -263,6 +412,25 @@ function UnlinkIcon() {
       <path d="m18.84 12.25 1.72-1.71a4.24 4.24 0 0 0-6-6l-1.72 1.71" />
       <path d="m5.17 11.75-1.71 1.71a4.24 4.24 0 0 0 6 6l1.71-1.71" />
       <path d="m2 2 20 20" />
+    </svg>
+  );
+}
+
+/** Uma etiqueta pendurada — o sinal de "escrever aqui". */
+function TagIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+    >
+      <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+      <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
     </svg>
   );
 }

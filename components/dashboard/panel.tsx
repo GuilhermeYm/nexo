@@ -61,10 +61,11 @@ export function Panel({
             ) : (
               <span
                 aria-hidden="true"
+                data-live-dot={status === "live" ? "" : undefined}
                 className={cn(
                   "size-1.5 rounded-full transition-colors duration-200",
                   status === "live"
-                    ? "bg-tag-3-foreground"
+                    ? "bg-tag-3-foreground animate-live-pulse motion-reduce:animate-none"
                     : status === "connecting"
                       ? "bg-tag-1-foreground"
                       : "bg-subtle-foreground"
@@ -91,16 +92,19 @@ export function Panel({
 
 /**
  * Estado vazio que ensina a interface em vez de anunciar a ausência.
- * O texto diz o que fazer para a lista deixar de estar vazia.
+ * O texto diz o que fazer para a lista deixar de estar vazia, e — quando o
+ * shell entrega a ação — um botão faz esse passo sem a pessoa sair daqui.
  */
 export function EmptyState({
   icon,
   title,
   description,
+  action,
 }: {
   icon: ReactNode;
   title: string;
   description: string;
+  action?: { label: string; onClick: () => void };
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-8 py-10 text-center">
@@ -113,6 +117,48 @@ export function EmptyState({
           {description}
         </p>
       </div>
+      {action && (
+        <button
+          type="button"
+          onClick={action.onClick}
+          className="mt-1 inline-flex h-9 items-center rounded-full bg-accent px-4 text-sm font-semibold text-accent-foreground transition-colors duration-150 hover:bg-accent/90 pointer-coarse:h-11"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * O convite de repouso. Aparece no rodapé de um painel que **tem** conteúdo
+ * mas anda quieto — nada novo há mais de meio dia. Não apaga nem reinicia
+ * nada; só devolve ao usuário o próximo passo, para o painel não virar uma
+ * lista parada de tarefas de três dias atrás.
+ */
+export function QuietFooter({
+  label,
+  actionLabel,
+  onAction,
+}: {
+  label: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="mt-auto flex items-center gap-3 border-t border-border px-4 py-2.5">
+      <span className="min-w-0 flex-1 text-xs leading-relaxed text-subtle-foreground">
+        {label}
+      </span>
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="shrink-0 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:py-1.5"
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }

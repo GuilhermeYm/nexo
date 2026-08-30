@@ -1,12 +1,13 @@
-import { desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { errorResponse, logServerError } from "@/lib/api";
+import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
 import { db } from "@/lib/db";
-import { notes, workspaces } from "@/lib/db/schema";
+import { notes } from "@/lib/db/schema";
+import { richDocumentSchema, richTextToPlain } from "@/lib/editor/document";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
+import { getNoteCaptureContext } from "@/lib/usage/queries";
 
 /**
  * Cria uma nota fora de qualquer lousa.
@@ -18,17 +19,14 @@ import { createClient } from "@/lib/supabase/server";
  * "Trazer da conta".
  */
 
-const createNoteSchema = z
-  .object({
-    title: z.string().trim().max(200).default(""),
-    content: z.string().max(20_000).default(""),
-  })
-  // Nota sem título e sem texto não é nota; é um clique errado. Recusar aqui
-  // evita uma linha vazia permanente na conta de quem só encostou no botão.
-  .refine(
-    (value) => value.title.length > 0 || value.content.trim().length > 0,
-    { message: "Escreva um título ou um texto." }
-  );
+const createNoteSchema = z.object({
+  title: z.string().trim().max(200).default(""),
+  content: z.string().max(100_000).default(""),
+  // O rascunho do dashboard hoje edita como nota cheia. Quando há documento,
+  // ele é a fonte da verdade e o `content` acima é ignorado — o texto puro
+  // sai derivado no servidor, mesma regra do `PATCH /api/notes/[id]`.
+  contentRich: richDocumentSchema.optional(),
+});
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -57,25 +55,51 @@ export async function POST(request: Request) {
     }
     const input = parsed.data;
 
-    // A nota ganha um lugar: o workspace padrão, ou o mais antigo se o
-    // padrão tiver sido excluído. Uma nota com `workspace_id` nulo continua
-    // achável pela busca, mas não aparece em lousa nenhuma — e é assim que
-    // conteúdo some de vista sem ter sido apagado.
-    const [home] = await db
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(eq(workspaces.userId, user.id))
-      .orderBy(desc(workspaces.isDefault), workspaces.createdAt)
-      .limit(1);
+    // O texto puro alimenta `search_vector` e os resumos: quando há documento,
+    // ele vem derivado do documento e não do que o cliente mandou em
+    // `content` — senão a busca indexaria uma coisa e o editor mostraria
+    // outra.
+    const content =
+      input.contentRich !== undefined
+        ? richTextToPlain(input.contentRich)
+        : input.content;
+
+    // Nota sem título e sem texto não é nota; é um clique errado. Recusar aqui
+    // evita uma linha vazia permanente na conta de quem só encostou no botão.
+    if (input.title.length === 0 && content.trim().length === 0) {
+      return errorResponse(400, "Escreva um título ou um texto.");
+    }
+
+    // O plano, o consumo do mês e o workspace de destino numa consulta só.
+    // Eram três em sequência, e a soma delas empurrou o salvamento do
+    // rascunho para mais de um segundo — mesma armadilha que
+    // `getBoardWriteContext` já tinha resolvido na lousa.
+    //
+    // O workspace de destino é o padrão, ou o mais antigo se o padrão tiver
+    // sido excluído. Uma nota com `workspace_id` nulo continua achável pela
+    // busca, mas não aparece em lousa nenhuma — é assim que conteúdo some de
+    // vista sem ter sido apagado.
+    const context = await getNoteCaptureContext(user.id);
+
+    // Teto de capturas do mês. A alavanca que separa Gratuito de Pro é
+    // limite, e este é um dos que a página de planos promete: sem a checagem
+    // aqui, "50 capturas por mês" seria decoração.
+    if (context.captureQuota && !context.captureQuota.ok) {
+      return planLimitResponse(
+        409,
+        `Você já fez as ${context.captureQuota.limit} capturas deste mês do plano Gratuito. No Pro elas são ilimitadas.`
+      );
+    }
 
     const [created] = await db
       .insert(notes)
       .values({
         // Do token, nunca do corpo.
         userId: user.id,
-        workspaceId: home?.id ?? null,
-        title: input.title || firstLine(input.content) || "Sem título",
-        content: input.content,
+        workspaceId: context.homeWorkspaceId,
+        title: input.title || firstLine(content) || "Sem título",
+        content,
+        contentRich: input.contentRich ?? null,
         type: "note",
         source: "user",
       })

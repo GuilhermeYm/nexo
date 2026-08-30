@@ -64,6 +64,10 @@ export default async function WorkspacePage(
       initialConnections={board.connections}
       focusWindowId={focusWindowId}
       windowCap={windowCapFor(plan)}
+      // Quem já é Pro bate no teto absoluto anti-abuso, não numa oferta:
+      // convidá-lo a assinar o que ele já assinou seria a interface não
+      // sabendo com quem está falando.
+      canUpgrade={plan === "free"}
     />
   );
 }

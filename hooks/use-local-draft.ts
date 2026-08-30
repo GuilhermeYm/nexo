@@ -28,7 +28,18 @@ const STORAGE_KEY = "nexo-draft";
 
 export interface LocalDraft {
   title: string;
+  /**
+   * Texto puro. É o que vai para `POST /api/notes` quando não há documento,
+   * e o que decide se o rascunho tem conteúdo. O editor o mantém em sincronia
+   * com `contentRich` a cada tecla.
+   */
   content: string;
+  /**
+   * O documento do editor (TipTap/ProseMirror), quando a pessoa já escreveu
+   * com ele. Ausente nos rascunhos criados antes do editor — nesse caso o
+   * editor abre a partir do `content`.
+   */
+  contentRich?: unknown;
   /** Quando a última tecla caiu. Só para o rótulo de "escrito há…". */
   updatedAt: number;
 }
@@ -55,9 +66,17 @@ function parse(raw: string | null): LocalDraft | null {
       return null;
     }
 
+    // O documento é opcional e só vale se for um objeto — um `null` ou um
+    // primitivo no storage editado à mão não deve virar `content` do editor.
+    const contentRich =
+      typeof value.contentRich === "object" && value.contentRich !== null
+        ? value.contentRich
+        : undefined;
+
     return {
       title: value.title,
       content: value.content,
+      contentRich,
       updatedAt:
         typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt)
           ? value.updatedAt
@@ -112,10 +131,19 @@ export function useLocalDraft() {
    * segundo a cada tecla.
    */
   const update = useCallback(
-    (patch: Partial<Pick<LocalDraft, "title" | "content">>) => {
+    (
+      patch: Partial<Pick<LocalDraft, "title" | "content">> & {
+        contentRich?: unknown;
+      }
+    ) => {
       write({
         title: patch.title ?? draft?.title ?? "",
         content: patch.content ?? draft?.content ?? "",
+        // `"contentRich" in patch` e não `patch.contentRich ?? …`: o editor
+        // manda o documento junto com o texto a cada tecla, mas uma edição só
+        // de título não pode zerar o documento que já existe.
+        contentRich:
+          "contentRich" in patch ? patch.contentRich : draft?.contentRich,
         updatedAt: Date.now(),
       });
     },

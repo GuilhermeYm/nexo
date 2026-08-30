@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { errorResponse, logServerError } from "@/lib/api";
+import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { listWorkspaces } from "@/lib/dashboard/queries";
 import { limitsFor } from "@/lib/plans";
@@ -70,10 +70,10 @@ export async function POST(request: Request) {
     if (workspaceCap !== null) {
       const existing = await listWorkspaces(user.id);
       if (existing.length >= workspaceCap) {
-        return errorResponse(
+        return planLimitResponse(
           409,
           workspaceCap === 1
-            ? "O plano Gratuito tem um workspace. Assine o Pro para criar mais."
+            ? "O plano Gratuito tem um workspace. No Pro eles são ilimitados."
             : `Seu plano permite ${workspaceCap} workspaces.`
         );
       }

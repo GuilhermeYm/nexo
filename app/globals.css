@@ -200,6 +200,19 @@ a {
      qualquer coisa acima de ~150ms lê como atraso, não como transição. */
   --animate-menu-in: menu-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
   --animate-menu-out: menu-out 0.1s ease-in;
+  /* Loading — movimento suave e contínuo, nada abrupto. */
+  --animate-loading-pulse: loading-pulse 2.4s ease-in-out infinite;
+  --animate-loading-ring: loading-ring 2s linear infinite;
+  --animate-loading-dots: loading-dots 1.4s ease-in-out infinite;
+  /* Uma linha nova entrando nos painéis do dashboard (Tarefas, Recentes).
+     É o único momento animado ali: amarrado a um evento real do Realtime,
+     não decoração. `both` para a linha já nascer no estado inicial e não
+     piscar antes do primeiro quadro. */
+  --animate-row-in: row-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-row-flash: row-flash 1.2s ease-out both;
+  /* O ponto "ao vivo" da moldura respira devagar enquanto o socket está de
+     pé — um sinal de conexão viva, não um efeito. */
+  --animate-live-pulse: live-pulse 2.8s ease-in-out infinite;
 }
 
 @keyframes menu-in {
@@ -246,11 +259,99 @@ a {
   }
 }
 
+/* Animações da tela de carregamento.
+   Mantidas no tema para poderem ser usadas via `animate-*` do Tailwind. */
+@keyframes loading-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.85;
+  }
+}
+
+@keyframes loading-ring {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loading-dots {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  40% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A lavagem de cor que recua atrás de uma linha recém-chegada. Vive num
+   elemento próprio sobre a linha, para não brigar com o fundo do hover. */
+@keyframes row-flash {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* Quem pediu menos movimento recebe o estado final direto, sem transição. */
 @media (prefers-reduced-motion: reduce) {
   [data-slot="accordion-content"],
   [data-slot="context-menu-content"],
-  [data-slot="context-menu-sub-content"] {
+  [data-slot="context-menu-sub-content"],
+  [data-row-enter],
+  [data-row-flash],
+  [data-live-dot] {
     animation: none !important;
+  }
+}
+
+/* Exportação em PDF ("Exportar PDF" no editor, que usa window.print()).
+   O papel é branco mesmo no tema escuro: o navegador não imprime o fundo, e
+   sem esta regra o texto claro do tema escuro sairia quase invisível. O chrome
+   da tela (cabeçalho, barra de formatação) sai via `print:hidden` no próprio
+   componente. */
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  body * {
+    color: #17130a !important;
+    background-color: transparent !important;
   }
 }

@@ -8,7 +8,7 @@ import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
-import { EmptyState, Panel } from "@/components/dashboard/panel";
+import { EmptyState, Panel, QuietFooter } from "@/components/dashboard/panel";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,14 +21,27 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useLiveResource } from "@/hooks/use-live-resource";
+import { useNewItems } from "@/hooks/use-new-items";
 import {
   formatAbsolute,
   formatRelative,
+  STALE_AFTER_MS,
   toIsoString,
 } from "@/lib/dashboard/format";
 import type { RecentNote, WorkspaceSummary } from "@/lib/dashboard/queries";
+import { cn } from "@/lib/utils";
 
 const TABLES = ["notes"] as const;
+
+const noteId = (note: RecentNote) => note.id;
+
+/** Quando a lista foi tocada por último, para o convite de repouso. */
+function lastTouched(notes: RecentNote[]): number {
+  return notes.reduce((newest, note) => {
+    const stamp = new Date(note.updatedAt).getTime();
+    return stamp > newest ? stamp : newest;
+  }, 0);
+}
 
 /** Os seis matizes de tag do tema, endereçados pela posição gravada no banco. */
 const TAG_TONE: Record<string, string> = {
@@ -62,6 +75,7 @@ export function RecentPanel({
   now,
   workspaces,
   onOpenNote,
+  onCreateNote,
 }: {
   initial: RecentNote[];
   renderedAt: number;
@@ -69,6 +83,8 @@ export function RecentPanel({
   /** Alimenta o submenu "Abrir no workspace". */
   workspaces: WorkspaceSummary[];
   onOpenNote: (noteId: string) => void;
+  /** Abre o rascunho do dashboard. */
+  onCreateNote?: () => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +94,11 @@ export function RecentPanel({
     initial,
     tables: [...TABLES],
   });
+
+  const fresh = useNewItems(items, noteId);
+  const clock = now || renderedAt;
+  const quiet =
+    items.length > 0 && lastTouched(items) < clock - STALE_AFTER_MS;
 
   /**
    * Abre a nota numa lousa.
@@ -142,23 +163,39 @@ export function RecentPanel({
           icon={<Inbox className="size-5" aria-hidden="true" />}
           title="Nada guardado ainda"
           description="Solte um arquivo na barra acima, ou arraste um para dentro dela. O que você guardar e o que a Nexo criar aparecem aqui, do mais recente para o mais antigo."
+          action={
+            onCreateNote
+              ? { label: "Escrever uma nota", onClick: onCreateNote }
+              : undefined
+          }
         />
       ) : (
-        <ul className="divide-y divide-border">
-          {items.map((note) => (
-            <RecentRow
-              key={note.id}
-              note={note}
-              now={now || renderedAt}
-              workspaces={workspaces}
-              onOpen={() => onOpenNote(note.id)}
-              onOpenInWorkspace={(workspaceId) =>
-                openInWorkspace(note.id, workspaceId)
-              }
-              onDelete={() => deleteNote(note.id)}
+        <div className="flex min-h-full flex-col">
+          <ul className="divide-y divide-border">
+            {items.map((note) => (
+              <RecentRow
+                key={note.id}
+                note={note}
+                now={clock}
+                isNew={fresh.has(note.id)}
+                workspaces={workspaces}
+                onOpen={() => onOpenNote(note.id)}
+                onOpenInWorkspace={(workspaceId) =>
+                  openInWorkspace(note.id, workspaceId)
+                }
+                onDelete={() => deleteNote(note.id)}
+              />
+            ))}
+          </ul>
+
+          {quiet && (
+            <QuietFooter
+              label="Faz um tempo desde a última captura."
+              actionLabel={onCreateNote ? "Escrever uma nota" : undefined}
+              onAction={onCreateNote}
             />
-          ))}
-        </ul>
+          )}
+        </div>
       )}
 
       {error && (
@@ -183,6 +220,7 @@ export function RecentPanel({
 function RecentRow({
   note,
   now,
+  isNew,
   workspaces,
   onOpen,
   onOpenInWorkspace,
@@ -190,6 +228,7 @@ function RecentRow({
 }: {
   note: RecentNote;
   now: number;
+  isNew: boolean;
   workspaces: WorkspaceSummary[];
   onOpen: () => void;
   onOpenInWorkspace: (workspaceId: string) => void;
@@ -198,7 +237,20 @@ function RecentRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <li>
+        <li
+          data-row-enter={isNew ? "" : undefined}
+          className={cn(
+            "relative",
+            isNew && "animate-row-in motion-reduce:animate-none"
+          )}
+        >
+          {isNew && (
+            <span
+              aria-hidden="true"
+              data-row-flash=""
+              className="pointer-events-none absolute inset-0 animate-row-flash bg-accent/10 motion-reduce:hidden"
+            />
+          )}
           <button
             type="button"
             onClick={onOpen}

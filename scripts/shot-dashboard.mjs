@@ -269,9 +269,11 @@ async function main() {
     // única razão de ele existir.
     console.log("→ rascunho");
     await page.click("button:has-text('Escrever um rascunho')");
-    await page.waitForTimeout(200);
+    // O editor entra por `next/dynamic` — espera o contenteditable montar.
+    await page.waitForSelector("#draft-content", { timeout: 10_000 });
     await page.fill("#draft-title", "Ideia da madrugada");
-    await page.fill("#draft-content", "Ligar o classificador ao workspace.");
+    await page.click("#draft-content");
+    await page.keyboard.type("Ligar o classificador ao workspace.");
     await page.waitForTimeout(400);
 
     const { rows: unsaved } = await sql.query(
@@ -282,10 +284,14 @@ async function main() {
 
     await page.reload({ waitUntil: "networkidle" });
     await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector("#draft-content", { timeout: 10_000 });
     await page.waitForTimeout(1200);
     check(
       "o rascunho sobrevive ao recarregamento (está no navegador)",
-      (await page.inputValue("#draft-title")) === "Ideia da madrugada"
+      (await page.inputValue("#draft-title")) === "Ideia da madrugada" &&
+        (await page.textContent("#draft-content"))?.includes(
+          "Ligar o classificador ao workspace."
+        )
     );
     await page.screenshot({ path: `${OUT}/rascunho.png` });
 

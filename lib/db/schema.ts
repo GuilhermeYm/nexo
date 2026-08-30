@@ -561,6 +561,16 @@ export const workspaceConnections = pgTable(
      */
     fromWindowId: uuid("from_window_id").notNull(),
     toWindowId: uuid("to_window_id").notNull(),
+    /**
+     * O que a flecha diz. Nulo quando não há rótulo, e nunca string vazia:
+     * "sem rótulo" e "rótulo em branco" são o mesmo estado, e dois jeitos de
+     * escrever o mesmo estado viram duas condições em toda leitura.
+     *
+     * É a única coluna desta tabela que o cliente pode atualizar — o GRANT de
+     * 0012 é por coluna, para origem e destino continuarem fora do alcance
+     * do PostgREST.
+     */
+    label: text("label"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -638,5 +648,51 @@ export const workspaceConnectionsRelations = relations(
       references: [workspaceWindows.id],
       relationName: "connection_to",
     }),
+  })
+);
+
+/* -------------------------------------------------------------------------
+ * Entrada — notificações do sistema e de outros usuários
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Tipo da notificação.
+ *
+ * - `system`: mensagens da Nexo (boas-vindas, atualizações, limites de plano,
+ *   avisos de segurança). Quem escreve é o servidor.
+ * - `user`: mensagens vindas de outros usuários (compartilhamentos,
+ *   convites, menções). Ainda não implementado; a coluna existe para a
+ *   classificação não precisar mudar no futuro.
+ */
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "system",
+  "user",
+]);
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    type: notificationTypeEnum("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    metadata: jsonb("metadata"),
+    read: boolean("read").default(false).notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userIdx: index("notifications_user_id_idx").on(table.userId),
+    userCreatedIdx: index("notifications_user_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    unreadIdx: index("notifications_unread_idx").on(table.userId, table.read),
   })
 );

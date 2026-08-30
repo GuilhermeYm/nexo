@@ -173,11 +173,40 @@ export const createConnectionSchema = z
     message: "Um elemento não se liga a ele mesmo.",
   });
 
-/** Uma ligação como o "Desfazer" da borracha a devolve. */
+/**
+ * O rótulo da flecha.
+ *
+ * Texto vazio é o gesto de **apagar** o rótulo, não um valor: a coluna é nula
+ * quando não há rótulo, e deixar a string vazia entrar criaria um segundo
+ * jeito de escrever o mesmo estado. Por isso o `transform` para `null` em vez
+ * de um `.min(1)` que recusaria quem só quer limpar o campo.
+ *
+ * O teto de 80 é o mesmo do CHECK em 0012 — quem passar direto pelo
+ * PostgREST esbarra no banco.
+ */
+export const connectionLabelSchema = z.object({
+  label: z
+    .string()
+    .max(80, "No máximo 80 caracteres.")
+    // Quebra de linha viraria uma etiqueta de duas alturas em cima de um
+    // traço; o que precisa de parágrafo precisa de uma nota.
+    .transform((value) => value.replace(/\s+/g, " ").trim())
+    .transform((value) => (value.length === 0 ? null : value))
+    .nullable(),
+});
+
+/**
+ * Uma ligação como o "Desfazer" da borracha a devolve.
+ *
+ * O rótulo volta junto: ele é conteúdo escrito pela pessoa, e restaurar a
+ * flecha sem o texto dela seria desfazer só metade da apagada — a mesma razão
+ * pela qual o `source` da janela volta como veio.
+ */
 const restorableConnectionSchema = z
   .object({
     fromWindowId: z.uuid(),
     toWindowId: z.uuid(),
+    label: z.string().max(80).nullish(),
   })
   .refine((value) => value.fromWindowId !== value.toWindowId);
 

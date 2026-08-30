@@ -10,6 +10,7 @@ import {
 } from "@/lib/dashboard/queries";
 import { db } from "@/lib/db";
 import { profiles, workspaces } from "@/lib/db/schema";
+import { countUnreadNotifications } from "@/lib/inbox/queries";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
@@ -44,9 +45,10 @@ export default async function DashboardPage() {
     workspaceList = await createDefaultWorkspace(user.id);
   }
 
-  const [jobs, notes] = await Promise.all([
+  const [jobs, notes, unreadCount] = await Promise.all([
     listAiJobs(user.id),
     listRecentNotes(user.id),
+    countUnreadNotifications(user.id),
   ]);
 
   // Server Component dinâmico: este instante é dado da requisição, não
@@ -65,6 +67,7 @@ export default async function DashboardPage() {
       notes={notes}
       renderedAt={renderedAt}
       serverHour={new Date(renderedAt).getHours()}
+      unreadCount={unreadCount}
     />
   );
 }

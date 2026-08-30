@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { readApiFailure } from "@/lib/plan-limit";
 import { createClient } from "@/lib/supabase/client";
 import { authorizeRealtime } from "@/lib/supabase/realtime";
-import type { BoardConnection, BoardWindow } from "@/lib/workspace/queries";
+import { paletteFromName } from "@/lib/tags/palette";
+import type {
+  BoardConnection,
+  BoardNoteTag,
+  BoardWindow,
+} from "@/lib/workspace/queries";
 
 /**
  * O estado da lousa.
@@ -65,10 +71,12 @@ export interface RestorableWindow {
   state: BoardWindow["state"];
 }
 
-/** Uma flecha como ela volta do apagar: os dois ids, e nada mais. */
+/** Uma flecha como ela volta do apagar: os dois ids e o texto escrito nela. */
 export interface RestorableConnection {
   fromWindowId: string;
   toWindowId: string;
+  /** O rótulo volta com a flecha — é conteúdo, não geometria. */
+  label?: string | null;
 }
 
 /** O último lote apagado, enquanto o "Desfazer" ainda está de pé. */
@@ -108,6 +116,29 @@ export interface CreateWindowInput {
 
 type NotePatch = { title?: string; content?: string };
 
+/**
+ * O aviso que a lousa mostra.
+ *
+ * `upgrade` marca o teto do plano, que **não é defeito**: o cartão troca a
+ * cara de erro pelo convite ao Pro, e não pede "tente de novo" para uma coisa
+ * que vai ser recusada de novo. Vem do servidor por `readApiFailure`.
+ */
+export interface BoardNotice {
+  message: string;
+  upgrade: boolean;
+}
+
+/**
+ * Uma falha que nunca é teto de plano — rede caiu, 500, cascade recusou.
+ *
+ * Função pura fora do componente de propósito: como `setError` do `useState`
+ * já é estável, nenhum dos sete `useCallback` daqui precisa ganhar uma
+ * dependência nova para chamá-la.
+ */
+function plainNotice(message: string): BoardNotice {
+  return { message, upgrade: false };
+}
+
 export function useBoardWindows(
   workspaceId: string,
   initial: BoardWindow[],
@@ -125,7 +156,14 @@ export function useBoardWindows(
   const [connections, setConnections] = useState<BoardConnection[]>(
     initialConnections
   );
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * O aviso da lousa.
+   *
+   * Carrega `upgrade` porque bater no teto do plano não é defeito: a lousa
+   * mostra o convite para o Pro em vez do texto de erro, e o cartão não pede
+   * "tente de novo" para algo que vai recusar de novo.
+   */
+  const [error, setError] = useState<BoardNotice | null>(null);
   const [lastErased, setLastErased] = useState<ErasedBatch | null>(null);
 
   const base = `/api/workspaces/${workspaceId}/windows`;
@@ -146,6 +184,16 @@ export function useBoardWindows(
    */
   const tombstones = useRef(new Set<string>());
   const connectionTombstones = useRef(new Set<string>());
+
+  /**
+   * Pares com um POST de ligação em voo.
+   *
+   * A criação não é otimista — o id vem do servidor —, então até a resposta
+   * chegar não há nada na lista dizendo que aquela flecha está a caminho.
+   * Dois toques rápidos no mesmo par disparavam dois POST, e o segundo
+   * voltava 409 com cara de erro.
+   */
+  const connecting = useRef(new Set<string>());
 
   const windowTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const noteTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -251,14 +299,14 @@ export function useBoardWindows(
         });
         if (!response.ok) {
           const body = await response.json().catch(() => null);
-          setError(body?.error ?? "Não foi possível salvar a posição.");
+          setError(plainNotice(body?.error ?? "Não foi possível salvar a posição."));
           // A rebusca traz de volta o que o banco realmente tem: melhor a
           // janela pular para o último estado salvo do que ficar mentindo
           // que foi guardada.
           scheduleRefresh();
         }
       } catch {
-        setError("Sem conexão. A última mudança não foi salva.");
+        setError(plainNotice("Sem conexão. A última mudança não foi salva."));
       } finally {
         pendingWindows.current.delete(id);
       }
@@ -285,10 +333,10 @@ export function useBoardWindows(
       });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        setError(body?.error ?? "Não foi possível salvar a nota.");
+        setError(plainNotice(body?.error ?? "Não foi possível salvar a nota."));
       }
     } catch {
-      setError("Sem conexão. A nota não foi salva.");
+      setError(plainNotice("Sem conexão. A nota não foi salva."));
     } finally {
       pendingNotes.current.delete(noteId);
     }
@@ -439,6 +487,187 @@ export function useBoardWindows(
     [flushNote]
   );
 
+  /** Muda as tags da nota em todas as janelas que a mostram. */
+  const patchNoteTags = useCallback(
+    (noteId: string, next: (tags: BoardNoteTag[]) => BoardNoteTag[]) => {
+      setWindows((current) =>
+        current.map((item) =>
+          item.note && item.note.id === noteId
+            ? { ...item, note: { ...item.note, tags: next(item.note.tags) } }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  /**
+   * Marca a nota com uma tag, direto da janela da lousa.
+   *
+   * Otimista: o chip entra na hora, com a cor derivada do nome, e um id
+   * provisório. A resposta traz o id (e a cor) de verdade, e o chip é
+   * reconciliado. `pendingNotes` protege a mudança de um retrato que chegue
+   * no meio do caminho — mesma mecânica do texto da nota.
+   */
+  const addNoteTag = useCallback(
+    async (noteId: string, rawName: string) => {
+      const name = rawName.trim().toLowerCase().replace(/\s+/g, " ");
+      if (!name) return;
+
+      const current = latest.current
+        .find((item) => item.note?.id === noteId)
+        ?.note?.tags;
+      if (current?.some((tag) => tag.name === name)) return;
+
+      const tempId = `pending:${name}`;
+      pendingNotes.current.add(noteId);
+      patchNoteTags(noteId, (tags) => [
+        ...tags,
+        { id: tempId, name, color: paletteFromName(name) },
+      ]);
+
+      try {
+        const response = await fetch(`/api/notes/${noteId}/tags`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const body = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          patchNoteTags(noteId, (tags) =>
+            tags.filter((tag) => tag.id !== tempId)
+          );
+          setError(plainNotice(body?.error ?? "Não foi possível marcar a tag."));
+          return;
+        }
+
+        // Troca o chip provisório pelo real; se o servidor devolveu uma tag
+        // que já estava lá, o provisório simplesmente sai.
+        patchNoteTags(noteId, (tags) => {
+          const withoutTemp = tags.filter((tag) => tag.id !== tempId);
+          return withoutTemp.some((tag) => tag.id === body.tag.id)
+            ? withoutTemp
+            : [...withoutTemp, body.tag];
+        });
+      } catch {
+        patchNoteTags(noteId, (tags) => tags.filter((tag) => tag.id !== tempId));
+        setError(plainNotice("Sem conexão. A tag não foi marcada."));
+      } finally {
+        if (!queuedNote.current.has(noteId)) pendingNotes.current.delete(noteId);
+      }
+    },
+    [patchNoteTags]
+  );
+
+  /** Tira uma tag da nota. */
+  const removeNoteTag = useCallback(
+    async (noteId: string, tagId: string) => {
+      const removed = latest.current
+        .find((item) => item.note?.id === noteId)
+        ?.note?.tags.find((tag) => tag.id === tagId);
+      if (!removed) return;
+
+      pendingNotes.current.add(noteId);
+      patchNoteTags(noteId, (tags) => tags.filter((tag) => tag.id !== tagId));
+
+      try {
+        const response = await fetch(
+          `/api/notes/${noteId}/tags?tagId=${tagId}`,
+          { method: "DELETE" }
+        );
+        if (!response.ok) {
+          patchNoteTags(noteId, (tags) =>
+            tags.some((tag) => tag.id === tagId) ? tags : [...tags, removed]
+          );
+          setError(plainNotice("Não foi possível remover a tag."));
+        }
+      } catch {
+        patchNoteTags(noteId, (tags) =>
+          tags.some((tag) => tag.id === tagId) ? tags : [...tags, removed]
+        );
+        setError(plainNotice("Sem conexão. A tag não foi removida."));
+      } finally {
+        if (!queuedNote.current.has(noteId)) pendingNotes.current.delete(noteId);
+      }
+    },
+    [patchNoteTags]
+  );
+
+  /**
+   * Renomeia ou recolore uma tag — em todo lugar de uma vez.
+   *
+   * A tag é da conta, não da nota: a mesma etiqueta pode estar em cinco
+   * janelas abertas, e mudar só a que a pessoa clicou deixaria a lousa
+   * mostrando dois nomes para a mesma coisa até a próxima rebusca. Por isso o
+   * otimismo varre todas as notas, e não uma.
+   *
+   * `pendingNotes` fica de fora aqui de propósito: quem escreve tag não é a
+   * rota da nota, e marcar a nota como "em voo" faria um retrato do servidor
+   * preservar o texto local por engano.
+   */
+  const updateTag = useCallback(
+    async (tagId: string, patch: { name?: string; color?: string | null }) => {
+      const name =
+        patch.name === undefined
+          ? undefined
+          : patch.name.trim().toLowerCase().replace(/\s+/g, " ");
+      if (name !== undefined && name.length === 0) return;
+
+      const before = latest.current
+        .flatMap((item) => item.note?.tags ?? [])
+        .find((tag) => tag.id === tagId);
+      if (!before) return;
+
+      const after = {
+        ...before,
+        ...(name !== undefined && { name }),
+        ...(patch.color !== undefined && { color: patch.color }),
+      };
+      if (after.name === before.name && after.color === before.color) return;
+
+      const paint = (value: BoardNoteTag) =>
+        setWindows((current) =>
+          current.map((item) =>
+            item.note?.tags.some((tag) => tag.id === tagId)
+              ? {
+                  ...item,
+                  note: {
+                    ...item.note,
+                    tags: item.note.tags.map((tag) =>
+                      tag.id === tagId ? value : tag
+                    ),
+                  },
+                }
+              : item
+          )
+        );
+
+      paint(after);
+
+      try {
+        const response = await fetch(`/api/tags/${tagId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(name !== undefined && { name }),
+            ...(patch.color !== undefined && { color: patch.color }),
+          }),
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          setError(plainNotice(body?.error ?? "Não foi possível salvar a tag."));
+          paint(before);
+        }
+      } catch {
+        setError(plainNotice("Sem conexão. A tag não foi salva."));
+        paint(before);
+      }
+    },
+    []
+  );
+
   /**
    * Traz a janela para a frente.
    *
@@ -488,19 +717,23 @@ export function useBoardWindows(
           body: JSON.stringify(input),
         });
 
-        const body = await response.json().catch(() => null);
         if (!response.ok) {
-          setError(body?.error ?? "Não foi possível abrir a janela.");
+          // O único ponto da lousa que pode esbarrar em teto de plano: o de
+          // elementos e, quando a janela cria uma nota nova, o de capturas.
+          setError(
+            await readApiFailure(response, "Não foi possível abrir a janela.")
+          );
           return null;
         }
 
         // A rota devolve a lousa inteira relida, não a linha criada: o
         // cliente aplica um retrato consistente em vez de montar o objeto
         // por conta própria e divergir do servidor.
+        const body = await response.json().catch(() => null);
         applySnapshot(body);
         return body?.windowId ?? null;
       } catch {
-        setError("Sem conexão. A janela não foi criada.");
+        setError(plainNotice("Sem conexão. A janela não foi criada."));
         return null;
       }
     },
@@ -528,11 +761,11 @@ export function useBoardWindows(
       try {
         const response = await fetch(`${base}/${id}`, { method: "DELETE" });
         if (!response.ok) {
-          setError("Não foi possível fechar a janela.");
+          setError(plainNotice("Não foi possível fechar a janela."));
           scheduleRefresh();
         }
       } catch {
-        setError("Sem conexão. A janela não foi fechada.");
+        setError(plainNotice("Sem conexão. A janela não foi fechada."));
         scheduleRefresh();
       }
     },
@@ -627,10 +860,13 @@ export function useBoardWindows(
         ]);
 
         if (fromWindows?.failed || fromConnections?.failed) {
+          // Apagar nunca esbarra em teto de plano — só em rede e em servidor.
           setError(
-            fromWindows?.body?.error ??
-              fromConnections?.body?.error ??
-              "Não foi possível apagar."
+            plainNotice(
+              fromWindows?.body?.error ??
+                fromConnections?.body?.error ??
+                "Não foi possível apagar."
+            )
           );
           // As lápides saem: o que não foi apagado no banco precisa voltar
           // para a tela na próxima rebusca.
@@ -670,7 +906,7 @@ export function useBoardWindows(
           links: removedLinks,
         });
       } catch {
-        setError("Sem conexão. Nada foi apagado.");
+        setError(plainNotice("Sem conexão. Nada foi apagado."));
         revive(windowIds, tombstones.current);
         revive(connectionIds, connectionTombstones.current);
         scheduleRefresh();
@@ -704,7 +940,7 @@ export function useBoardWindows(
 
       const body = await response.json().catch(() => null);
       if (!response.ok) {
-        setError(body?.error ?? "Não foi possível restaurar.");
+        setError(plainNotice(body?.error ?? "Não foi possível restaurar."));
         // O cartão volta: a pessoa tenta de novo em vez de perder o lote.
         setLastErased(batch);
         return;
@@ -717,7 +953,7 @@ export function useBoardWindows(
 
       applySnapshot(body);
     } catch {
-      setError("Sem conexão. Nada foi restaurado.");
+      setError(plainNotice("Sem conexão. Nada foi restaurado."));
       setLastErased(batch);
     }
   }, [base, lastErased, applySnapshot]);
@@ -736,6 +972,24 @@ export function useBoardWindows(
     async (fromWindowId: string, toWindowId: string) => {
       if (fromWindowId === toWindowId) return;
 
+      // Ligar de novo o que já está ligado não é erro nem pedido: é o segundo
+      // toque de quem clicou duas vezes, ou o encadeamento passando por um
+      // par que já existe. Sem esta guarda, o servidor respondia 409 e a
+      // lousa mostrava "Essas duas coisas já estão ligadas" com cara de falha
+      // — um aviso sobre um estado que já é o desejado.
+      const already = latestConnections.current.some(
+        (item) =>
+          item.fromWindowId === fromWindowId && item.toWindowId === toWindowId
+      );
+      if (already) return;
+
+      // A mesma corrida, dentro de um quadro: dois toques rápidos disparam
+      // dois POST antes de o primeiro voltar, e o espelho ainda não tem a
+      // linha. A trava vive até a resposta chegar.
+      const pair = `${fromWindowId}>${toWindowId}`;
+      if (connecting.current.has(pair)) return;
+      connecting.current.add(pair);
+
       try {
         const response = await fetch(connectionsBase, {
           method: "POST",
@@ -745,16 +999,74 @@ export function useBoardWindows(
 
         const body = await response.json().catch(() => null);
         if (!response.ok) {
-          setError(body?.error ?? "Não foi possível ligar.");
+          // 409 aqui só sai por duplicata, e duplicata já é o estado que a
+          // pessoa queria: a rebusca traz a flecha que existe e ninguém
+          // precisa ler um aviso sobre isso.
+          if (response.status === 409) scheduleRefresh();
+          else setError(plainNotice(body?.error ?? "Não foi possível ligar."));
           return;
         }
 
         applySnapshot(body);
       } catch {
-        setError("Sem conexão. A ligação não foi criada.");
+        setError(plainNotice("Sem conexão. A ligação não foi criada."));
+      } finally {
+        connecting.current.delete(pair);
       }
     },
-    [connectionsBase, applySnapshot]
+    [connectionsBase, applySnapshot, scheduleRefresh]
+  );
+
+  /**
+   * Escreve — ou apaga — o texto de uma flecha.
+   *
+   * Otimista, ao contrário da criação: aqui o id já existe e não há nada para
+   * reconciliar. O texto entra na hora e volta ao que era se a rota recusar,
+   * mesmo padrão do renomear de workspace.
+   */
+  const renameConnection = useCallback(
+    async (connectionId: string, rawLabel: string) => {
+      const label = rawLabel.replace(/\s+/g, " ").trim();
+      const previous =
+        latestConnections.current.find((item) => item.id === connectionId)
+          ?.label ?? null;
+      const next = label.length === 0 ? null : label;
+      if (previous === next) return;
+
+      setConnections((current) =>
+        current.map((item) =>
+          item.id === connectionId ? { ...item, label: next } : item
+        )
+      );
+
+      try {
+        const response = await fetch(`${connectionsBase}/${connectionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: next }),
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          setError(
+            plainNotice(body?.error ?? "Não foi possível salvar o texto.")
+          );
+          setConnections((current) =>
+            current.map((item) =>
+              item.id === connectionId ? { ...item, label: previous } : item
+            )
+          );
+        }
+      } catch {
+        setError(plainNotice("Sem conexão. O texto da ligação não foi salvo."));
+        setConnections((current) =>
+          current.map((item) =>
+            item.id === connectionId ? { ...item, label: previous } : item
+          )
+        );
+      }
+    },
+    [connectionsBase]
   );
 
 
@@ -785,11 +1097,11 @@ export function useBoardWindows(
           method: "DELETE",
         });
         if (!response.ok) {
-          setError("Não foi possível excluir a nota.");
+          setError(plainNotice("Não foi possível excluir a nota."));
           scheduleRefresh();
         }
       } catch {
-        setError("Sem conexão. A nota não foi excluída.");
+        setError(plainNotice("Sem conexão. A nota não foi excluída."));
         scheduleRefresh();
       }
     },
@@ -804,11 +1116,15 @@ export function useBoardWindows(
     dismissError,
     updateWindow,
     updateNote,
+    addNoteTag,
+    removeNoteTag,
+    updateTag,
     bringToFront,
     createWindow,
     closeWindow,
     connections,
     connect,
+    renameConnection,
     erase,
     lastErased,
     undoErase,

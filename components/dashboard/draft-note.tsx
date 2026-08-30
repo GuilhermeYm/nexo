@@ -1,10 +1,32 @@
 "use client";
 
-import { LoaderCircle, PenLine, Trash2, X } from "lucide-react";
+import { LoaderCircle, Maximize2, Minimize2, PenLine, Trash2, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 
+import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { useLocalDraft } from "@/hooks/use-local-draft";
+import { richTextToPlain } from "@/lib/editor/document";
+import { readApiFailure } from "@/lib/plan-limit";
 import { cn } from "@/lib/utils";
+
+/**
+ * O editor entra por `next/dynamic`: o ProseMirror é a peça mais pesada do
+ * cliente, e quem abre o dashboard só para capturar não deve baixá-lo até
+ * abrir o rascunho de fato. Até o chunk chegar, uma faixa reservada segura a
+ * altura para o cartão não saltar.
+ */
+const DraftEditor = dynamic(
+  () => import("@/components/dashboard/draft-editor").then((m) => m.DraftEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="mt-1 border-t border-border px-2.5 pt-3 pb-4">
+        <p className="text-sm text-subtle-foreground">Carregando o editor…</p>
+      </div>
+    ),
+  }
+);
 
 /**
  * O rascunho do dashboard.
@@ -28,13 +50,26 @@ import { cn } from "@/lib/utils";
 interface DraftNoteProps {
   /** O shell mostra o aviso e revalida os painéis. */
   onSaved: (title: string) => void;
+  /** Entrega ao shell uma função que abre o rascunho — o estado vazio de
+   *  Recentes a chama para o "Escrever uma nota" funcionar de lá. */
+  registerOpen?: (open: () => void) => void;
 }
 
-export function DraftNote({ onSaved }: DraftNoteProps) {
+export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
   const { draft, update, discard } = useLocalDraft();
   const [opened, setOpened] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Quando o rascunho é aberto de longe (do painel de Recentes), ele rola
+  // até a vista no render seguinte — o convite veio de baixo da dobra.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const scrollOnOpen = useRef(false);
+  // `upgrade` distingue o teto do plano de uma falha: no primeiro caso o
+  // rascunho não foi guardado e **não adianta** tentar de novo neste mês.
+  const [error, setError] = useState<{
+    message: string;
+    upgrade: boolean;
+  } | null>(null);
   const [armed, setArmed] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -45,6 +80,19 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
 
   useEffect(() => {
     if (opened) titleRef.current?.focus();
+  }, [opened]);
+
+  useEffect(() => {
+    registerOpen?.(() => {
+      scrollOnOpen.current = true;
+      setOpened(true);
+    });
+  }, [registerOpen]);
+
+  useEffect(() => {
+    if (!opened || !scrollOnOpen.current) return;
+    scrollOnOpen.current = false;
+    rootRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [opened]);
 
   // O armado da exclusão não pode sobreviver ao contexto que o criou: se a
@@ -90,21 +138,42 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
+  // Esc sai do modo tela cheia. O botão continua lá para quem prefere clicar.
+  useEffect(() => {
+    if (!expanded) return;
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setExpanded(false);
+    }
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [expanded]);
+
   async function save() {
     if (!draft || !filled) return;
 
     setSaving(true);
     setError(null);
     try {
+      // Com documento, manda o documento e deixa o servidor derivar o texto
+      // puro — mesma regra do `PATCH /api/notes/[id]`. Sem documento (rascunho
+      // criado antes do editor), manda o texto puro como sempre.
       const response = await fetch("/api/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draft.title, content: draft.content }),
+        body: JSON.stringify(
+          draft.contentRich !== undefined
+            ? { title: draft.title, contentRich: draft.contentRich }
+            : { title: draft.title, content: draft.content }
+        ),
       });
 
       if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        setError(body?.error ?? "Não foi possível guardar agora.");
+        setError(
+          await readApiFailure(response, "Não foi possível guardar agora.")
+        );
         return;
       }
 
@@ -113,9 +182,13 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
       // existe deste texto no mundo.
       discard();
       setOpened(false);
+      setExpanded(false);
       onSaved(note.title);
     } catch {
-      setError("Sem conexão. O rascunho continua aqui.");
+      setError({
+        message: "Sem conexão. O rascunho continua aqui.",
+        upgrade: false,
+      });
     } finally {
       setSaving(false);
     }
@@ -124,6 +197,9 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
   if (!open) {
     return (
       <button
+        ref={(el) => {
+          rootRef.current = el;
+        }}
         type="button"
         onClick={() => setOpened(true)}
         className="mt-3 flex w-full items-center gap-2.5 rounded-xl border border-dashed border-border px-4 py-3 text-left transition-colors duration-150 hover:border-subtle-foreground hover:bg-secondary"
@@ -147,8 +223,15 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
 
   return (
     <section
+      ref={(el) => {
+        rootRef.current = el;
+      }}
       aria-label="Rascunho"
-      className="mt-3 rounded-xl border border-border bg-secondary p-3"
+      className={cn(
+        "mt-3 rounded-xl border border-border bg-secondary p-3",
+        expanded &&
+          "fixed inset-0 z-50 m-0 flex flex-col rounded-none"
+      )}
     >
       <div className="flex items-center gap-2 px-1 pb-2">
         <PenLine
@@ -161,20 +244,46 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
         <p className="min-w-0 flex-1 truncate text-xs text-subtle-foreground">
           Fica só neste navegador — não entra na busca nem vai para o celular.
         </p>
-        {!filled && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setOpened(false)}
-            title="Fechar o rascunho"
+            onClick={() => setExpanded((current) => !current)}
+            title={expanded ? "Sair da tela cheia" : "Maximizar o rascunho"}
             className="flex size-7 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
           >
-            <X className="size-3.5" aria-hidden="true" />
-            <span className="sr-only">Fechar o rascunho</span>
+            {expanded ? (
+              <Minimize2 className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Maximize2 className="size-3.5" aria-hidden="true" />
+            )}
+            <span className="sr-only">
+              {expanded ? "Sair da tela cheia" : "Maximizar o rascunho"}
+            </span>
           </button>
-        )}
+
+          {!filled && (
+            <button
+              type="button"
+              onClick={() => {
+                discard();
+                setOpened(false);
+              }}
+              title="Fechar o rascunho"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+            >
+              <X className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Fechar o rascunho</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-background p-2.5">
+      <div
+        className={cn(
+          "overflow-hidden rounded-lg border border-border bg-background",
+          expanded && "flex flex-1 flex-col"
+        )}
+      >
         <label className="sr-only" htmlFor="draft-title">
           Título do rascunho
         </label>
@@ -186,21 +295,18 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
           placeholder="Título"
           maxLength={200}
           data-focus-ring="container"
-          className="w-full rounded-md bg-transparent px-1 py-1 text-base font-bold tracking-[-0.01em] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:ring-2 focus-visible:ring-subtle-foreground focus-visible:ring-inset"
+          className="w-full bg-transparent px-3 pt-2.5 pb-1.5 text-base font-bold tracking-[-0.01em] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-subtle-foreground"
         />
 
-        <label className="sr-only" htmlFor="draft-content">
-          Texto do rascunho
-        </label>
-        <textarea
-          id="draft-content"
-          value={draft?.content ?? ""}
-          onChange={(event) => update({ content: event.target.value })}
-          placeholder="Escreva à vontade. Nada daqui sai do seu navegador até você mandar."
-          rows={4}
-          maxLength={20_000}
-          data-focus-ring="container"
-          className="mt-1 w-full resize-y rounded-md bg-transparent px-1 py-1 text-sm leading-relaxed text-muted-foreground outline-none placeholder:text-subtle-foreground focus-visible:ring-2 focus-visible:ring-subtle-foreground focus-visible:ring-inset"
+        {/* Edição de nota cheia — negrito, títulos, listas —, só que este
+            documento vive no `localStorage` e não no banco. */}
+        <DraftEditor
+          initialDoc={draft?.contentRich ?? null}
+          plainFallback={draft?.content ?? ""}
+          expanded={expanded}
+          onChange={(doc) =>
+            update({ contentRich: doc, content: richTextToPlain(doc) })
+          }
         />
       </div>
 
@@ -246,14 +352,29 @@ export function DraftNote({ onSaved }: DraftNoteProps) {
           </button>
         )}
 
+        {/* O teto do plano não trunca: a frase inteira precisa ser lida, e o
+            caminho para os planos vem depois dela. Os demais avisos continuam
+            numa linha só — eles cabem. */}
         <p
           role="status"
           className={cn(
-            "ml-auto min-w-0 truncate text-xs",
-            error ? "text-error" : "text-subtle-foreground"
+            "ml-auto min-w-0 text-xs",
+            error?.upgrade
+              ? "text-muted-foreground"
+              : error
+                ? "truncate text-error"
+                : "truncate text-subtle-foreground"
           )}
         >
-          {error ?? (filled ? "Guardado neste navegador." : "")}
+          {error ? (
+            <>
+              {error.message} {error.upgrade && <UpgradeLink />}
+            </>
+          ) : filled ? (
+            "Guardado neste navegador."
+          ) : (
+            ""
+          )}
         </p>
       </div>
     </section>

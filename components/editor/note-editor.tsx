@@ -1,36 +1,18 @@
 "use client";
 
 import { Placeholder } from "@tiptap/extensions";
-import { EditorContent, useEditor, type Editor } from "@tiptap/react";
+import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import {
-  ArrowLeft,
-  Bold,
-  Code,
-  Heading1,
-  Heading2,
-  Italic,
-  LayoutGrid,
-  List,
-  ListOrdered,
-  Quote,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, Download, LayoutGrid, Paperclip, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
+import { NoteTags } from "@/components/editor/note-tags";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -42,8 +24,10 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { EditorToolbar } from "@/components/editor/editor-toolbar";
 import type { WorkspaceSummary } from "@/lib/dashboard/queries";
 import { plainToRichDocument } from "@/lib/editor/document";
+import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
 import type { EditableNote } from "@/lib/notes/queries";
 import { cn } from "@/lib/utils";
 
@@ -204,9 +188,30 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
     }
   }, [note.id, router]);
 
+  // Abre o arquivo de onde a nota nasceu. A URL assinada é pedida na hora e
+  // aberta em outra aba — o bucket é privado, não há endereço público para
+  // virar `href` (ver "A URL do arquivo" no AGENTS).
+  const openAttachment = useCallback(async () => {
+    if (!note.attachment) return;
+    try {
+      const response = await fetch(`/api/attachments/${note.attachment.id}`);
+      const body = (await response.json().catch(() => null)) as {
+        url?: string;
+      } | null;
+      if (response.ok && body?.url) {
+        window.open(body.url, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      // A referência continua visível mesmo quando o arquivo não abre.
+    }
+  }, [note.attachment]);
+
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2.5 sm:px-4">
+    // As variantes `print:` desmontam o chrome da tela na impressão: a página
+    // é 100dvh com rolagem interna, e sem elas o PDF sairia com uma página só
+    // — o recorte do que está visível no viewport.
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background print:h-auto print:overflow-visible">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2.5 sm:px-4 print:hidden">
         <Link
           href="/dashboard"
           className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:h-11"
@@ -276,6 +281,14 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
                 </ContextMenuSubContent>
               </ContextMenuSub>
 
+              <ContextMenuItem onSelect={() => window.print()}>
+                <Download className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
+                <ContextMenuItemLabel
+                  label="Exportar PDF"
+                  hint="Abre a impressão do navegador — escolha “Salvar como PDF”."
+                />
+              </ContextMenuItem>
+
               <ContextMenuSeparator />
 
               <ContextMenuItem
@@ -294,9 +307,9 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
         </div>
       </header>
 
-      <Toolbar editor={editor} />
+      <EditorToolbar editor={editor} className="print:hidden" />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
         <div className="mx-auto w-full max-w-2xl px-6 pt-10 pb-32">
           <label className="sr-only" htmlFor="note-title">
             Título da nota
@@ -311,47 +324,35 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
             className="w-full rounded-lg bg-transparent text-3xl font-bold tracking-[-0.02em] text-foreground outline-none placeholder:text-subtle-foreground font-[family-name:var(--font-display)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-subtle-foreground sm:text-4xl"
           />
 
-          {note.tags.length > 0 && (
-            <ul className="mt-4 flex flex-wrap items-center gap-1.5">
-              {note.tags.map((tag) => (
-                <li
-                  key={tag.id}
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                    TAG_TONE[tag.color ?? ""] ??
-                      "bg-secondary text-muted-foreground"
-                  )}
-                >
-                  #{tag.name}
-                </li>
-              ))}
-            </ul>
+          {/* A referência de origem: de qual documento a Nexo derivou esta
+              nota. Não leva `print:hidden` — a procedência é conteúdo, e faz
+              sentido no PDF exportado. */}
+          {note.attachment && (
+            <button
+              type="button"
+              onClick={() => void openAttachment()}
+              title="Abrir o arquivo de origem"
+              className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-muted-foreground motion-reduce:transition-none"
+            >
+              <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">
+                Derivada de{" "}
+                <span className="font-medium text-muted-foreground">
+                  {note.attachment.filename}
+                </span>
+              </span>
+            </button>
           )}
 
-          {/* A tipografia do documento vive aqui, por descendência: o
-              conteúdo do editor é gerado pelo ProseMirror e não passa pelas
-              nossas classes um a um. */}
+          <NoteTags noteId={note.id} initialTags={note.tags} />
+
+          {/* A tipografia do documento vive em `PROSE_EDITOR_CLASS`, por
+              descendência: o conteúdo é gerado pelo ProseMirror e não passa
+              pelas nossas classes um a um. Aqui só a altura e a margem, que
+              são desta tela. */}
           <EditorContent
             editor={editor}
-            className={[
-              "mt-8",
-              "[&_.tiptap]:min-h-[60vh] [&_.tiptap]:text-[15px] [&_.tiptap]:leading-[1.75] [&_.tiptap]:text-muted-foreground",
-              "[&_h1]:mt-8 [&_h1]:mb-2 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-[-0.01em] [&_h1]:text-foreground [&_h1]:font-[family-name:var(--font-display)]",
-              "[&_h2]:mt-7 [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-foreground [&_h2]:font-[family-name:var(--font-display)]",
-              "[&_h3]:mt-6 [&_h3]:mb-1.5 [&_h3]:text-base [&_h3]:font-bold [&_h3]:text-foreground",
-              "[&_p]:my-3",
-              "[&_strong]:font-semibold [&_strong]:text-foreground",
-              "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1",
-              "[&_blockquote]:my-4 [&_blockquote]:border-l [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-foreground [&_blockquote]:italic",
-              "[&_code]:rounded [&_code]:bg-tertiary [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_code]:text-foreground",
-              "[&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-secondary [&_pre]:p-4 [&_pre]:font-mono [&_pre]:text-[13px]",
-              "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
-              "[&_hr]:my-8 [&_hr]:border-border",
-              "[&_a]:text-foreground [&_a]:underline [&_a]:decoration-border [&_a]:underline-offset-4",
-              // O placeholder do TipTap é um pseudo-elemento no primeiro
-              // parágrafo vazio.
-              "[&_p.is-editor-empty:first-child::before]:pointer-events-none [&_p.is-editor-empty:first-child::before]:float-left [&_p.is-editor-empty:first-child::before]:h-0 [&_p.is-editor-empty:first-child::before]:text-subtle-foreground [&_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
-            ].join(" ")}
+            className={cn("mt-8 [&_.tiptap]:min-h-[60vh]", PROSE_EDITOR_CLASS)}
           />
         </div>
       </div>
@@ -360,140 +361,6 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
 }
 
 /* ---------------------------------------------------------------------- */
-
-const TAG_TONE: Record<string, string> = {
-  "1": "bg-tag-1 text-tag-1-foreground",
-  "2": "bg-tag-2 text-tag-2-foreground",
-  "3": "bg-tag-3 text-tag-3-foreground",
-  "4": "bg-tag-4 text-tag-4-foreground",
-  "5": "bg-tag-5 text-tag-5-foreground",
-  "6": "bg-tag-6 text-tag-6-foreground",
-};
-
-/**
- * Barra de formatação fixa.
- *
- * Fixa e não flutuante sobre a seleção: numa primeira versão, ver o que
- * existe vale mais do que economizar o espaço da barra. O menu flutuante
- * entra depois, quando o vocabulário já for conhecido.
- */
-function Toolbar({ editor }: { editor: Editor | null }) {
-  // A moldura existe desde o primeiro paint mesmo sem editor. O TipTap só
-  // monta no cliente (`immediatelyRender: false`), e sem esta reserva de
-  // altura o documento inteiro saltaria para baixo quando ele chegasse.
-  return (
-    <div className="flex h-11 shrink-0 items-center border-b border-border px-3 sm:px-4">
-      <div className="mx-auto flex w-full max-w-2xl items-center gap-0.5 overflow-x-auto">
-        {editor && (
-          <>
-            <ToolbarButton
-              label="Negrito"
-              active={editor.isActive("bold")}
-              onClick={() => editor.chain().focus().toggleBold().run()}
-            >
-              <Bold className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-            <ToolbarButton
-              label="Itálico"
-              active={editor.isActive("italic")}
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-            >
-              <Italic className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-            <ToolbarButton
-              label="Código"
-              active={editor.isActive("code")}
-              onClick={() => editor.chain().focus().toggleCode().run()}
-            >
-              <Code className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-
-            <Divider />
-
-            <ToolbarButton
-              label="Título"
-              active={editor.isActive("heading", { level: 1 })}
-              onClick={() =>
-                editor.chain().focus().toggleHeading({ level: 1 }).run()
-              }
-            >
-              <Heading1 className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-            <ToolbarButton
-              label="Subtítulo"
-              active={editor.isActive("heading", { level: 2 })}
-              onClick={() =>
-                editor.chain().focus().toggleHeading({ level: 2 }).run()
-              }
-            >
-              <Heading2 className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-
-            <Divider />
-
-            <ToolbarButton
-              label="Lista"
-              active={editor.isActive("bulletList")}
-              onClick={() => editor.chain().focus().toggleBulletList().run()}
-            >
-              <List className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-            <ToolbarButton
-              label="Lista numerada"
-              active={editor.isActive("orderedList")}
-              onClick={() => editor.chain().focus().toggleOrderedList().run()}
-            >
-              <ListOrdered className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-            <ToolbarButton
-              label="Citação"
-              active={editor.isActive("blockquote")}
-              onClick={() => editor.chain().focus().toggleBlockquote().run()}
-            >
-              <Quote className="size-4" aria-hidden="true" />
-            </ToolbarButton>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ToolbarButton({
-  label,
-  active,
-  onClick,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-pressed={active}
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
-        active
-          ? "bg-tertiary text-foreground"
-          : "text-subtle-foreground hover:bg-tertiary hover:text-foreground"
-      )}
-    >
-      {children}
-      <span className="sr-only">{label}</span>
-    </button>
-  );
-}
-
-function Divider() {
-  return (
-    <span aria-hidden="true" className="mx-1 h-5 w-px shrink-0 bg-border" />
-  );
-}
 
 /**
  * Estado do salvamento.

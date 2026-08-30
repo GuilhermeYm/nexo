@@ -267,7 +267,99 @@ async function main() {
       (await page.$$eval(ARROWS, (nodes) => nodes.length)) === 2
     );
 
-    // ---- botão direito na flecha ----
+    // ---- a folga entre a flecha e a moldura da janela ----
+    //
+    // Encostada, a flecha vira parte da moldura: o olho lê um retângulo com
+    // um espeto, não duas coisas ligadas. A conta é a distância de cada ponta
+    // do traço ao retângulo mais próximo, em pixels de tela.
+    const gaps = await page.evaluate(() => {
+      const group = document.querySelector("[data-connection]");
+      if (!group) return null;
+      const box = group.getBoundingClientRect();
+      const rects = [
+        ...document.querySelectorAll("article[class*='group/window']"),
+      ].map((node) => node.getBoundingClientRect());
+
+      const ends = [
+        { x: box.left, y: box.top + box.height / 2 },
+        { x: box.right, y: box.top + box.height / 2 },
+      ];
+
+      return ends.map((point) =>
+        Math.min(
+          ...rects.map((rect) => {
+            const dx = Math.max(rect.left - point.x, 0, point.x - rect.right);
+            const dy = Math.max(rect.top - point.y, 0, point.y - rect.bottom);
+            return Math.hypot(dx, dy);
+          })
+        )
+      );
+    });
+    check(
+      "a flecha para antes de encostar na janela",
+      Boolean(gaps) && gaps.every((gap) => gap >= 6 && gap <= 30),
+      gaps ? gaps.map((gap) => Math.round(gap)).join(" / ") : "sem flecha"
+    );
+
+    // ---- o par recíproco não fica uma flecha em cima da outra ----
+    const windowIds = await page.evaluate(
+      async (id) => {
+        const response = await fetch(`/api/workspaces/${id}/windows`, {
+          cache: "no-store",
+        });
+        const body = await response.json();
+        return body.connections.map((c) => [c.fromWindowId, c.toWindowId]);
+      },
+      workspaceId
+    );
+    const [firstPair] = windowIds;
+    await page.evaluate(
+      async ([id, from, to]) => {
+        await fetch(`/api/workspaces/${id}/connections`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // A de volta: B → A. É outra linha de propósito.
+          body: JSON.stringify({ fromWindowId: to, toWindowId: from }),
+        });
+      },
+      [workspaceId, firstPair[0], firstPair[1]]
+    );
+    await page.waitForTimeout(1500);
+
+    const traces = await page.$$eval("[data-connection]", (nodes) =>
+      nodes.map((node) => {
+        const box = node.getBoundingClientRect();
+        return `${Math.round(box.top)}:${Math.round(box.height)}`;
+      })
+    );
+    check(
+      "A→B e B→A são desenhadas separadas",
+      traces.length === 3 && new Set(traces).size === traces.length,
+      traces.join(" | ")
+    );
+    await page.screenshot({ path: `${OUT}/04-par-reciproco-light.png` });
+
+    // Desfeita a de volta: o resto do roteiro conta com duas flechas.
+    await page.evaluate(
+      async ([id, from, to]) => {
+        const response = await fetch(`/api/workspaces/${id}/windows`, {
+          cache: "no-store",
+        });
+        const body = await response.json();
+        const back = body.connections.find(
+          (c) => c.fromWindowId === to && c.toWindowId === from
+        );
+        await fetch(`/api/workspaces/${id}/connections`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: [back.id] }),
+        });
+      },
+      [workspaceId, firstPair[0], firstPair[1]]
+    );
+    await page.waitForTimeout(1500);
+
+    // ---- o rótulo ----
     const between = {
       x: (pesquisa.x + hipotese.x) / 2,
       y: (pesquisa.y + hipotese.y) / 2,
@@ -275,10 +367,46 @@ async function main() {
     await page.mouse.click(between.x, between.y, { button: "right" });
     await page.waitForSelector("[role='menu']", { timeout: 5000 });
     check(
+      "o menu da flecha oferece escrever nela",
+      await page.isVisible("[role='menu'] :text('Escrever na ligação')")
+    );
+    await page.click(
+      "[role='menu'] [role='menuitem']:has-text('Escrever na ligação')"
+    );
+    await page.waitForSelector("input[aria-label='Texto da ligação']", {
+      timeout: 5000,
+    });
+    await page.fill("input[aria-label='Texto da ligação']", "sustenta");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1500);
+
+    const { rows: labelled } = await sql.query(
+      "select label from workspace_connections where user_id = $1 and label is not null",
+      [userId]
+    );
+    check(
+      "o texto escrito na flecha vai para o banco",
+      labelled.length === 1 && labelled[0].label === "sustenta",
+      labelled.map((row) => row.label).join(", ") || "nenhum"
+    );
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector(WINDOW, { timeout: 20000 });
+    await page.waitForTimeout(1000);
+    check(
+      "e continua na tela depois de recarregar",
+      await page.isVisible("button:has-text('sustenta')")
+    );
+    await page.screenshot({ path: `${OUT}/05-com-rotulo-light.png` });
+
+    // ---- botão direito na flecha ----
+    await page.mouse.click(between.x, between.y, { button: "right" });
+    await page.waitForSelector("[role='menu']", { timeout: 5000 });
+    check(
       "o botão direito na flecha abre o menu dela",
       await page.isVisible("[role='menu'] :text('Remover a ligação')")
     );
-    await page.screenshot({ path: `${OUT}/04-menu-da-flecha-light.png` });
 
     await page.click("[role='menu'] [role='menuitem']:has-text('Remover a ligação')");
     check(
@@ -295,7 +423,7 @@ async function main() {
     await page.waitForTimeout(300);
     await page.mouse.move(remaining.x - 40, remaining.y);
     await page.waitForTimeout(200);
-    await page.screenshot({ path: `${OUT}/05-borracha-na-flecha-light.png` });
+    await page.screenshot({ path: `${OUT}/06-borracha-na-flecha-light.png` });
 
     await page.mouse.down();
     for (let step = 1; step <= 12; step++) {
@@ -345,7 +473,7 @@ async function main() {
       document.documentElement.setAttribute("data-theme", "dark");
     });
     await page.waitForTimeout(400);
-    await page.screenshot({ path: `${OUT}/06-escuro.png` });
+    await page.screenshot({ path: `${OUT}/07-escuro.png` });
 
     console.log(`\n${results.join("\n")}`);
     const consoleProblems = [...new Set(problems.filter((p) => p.includes(":")))];

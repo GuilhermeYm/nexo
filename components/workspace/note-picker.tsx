@@ -7,7 +7,9 @@ import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
+import { storedChipClass } from "@/lib/tags/palette";
 import type {
+  BoardNoteTag,
   OpenableAttachment,
   OpenableNote,
 } from "@/lib/workspace/queries";
@@ -284,6 +286,7 @@ export function NotePicker({
                     title={note.title}
                     excerpt={note.excerpt}
                     meta={NOTE_TYPE_LABEL[note.type] ?? "Nota"}
+                    tags={note.tags}
                     badge={
                       note.source === "ai" ? (
                         <Sparkles
@@ -377,6 +380,7 @@ function PickerRow({
   title,
   excerpt,
   meta,
+  tags = [],
   badge,
   onClick,
 }: {
@@ -384,6 +388,8 @@ function PickerRow({
   title: string;
   excerpt: string | null;
   meta: string;
+  /** As tags da nota — só na aba Notas; os arquivos não têm. */
+  tags?: BoardNoteTag[];
   badge: React.ReactNode;
   onClick: () => void;
 }) {
@@ -404,6 +410,26 @@ function PickerRow({
         {excerpt && (
           <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-muted-foreground">
             {excerpt}
+          </span>
+        )}
+        {tags.length > 0 && (
+          <span className="mt-1.5 flex flex-wrap items-center gap-1">
+            {tags.slice(0, 4).map((tag) => (
+              <span
+                key={tag.id}
+                className={cn(
+                  "max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                  storedChipClass(tag)
+                )}
+              >
+                #{tag.name}
+              </span>
+            ))}
+            {tags.length > 4 && (
+              <span className="text-[10px] font-medium text-subtle-foreground">
+                +{tags.length - 4}
+              </span>
+            )}
           </span>
         )}
         <span className="mt-1 block text-[11px] text-subtle-foreground">

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "audit": "node --env-file=.env scripts/audit-security.mjs",
+    "notify": "node --env-file=.env scripts/notify.mjs",
     "shots": "node scripts/shots.mjs",
     "shots:dash": "node --env-file=.env scripts/shot-dashboard.mjs",
     "shots:board": "node --env-file=.env scripts/shot-workspace.mjs",
@@ -14,7 +16,9 @@
     "shots:file": "node --env-file=.env.local --env-file=.env scripts/shot-attachment.mjs",
     "shots:tags": "node --env-file=.env scripts/shot-tags.mjs",
     "shots:eraser": "node --env-file=.env scripts/shot-eraser.mjs",
-    "shots:links": "node --env-file=.env scripts/shot-connections.mjs"
+    "shots:links": "node --env-file=.env scripts/shot-connections.mjs",
+    "shots:entrada": "node --env-file=.env scripts/shot-inbox.mjs",
+    "shots:planos": "node --env-file=.env scripts/shot-plans.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

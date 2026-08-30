@@ -3,7 +3,7 @@ import "server-only";
 import { and, eq, ne } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { noteTags, notes, tags, workspaces } from "@/lib/db/schema";
+import { attachments, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
 
 export interface EditableNote {
   id: string;
@@ -19,6 +19,12 @@ export interface EditableNote {
   workspaceName: string | null;
   updatedAt: Date;
   tags: { id: string; name: string; color: string | null }[];
+  /**
+   * O arquivo de onde a nota nasceu (um upload classificado pela IA), quando
+   * há. É a referência de origem que o editor mostra — ver "Anexos como
+   * janela": o vínculo mora em `attachments.note_id`, do lado do arquivo.
+   */
+  attachment: { id: string; filename: string; type: string } | null;
 }
 
 /**
@@ -58,11 +64,27 @@ export async function getOwnedNote(
 
   if (!row) return null;
 
+  // Tags numa segunda consulta, não num join — uma nota com cinco tags
+  // multiplicaria a linha por cinco. Mesmo padrão do `attachTags`.
   const noteTagRows = await db
     .select({ id: tags.id, name: tags.name, color: tags.color })
     .from(noteTags)
     .innerJoin(tags, eq(noteTags.tagId, tags.id))
     .where(eq(noteTags.noteId, noteId));
 
-  return { ...row, tags: noteTagRows };
+  // O arquivo de origem, quando a nota nasceu de um upload. O vínculo mora
+  // do lado do anexo (`attachments.note_id`), e o `userId` entra no filtro
+  // mesmo redundante: leitura que depende só da posse da nota fica frágil no
+  // dia em que alguém mexer nela.
+  const [attachment] = await db
+    .select({
+      id: attachments.id,
+      filename: attachments.filename,
+      type: attachments.type,
+    })
+    .from(attachments)
+    .where(and(eq(attachments.noteId, noteId), eq(attachments.userId, userId)))
+    .limit(1);
+
+  return { ...row, tags: noteTagRows, attachment: attachment ?? null };
 }

@@ -19,7 +19,9 @@ import {
 } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
+import { UpgradeLink } from "@/components/ui/upgrade-link";
 import type { RecentNote } from "@/lib/dashboard/queries";
+import { readApiFailure } from "@/lib/plan-limit";
 import { cn } from "@/lib/utils";
 
 /**
@@ -44,16 +46,25 @@ type UploadState =
   | { phase: "idle" }
   | { phase: "sending"; filename: string }
   | { phase: "done"; filename: string }
-  | { phase: "error"; message: string };
+  // `upgrade` separa o teto do plano do defeito de verdade: um pede assinatura,
+  // o outro pede tentar de novo, e a linha de rodapé diz coisas diferentes.
+  | { phase: "error"; message: string; upgrade?: boolean };
 
 interface CommandBarProps {
   onOpenNote: (noteId: string) => void;
   /** Chamado quando um upload conclui, para o painel de Tarefas revalidar
    *  sem esperar o evento do Realtime dar a volta. */
   onUploaded: () => void;
+  /** Entrega ao shell uma função que abre o seletor de arquivo — o estado
+   *  vazio de Tarefas a chama para o "Enviar um arquivo" funcionar de lá. */
+  registerPickFile?: (pick: () => void) => void;
 }
 
-export function CommandBar({ onOpenNote, onUploaded }: CommandBarProps) {
+export function CommandBar({
+  onOpenNote,
+  onUploaded,
+  registerPickFile,
+}: CommandBarProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -145,13 +156,28 @@ export function CommandBar({ onOpenNote, onUploaded }: CommandBarProps) {
         });
 
         if (!response.ok) {
-          const message =
+          // O teto de plano chega com mensagem própria e com a marca
+          // `upgrade` — ela vale mais que qualquer texto genérico, porque
+          // explica que não houve defeito nenhum.
+          const failure = await readApiFailure(
+            response,
             response.status === 429
               ? "Limite de envios por hora atingido."
               : response.status === 413 || response.status === 400
                 ? "Arquivo não aceito. Confira o tipo e o tamanho (até 25 MB)."
-                : "Não foi possível enviar. Tente novamente.";
-          setUpload({ phase: "error", message });
+                : "Não foi possível enviar. Tente novamente."
+          );
+
+          setUpload({
+            phase: "error",
+            // O 429 é da nossa proteção contra abuso, não do plano: a
+            // mensagem do servidor ali não ajuda mais que a nossa.
+            message:
+              response.status === 429
+                ? "Limite de envios por hora atingido."
+                : failure.message,
+            upgrade: failure.upgrade,
+          });
           return;
         }
 
@@ -171,6 +197,10 @@ export function CommandBar({ onOpenNote, onUploaded }: CommandBarProps) {
     const timer = setTimeout(() => setUpload({ phase: "idle" }), 4000);
     return () => clearTimeout(timer);
   }, [upload]);
+
+  useEffect(() => {
+    registerPickFile?.(() => fileRef.current?.click());
+  }, [registerPickFile]);
 
   /* --- Teclado -------------------------------------------------------- */
 
@@ -443,10 +473,23 @@ export function CommandBar({ onOpenNote, onUploaded }: CommandBarProps) {
               {upload.filename} chegou. A classificação aparece em Tarefas.
             </span>
           ) : upload.phase === "error" ? (
-            <span className="flex items-center gap-1.5 text-error">
-              <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-              {upload.message}
-            </span>
+            // Teto do plano não é erro, e não se pinta de vermelho: o ícone é
+            // de informação e o texto fica na cor de sempre, seguido do
+            // caminho para os planos. Pintar isso de vermelho ensinaria a
+            // pessoa que ela quebrou alguma coisa.
+            upload.upgrade ? (
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <Sparkles className="size-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  {upload.message} <UpgradeLink />
+                </span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-error">
+                <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+                {upload.message}
+              </span>
+            )
           ) : (
             <>
               Busca e envio estão no ar. Pedir à IA chega junto com os créditos

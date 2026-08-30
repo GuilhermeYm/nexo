@@ -2,8 +2,13 @@
 
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { Check, Clock } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, Clock } from "lucide-react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { Button } from "@/components/ui/button";
 import { type BillingPeriod } from "@/lib/stripe";
@@ -32,27 +37,34 @@ interface Plan {
 }
 
 // Os números abaixo (preços, limites de captura e de armazenamento) são a
-// proposta inicial — troque à vontade, é o único lugar que precisa mudar.
+// proposta inicial — troque à vontade, mas mantenha-os de acordo com
+// `lib/plans.ts`, que é quem as rotas consultam para barrar de verdade.
+//
+// **O Pro é o Gratuito sem os tetos.** Nenhuma linha da lista de baixo existe
+// só para quem paga: as sete linhas são as mesmas nos dois cartões, na mesma
+// ordem e com a mesma redação, e só os números mudam. Isso é de propósito —
+// a comparação é feita com o olho, linha por linha, e não com a memória.
 const PLANS: Plan[] = [
   {
     name: "Gratuito",
-    tagline: "Para conhecer a Nexo sem compromisso.",
+    tagline: "A Nexo inteira, com teto. Para conhecer sem compromisso.",
     price: { monthly: "R$ 0", yearly: "R$ 0" },
     billingNote: { monthly: "para sempre", yearly: "para sempre" },
     features: [
-      "50 capturas por mês",
-      "Classificação automática por IA",
+      "50 capturas por mês — notas e arquivos",
+      "Envio de PDF, texto e áudio",
+      "Classificação, resumo e tags por IA",
       "1 workspace",
       "Busca por texto",
       "200 MB de arquivos",
       "Suporte por e-mail",
     ],
     closingNote:
-      "Sem cartão de crédito. Você só decide sobre o Pro depois que a Nexo já tiver virado o lugar onde tudo cai.",
+      "Sem cartão de crédito. Ao bater no teto nada some: a Nexo avisa, e tudo o que você já guardou continua lá. Você só decide sobre o Pro depois que ela já tiver virado o lugar onde tudo cai.",
   },
   {
     name: "Pro",
-    tagline: "Para quem joga tudo na Nexo e não quer pensar em limite.",
+    tagline: "Tudo do Gratuito, sem os tetos — para quem joga tudo na Nexo.",
     // Preço provisório: R$ 50/mês enquanto finalizamos a integração com o
     // Stripe. O anual mantém o desconto de dois meses grátis.
     price: { monthly: "R$ 50", yearly: "R$ 42" },
@@ -61,18 +73,26 @@ const PLANS: Plan[] = [
       yearly: "por mês, cobrado R$ 504 por ano",
     },
     features: [
-      "Capturas ilimitadas",
-      "Classificação, resumo e tags com IA avançada",
+      "Capturas ilimitadas — notas e arquivos",
+      "Envio de PDF, texto e áudio",
+      "Classificação, resumo e tags por IA",
       "Workspaces ilimitados",
       "Busca por texto",
       "20 GB de arquivos",
       "Suporte prioritário",
     ],
-    // Estas duas ainda não existem no produto. Ficam visíveis porque fazem
-    // parte do que o Pro vai ser, e ficam separadas porque cobrar hoje por uma
-    // funcionalidade que não roda é o tipo de promessa que volta como
-    // estorno — não como reclamação.
+    // Nada aqui roda hoje. Continua no cartão porque é o que o Pro vai ser,
+    // fica **separado** da lista de cima porque cobrar por uma funcionalidade
+    // que não existe volta como estorno — não como reclamação —, e vem
+    // **recolhido** porque, aberto, o bloco estica o cartão do Pro e abre um
+    // buraco no do Gratuito ao lado.
+    //
+    // O modelo mais capacitado entra nesta lista pelo mesmo motivo: hoje a
+    // classificação de todo mundo passa pelos modelos rápidos da Groq, e
+    // anunciá-lo entre as linhas de cima seria vender o que ainda não roda.
     upcoming: [
+      "Processamento com modelos de IA mais capacitados",
+      "Tarefas de IA que agem sobre os seus arquivos e documentos",
       "Busca semântica em notas, áudios e PDFs",
       "Ambiente de blocos, hierarquia e links",
     ],
@@ -255,37 +275,27 @@ export function PricingSection() {
               </ul>
 
               {plan.upcoming && (
-                <div className="mt-7 rounded-2xl border border-dashed border-border bg-background/50 p-4">
-                  <p className="text-[11px] font-bold tracking-wide text-subtle-foreground uppercase">
-                    Em breve no {plan.name}
-                  </p>
-                  <ul className="mt-3 flex flex-col gap-2.5">
-                    {plan.upcoming.map((feature) => (
-                      <li key={feature} className="flex items-start gap-3">
-                        <Clock
-                          aria-hidden="true"
-                          className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
-                        />
-                        <span className="text-sm leading-relaxed text-subtle-foreground">
-                          {feature}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-3 text-xs leading-relaxed text-subtle-foreground">
-                    Ainda não estão no ar. Entram para quem já é assinante, sem
-                    custo adicional.
-                  </p>
-                </div>
+                <UpcomingDisclosure
+                  planName={plan.name}
+                  items={plan.upcoming}
+                />
               )}
 
               {plan.closingNote && (
-                <p className="mt-auto border-t border-border/70 pt-6 text-sm leading-relaxed text-muted-foreground">
+                <p className="mt-7 border-t border-border/70 pt-6 text-sm leading-relaxed text-muted-foreground">
                   {plan.closingNote}
                 </p>
               )}
 
-              <div className="mt-8">
+              {/* O `mt-auto` vive aqui, e não na nota de fechamento.
+                  Os dois cartões têm a mesma altura (grid) e conteúdos de
+                  tamanhos diferentes — com o "Em breve" recolhido, o Gratuito
+                  costuma ser o mais alto pela nota de fechamento. A sobra do
+                  cartão mais curto tem que cair em algum lugar: empurrando a
+                  nota para o rodapé ela caía num buraco no meio; empurrando o
+                  botão, a sobra vira respiro antes do CTA e os dois botões
+                  ficam alinhados na mesma linha. */}
+              <div className="mt-auto pt-8">
                 <Button
                   size="lg"
                   variant={plan.featured ? "default" : "outline"}
@@ -313,5 +323,134 @@ export function PricingSection() {
         </p>
       </div>
     </section>
+  );
+}
+
+/**
+ * "Em breve no {plano}" — `<details>` nativo, recolhido por padrão.
+ *
+ * Nativo porque não vale um estado nem uma dependência para uma revelação:
+ * teclado, `aria-expanded` e o alvo de foco vêm de graça. O que ele **não**
+ * dá é a animação de altura, então ela é feita à mão com o GSAP que a seção
+ * já carrega:
+ *
+ * - **Abrir:** o `<details>` já mostrou o conteúdo quando `onToggle` dispara;
+ *   o tween parte de altura 0 e sobe até a altura natural.
+ * - **Fechar:** o clique no `summary` é interceptado (`preventDefault`) para
+ *   o conteúdo não sumir de imediato; anima até 0 e só então marca
+ *   `open = false`.
+ *
+ * `prefers-reduced-motion` pula os dois tweens — o `<details>` alterna seco.
+ * Depois de cada transição, `ScrollTrigger.refresh()` recalcula os gatilhos
+ * das seções abaixo contra a nova altura do documento.
+ */
+function UpcomingDisclosure({
+  planName,
+  items,
+}: {
+  planName: string;
+  items: string[];
+}) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  // Sem padding próprio: `height: 0` só é de fato zero se a caixa não
+  // reservar espaço de padding. O respiro mora no filho.
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  function prefersReducedMotion() {
+    return (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+  }
+
+  function handleToggle() {
+    const details = detailsRef.current;
+    const content = contentRef.current;
+    if (!details || !content) return;
+
+    if (!details.open || prefersReducedMotion()) {
+      ScrollTrigger.refresh();
+      return;
+    }
+
+    gsap.fromTo(
+      content,
+      { height: 0, opacity: 0 },
+      {
+        height: "auto",
+        opacity: 1,
+        duration: 0.36,
+        ease: "power2.out",
+        onComplete: () => {
+          gsap.set(content, { clearProps: "height,opacity" });
+          ScrollTrigger.refresh();
+        },
+      }
+    );
+  }
+
+  function handleSummaryClick(event: ReactMouseEvent<HTMLElement>) {
+    const details = detailsRef.current;
+    const content = contentRef.current;
+    // Só o fechamento precisa ser segurado; abrir segue pelo caminho nativo.
+    if (!details || !content || !details.open || prefersReducedMotion()) return;
+
+    event.preventDefault();
+    gsap.to(content, {
+      height: 0,
+      opacity: 0,
+      duration: 0.26,
+      ease: "power2.in",
+      onComplete: () => {
+        details.open = false;
+        gsap.set(content, { clearProps: "height,opacity" });
+        ScrollTrigger.refresh();
+      },
+    });
+  }
+
+  return (
+    <details
+      ref={detailsRef}
+      onToggle={handleToggle}
+      className="group mt-7 rounded-2xl border border-dashed border-border bg-background/50 [&_summary::-webkit-details-marker]:hidden"
+    >
+      <summary
+        onClick={handleSummaryClick}
+        className="flex cursor-pointer list-none items-center gap-2 rounded-2xl p-4 outline-none transition-colors duration-200 hover:bg-background/60 focus-visible:ring-2 focus-visible:ring-subtle-foreground"
+      >
+        <span className="text-[11px] font-bold tracking-wide text-subtle-foreground uppercase">
+          Em breve no {planName}
+        </span>
+        <span className="rounded-full bg-tertiary px-1.5 py-0.5 text-[10px] font-bold text-subtle-foreground tabular-nums">
+          {items.length}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className="ml-auto size-4 text-subtle-foreground transition-transform duration-300 ease-out group-open:rotate-180 motion-reduce:transition-none"
+        />
+      </summary>
+      <div ref={contentRef} className="overflow-hidden">
+        <div className="px-4 pb-4">
+          <ul className="flex flex-col gap-2.5">
+            {items.map((feature) => (
+              <li key={feature} className="flex items-start gap-3">
+                <Clock
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+                />
+                <span className="text-sm leading-relaxed text-subtle-foreground">
+                  {feature}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs leading-relaxed text-subtle-foreground">
+            Ainda não estão no ar. Entram para quem já é assinante, sem custo
+            adicional.
+          </p>
+        </div>
+      </div>
+    </details>
   );
 }

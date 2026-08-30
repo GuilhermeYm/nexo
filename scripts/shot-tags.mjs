@@ -11,7 +11,13 @@
  * O que é conferido, não só fotografado:
  *   - as tags recentes aparecem com a contagem certa de notas;
  *   - abrir uma tag lista as notas dela (via GET /api/tags/[id]/notes);
- *   - a busca encontra tag pelo nome (sem acento) e nota pelo conteúdo.
+ *   - a busca encontra tag pelo nome (sem acento) e nota pelo conteúdo;
+ *   - na janela da lousa, o painel do chip renomeia e recolore a tag, o
+ *     renomeio vai para a trilha de auditoria e a cor não, e as duas coisas
+ *     sobrevivem ao recarregamento.
+ *
+ * A última parte acontece na lousa e mesmo assim mora aqui: o que ela exercita
+ * é a tag, que é da conta e não daquela nota.
  */
 import { createClient } from "@supabase/supabase-js";
 import { existsSync, mkdirSync } from "node:fs";
@@ -85,6 +91,30 @@ async function seed(sql, userId) {
      on conflict do nothing`,
     [userId]
   );
+}
+
+/**
+ * Espera o banco chegar no estado esperado, em vez de dormir um tempo fixo.
+ *
+ * A rota leva de 300ms a 2s conforme o Turbopack já a tenha compilado ou não,
+ * e um `waitForTimeout` calibrado numa máquina quente falha na fria.
+ */
+async function waitForTag(sql, userId, name, color, timeout = 20000) {
+  const deadline = Date.now() + timeout;
+  const read = async () =>
+    (
+      await sql.query(
+        "select name, color from tags where user_id = $1 and name = $2",
+        [userId, name]
+      )
+    ).rows;
+
+  let rows = await read();
+  while (rows[0]?.color !== color && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    rows = await read();
+  }
+  return rows;
 }
 
 function check(problems, label, ok, detail = "") {
@@ -230,6 +260,95 @@ async function main() {
       matchedNotes.join(" | ") || "lista vazia"
     );
     await page.screenshot({ path: `${OUT}/search-light.png` });
+
+    // ---- editar a tag na janela da lousa ----
+    //
+    // A tag é da conta, não da nota: o painel que abre no chip renomeia e
+    // recolore em todas as notas marcadas. Aqui é onde se prova que o gesto
+    // chega ao Postgres — a interface fica idêntica se a rota falhar em
+    // silêncio.
+    console.log("→ editar a tag na lousa");
+    const { rows: boardRows } = await sql.query(
+      `select w.id as workspace_id, n.id as note_id
+         from workspaces w
+         join notes n on n.user_id = w.user_id and n.type = 'meeting'
+        where w.user_id = $1
+        order by w.is_default desc
+        limit 1`,
+      [userId]
+    );
+    const board = boardRows[0];
+
+    await page.evaluate(
+      async ([workspaceId, noteId]) => {
+        await fetch(`/api/workspaces/${workspaceId}/windows`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "note", noteId, x: 120, y: 120 }),
+        });
+      },
+      [board.workspace_id, board.note_id]
+    );
+
+    await page.goto(`${BASE}/workspace/${board.workspace_id}`, {
+      waitUntil: "networkidle",
+    });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector("button[aria-label='Editar a tag reunião']", {
+      timeout: 20000,
+    });
+    await page.click("button[aria-label='Editar a tag reunião']");
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}/editor-da-tag-light.png` });
+
+    // A cor grava na hora; o nome espera o Enter.
+    await page.click("button[aria-label='Cor 6']");
+    const recolored = await waitForTag(sql, userId, "reunião", "6");
+    check(
+      problems,
+      "a amostra de cor grava na hora",
+      recolored[0]?.color === "6",
+      `color = ${recolored[0]?.color}`
+    );
+
+    await page.fill("input[aria-label='Nome da tag']", "alinhamento");
+    await page.keyboard.press("Enter");
+    const renamed = await waitForTag(sql, userId, "alinhamento", "6");
+    check(
+      problems,
+      "renomear a tag vale para a conta inteira",
+      renamed.length === 1 && renamed[0].color === "6",
+      renamed.length ? `${renamed[0].name} / ${renamed[0].color}` : "não achou"
+    );
+
+    // E a trilha registra o renomeio — o nome é como a pessoa reencontra o
+    // que guardou; a cor, não.
+    const { rows: audited } = await sql.query(
+      "select count(*)::int as total from audit_logs where user_id = $1 and table_name = 'tags'",
+      [userId]
+    );
+    check(
+      problems,
+      "o renomeio é auditado (e a cor não)",
+      audited[0].total === 1,
+      `${audited[0].total} registro(s)`
+    );
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector("button[aria-label='Editar a tag alinhamento']", {
+      timeout: 20000,
+    });
+    check(
+      problems,
+      "o novo nome sobrevive ao recarregamento",
+      await page.isVisible("button[aria-label='Editar a tag alinhamento']")
+    );
+    await page.screenshot({ path: `${OUT}/tag-editada-light.png` });
+
+    await page.goto(`${BASE}/dashboard/tags`, { waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForTimeout(1200);
 
     // Tema escuro, de volta à tela de descanso.
     await page.evaluate(() => {

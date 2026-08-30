@@ -42,7 +42,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Início", href: "/dashboard", icon: House, ready: true },
-  { label: "Entrada", href: "/dashboard/entrada", icon: Inbox },
+  { label: "Entrada", href: "/dashboard/entrada", icon: Inbox, ready: true },
   { label: "Notas", href: "/dashboard/notas", icon: FileText },
   { label: "Tags", href: "/dashboard/tags", icon: Tags, ready: true },
   { label: "Arquivos", href: "/dashboard/arquivos", icon: Paperclip },
@@ -81,6 +81,8 @@ interface SidebarProps {
   onRenameWorkspace: (workspace: WorkspaceSummary, name: string) => void;
   userName: string | null;
   userEmail: string;
+  /** Notificações não lidas para o badge da Entrada. */
+  unreadCount?: number;
 }
 
 /**
@@ -106,6 +108,7 @@ export function Sidebar({
   onRenameWorkspace,
   userName,
   userEmail,
+  unreadCount,
 }: SidebarProps) {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
@@ -176,7 +179,13 @@ export function Sidebar({
           <ul className="flex flex-col gap-0.5">
             {NAV_ITEMS.map((item) => (
               <li key={item.href}>
-                <NavRow item={item} open={labelsVisible} />
+                <NavRow
+                  item={item}
+                  open={labelsVisible}
+                  badge={
+                    item.label === "Entrada" && unreadCount ? unreadCount : undefined
+                  }
+                />
               </li>
             ))}
           </ul>
@@ -245,14 +254,14 @@ export function Sidebar({
               labelsVisible ? "flex-row" : "flex-col"
             )}
           >
-            <button
-              type="button"
+            <Link
+              href="/dashboard/configuracoes"
               title="Configurações"
               className="flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
             >
               <Settings className="size-4" aria-hidden="true" />
               <span className="sr-only">Configurações</span>
-            </button>
+            </Link>
             <ThemeToggle />
             <button
               type="button"
@@ -303,7 +312,15 @@ function SideLabel({
   );
 }
 
-function NavRow({ item, open }: { item: NavItem; open: boolean }) {
+function NavRow({
+  item,
+  open,
+  badge,
+}: {
+  item: NavItem;
+  open: boolean;
+  badge?: number;
+}) {
   const Icon = item.icon;
   const isReady = item.ready ?? false;
 
@@ -322,6 +339,11 @@ function NavRow({ item, open }: { item: NavItem; open: boolean }) {
           <span className="text-sm">{item.label}</span>
           {!isReady && (
             <span className="text-[11px] text-subtle-foreground">em breve</span>
+          )}
+          {isReady && badge !== undefined && badge > 0 && (
+            <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+              {badge}
+            </span>
           )}
         </span>
       </SideLabel>

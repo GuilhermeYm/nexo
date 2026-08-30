@@ -13,6 +13,14 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
+/**
+ * Depois de quanto tempo sem nada novo um painel do dashboard passa a
+ * mostrar o convite de repouso ("faz um tempo desde a última captura…").
+ * 12h: quem volta no dia seguinte ou depois de uma pausa longa vê o convite;
+ * quem está usando durante o dia, não.
+ */
+export const STALE_AFTER_MS = 12 * HOUR;
+
 /** Fuso fixo para o formato absoluto sair igual no servidor e no cliente. */
 const TIME_ZONE = "America/Sao_Paulo";
 

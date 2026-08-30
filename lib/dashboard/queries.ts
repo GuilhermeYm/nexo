@@ -115,40 +115,71 @@ export interface AiJobItem {
   finishedAt: Date | null;
 }
 
+const AI_JOB_COLUMNS = {
+  id: aiJobs.id,
+  kind: aiJobs.kind,
+  status: aiJobs.status,
+  label: aiJobs.label,
+  detail: aiJobs.detail,
+  noteId: aiJobs.noteId,
+  creditsCost: aiJobs.creditsCost,
+  createdAt: aiJobs.createdAt,
+  finishedAt: aiJobs.finishedAt,
+} as const;
+
 /**
  * O feed de Tarefas: o que os agentes fizeram, estão fazendo, ou pararam de
- * fazer por falta de crédito. As pendentes sobem para o topo — são as únicas
- * que pedem ação do usuário; o resto é histórico.
+ * fazer por falta de crédito.
+ *
+ * **As tarefas paradas por falta de crédito são fixas.** Elas pedem uma
+ * decisão do usuário — assinar para retomar — e guardam `credits_cost` para a
+ * cobrança dessa retomada. Não podem cair da lista porque tarefas mais novas
+ * chegaram, nem serem despejadas por qualquer limpeza: é a razão de este feed
+ * morar no Postgres e não só em cache (ver o comentário do enum em
+ * `lib/db/schema.ts`). Por isso saem numa consulta própria, **sem `limit`**, e
+ * vão sempre na frente. O histórico recebe o `limit` e nunca disputa espaço
+ * com elas.
+ *
+ * Nenhuma rotina apaga linhas de `ai_jobs`. Uma limpeza por tempo foi
+ * considerada e recusada: ela destruiria exatamente estas linhas.
  */
 export async function listAiJobs(
   userId: string,
   limit = JOBS_LIMIT
 ): Promise<AiJobItem[]> {
-  return db
-    .select({
-      id: aiJobs.id,
-      kind: aiJobs.kind,
-      status: aiJobs.status,
-      label: aiJobs.label,
-      detail: aiJobs.detail,
-      noteId: aiJobs.noteId,
-      creditsCost: aiJobs.creditsCost,
-      createdAt: aiJobs.createdAt,
-      finishedAt: aiJobs.finishedAt,
-    })
+  const pinnedQuery = db
+    .select(AI_JOB_COLUMNS)
     .from(aiJobs)
-    .where(eq(aiJobs.userId, userId))
+    .where(
+      and(
+        eq(aiJobs.userId, userId),
+        eq(aiJobs.status, "insufficient_credits")
+      )
+    )
+    .orderBy(desc(aiJobs.createdAt));
+
+  const historyQuery = db
+    .select(AI_JOB_COLUMNS)
+    .from(aiJobs)
+    .where(
+      and(
+        eq(aiJobs.userId, userId),
+        ne(aiJobs.status, "insufficient_credits")
+      )
+    )
     .orderBy(
-      // Pendentes e em execução primeiro, depois o histórico por data.
+      // Em execução e na fila no topo do histórico; o resto por data.
       sql`case
-        when ${aiJobs.status} = 'insufficient_credits' then 0
-        when ${aiJobs.status} = 'running' then 1
-        when ${aiJobs.status} = 'queued' then 2
-        else 3
+        when ${aiJobs.status} = 'running' then 0
+        when ${aiJobs.status} = 'queued' then 1
+        else 2
       end`,
       desc(aiJobs.createdAt)
     )
     .limit(limit);
+
+  const [pinned, history] = await Promise.all([pinnedQuery, historyQuery]);
+  return [...pinned, ...history];
 }
 
 /**

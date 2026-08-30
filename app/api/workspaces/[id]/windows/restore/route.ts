@@ -160,7 +160,11 @@ async function insertWindows(
 async function restoreConnections(
   userId: string,
   workspaceId: string,
-  connections: { fromWindowId: string; toWindowId: string }[]
+  connections: {
+    fromWindowId: string;
+    toWindowId: string;
+    label?: string | null;
+  }[]
 ): Promise<void> {
   if (connections.length === 0) return;
 
@@ -188,6 +192,8 @@ async function restoreConnections(
         workspaceId,
         fromWindowId: row.fromWindowId,
         toWindowId: row.toWindowId,
+        // O texto escrito na flecha volta com ela.
+        label: row.label ?? null,
       }))
     )
     .onConflictDoNothing();

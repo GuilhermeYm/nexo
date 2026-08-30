@@ -1,12 +1,24 @@
 import "server-only";
 
-import { and, asc, desc, eq, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import {
   attachments,
+  noteTags,
   notes,
   profiles,
+  tags,
   workspaceConnections,
   workspaceWindows,
   workspaces,
@@ -67,6 +79,14 @@ export interface WindowContent {
   tone?: string;
 }
 
+/** Uma tag da nota, para a janela da lousa exibir com a cor da paleta. */
+export interface BoardNoteTag {
+  id: string;
+  name: string;
+  /** Posição na paleta (`tag-1`..`tag-6` do `globals.css`), ou `null`. */
+  color: string | null;
+}
+
 /**
  * O arquivo por trás de uma janela de anexo.
  *
@@ -114,6 +134,8 @@ export interface BoardWindow {
      * documento em si.
      */
     attachmentId: string | null;
+    /** As tags da nota, com a posição na paleta para colorir o chip. */
+    tags: BoardNoteTag[];
   } | null;
   attachmentId: string | null;
   /** Preenchido quando `kind === "attachment"`. */
@@ -175,6 +197,13 @@ export async function listBoardWindows(
     )
     .orderBy(asc(workspaceWindows.zIndex), asc(workspaceWindows.createdAt));
 
+  // As tags numa segunda consulta, não num join: uma nota com cinco tags
+  // multiplicaria a linha da janela por cinco. Mesmo padrão do `attachTags`
+  // do dashboard.
+  const tagsByNote = await loadNoteTags(
+    rows.map((row) => row.noteId).filter((id): id is string => id !== null)
+  );
+
   return rows.map((row) => ({
     id: row.id,
     kind: row.kind,
@@ -200,6 +229,7 @@ export async function listBoardWindows(
           source: row.noteSource,
           updatedAt: row.noteUpdatedAt,
           attachmentId: row.noteAttachmentId,
+          tags: tagsByNote.get(row.noteId) ?? [],
         }
       : null,
     attachmentId: row.attachmentId,
@@ -218,6 +248,41 @@ export async function listBoardWindows(
 }
 
 /**
+ * As tags de um conjunto de notas, agrupadas por nota. Usada pela janela de
+ * nota da lousa e pela lista de "Trazer da conta".
+ *
+ * `inArray` e não um `= any()` montado à mão: o Drizzle serializa a lista
+ * como `uuid[]` em vez de deixar o driver adivinhar. Ordenadas por nome para
+ * o chip não trocar de lugar entre um retrato e o seguinte.
+ */
+async function loadNoteTags(
+  noteIds: string[]
+): Promise<Map<string, BoardNoteTag[]>> {
+  const byNote = new Map<string, BoardNoteTag[]>();
+  if (noteIds.length === 0) return byNote;
+
+  const rows = await db
+    .select({
+      noteId: noteTags.noteId,
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+    })
+    .from(noteTags)
+    .innerJoin(tags, eq(noteTags.tagId, tags.id))
+    .where(inArray(noteTags.noteId, noteIds))
+    .orderBy(asc(tags.name));
+
+  for (const row of rows) {
+    const list = byNote.get(row.noteId) ?? [];
+    list.push({ id: row.id, name: row.name, color: row.color });
+    byNote.set(row.noteId, list);
+  }
+
+  return byNote;
+}
+
+/**
  * Uma flecha entre dois elementos da lousa.
  *
  * Só os três ids. Onde a flecha começa e termina na tela é geometria, e
@@ -229,6 +294,8 @@ export interface BoardConnection {
   id: string;
   fromWindowId: string;
   toWindowId: string;
+  /** O que a flecha diz. Nulo quando ninguém escreveu nada nela. */
+  label: string | null;
 }
 
 /**
@@ -247,6 +314,7 @@ export async function listBoardConnections(
       id: workspaceConnections.id,
       fromWindowId: workspaceConnections.fromWindowId,
       toWindowId: workspaceConnections.toWindowId,
+      label: workspaceConnections.label,
     })
     .from(workspaceConnections)
     .where(
@@ -283,6 +351,8 @@ export interface OpenableNote {
   type: string;
   source: string;
   updatedAt: Date;
+  /** As tags da nota — a lista de "Trazer da conta" as mostra coloridas. */
+  tags: BoardNoteTag[];
 }
 
 /**
@@ -344,9 +414,12 @@ export async function listOpenableNotes(
     .orderBy(desc(notes.updatedAt))
     .limit(limit);
 
+  const tagsByNote = await loadNoteTags(rows.map((row) => row.id));
+
   return rows.map(({ content, ...row }) => ({
     ...row,
     excerpt: buildExcerpt(content),
+    tags: tagsByNote.get(row.id) ?? [],
   }));
 }
 

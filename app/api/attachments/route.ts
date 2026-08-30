@@ -15,7 +15,9 @@ import {
 import { classifyDocument } from "@/lib/ai/classify-document";
 import { rateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit";
-import { errorResponse, logServerError } from "@/lib/api";
+import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
+import { formatBytes } from "@/lib/utils";
+import { getUploadQuotaContext } from "@/lib/usage/queries";
 import { matchesSignature, readSignature } from "@/lib/validations/file-signature";
 
 const BUCKET = "files";
@@ -128,6 +130,29 @@ export async function POST(request: Request) {
     }
     if (file.size > MAX_FILE_SIZE) {
       return errorResponse(413, "Arquivo maior que 25MB.");
+    }
+
+    // Tetos do plano, antes de gastar upload e classificação num arquivo que
+    // não vai poder ficar. Os dois são promessa da página de planos: "50
+    // capturas por mês" e "200 MB de arquivos" no Gratuito.
+    //
+    // `planLimitResponse` e não `errorResponse`: bater no teto não é defeito,
+    // e a interface precisa saber disso para oferecer o Pro em vez de mandar
+    // a pessoa tentar de novo.
+    const quota = await getUploadQuotaContext(user.id, file.size);
+
+    if (quota.captures && !quota.captures.ok) {
+      return planLimitResponse(
+        409,
+        `Você já fez as ${quota.captures.limit} capturas deste mês do plano Gratuito. No Pro elas são ilimitadas.`
+      );
+    }
+
+    if (quota.storage && !quota.storage.ok) {
+      return planLimitResponse(
+        413,
+        `Os ${formatBytes(quota.storage.limit)} de arquivos do plano Gratuito estão cheios. O Pro tem 20 GB.`
+      );
     }
 
     // O MIME vem do cliente — confere se o conteúdo bate com o declarado.

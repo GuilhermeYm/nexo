@@ -10,6 +10,7 @@ import {
 
 import type { WindowPatch } from "@/hooks/use-board-windows";
 import type { BoardWindow } from "@/lib/workspace/queries";
+import { COLLAPSED_WINDOW_WIDTH } from "@/lib/workspace/window-sizes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -210,7 +211,10 @@ export function WindowFrame({
       style={{
         left: item.x,
         top: item.y,
-        width: item.width,
+        // Recolhida, a janela vira uma etiqueta com o ícone e o nome. A
+        // largura guardada é a de quando ela reabrir — ver `frameWidthOf`,
+        // que mantém a borracha e as flechas mirando o que se vê.
+        width: minimized ? COLLAPSED_WINDOW_WIDTH : item.width,
         height: minimized ? undefined : item.height,
         zIndex: item.zIndex,
       }}
@@ -266,8 +270,9 @@ export function WindowFrame({
             "flex shrink-0 items-center gap-0.5 transition-opacity duration-150 motion-reduce:transition-none",
             // Some quando a janela está em repouso e ninguém está nela: uma
             // lousa com vinte janelas não precisa de sessenta botões
-            // competindo por atenção.
-            focused
+            // competindo por atenção. Recolhida é a exceção — sem o botão de
+            // expandir à vista, a única saída seria o menu do botão direito.
+            focused || minimized
               ? "opacity-100"
               : "opacity-0 group-hover/window:opacity-100 group-focus-within/window:opacity-100"
           )}

@@ -19,9 +19,10 @@ import { createConnectionSchema } from "@/lib/validations/workspace";
  * exatamente onde mora a flecha apontando para uma janela que já foi
  * fechada.
  *
- * Também não há `PATCH`: uma ligação não tem o que atualizar. Mudar a
- * direção é apagar e ligar de novo, e a política de RLS reflete isso — não
- * existe policy de UPDATE nesta tabela.
+ * O `PATCH` também não mora aqui: origem e destino não se editam — mudar a
+ * direção é apagar e ligar de novo. O que se edita é o **rótulo**, e ele tem
+ * rota própria (`/connections/[connectionId]`), com a policy de UPDATE que
+ * 0012 abriu restrita a essa única coluna.
  */
 export async function POST(
   request: Request,
@@ -187,6 +188,9 @@ export async function DELETE(
       .returning({
         fromWindowId: workspaceConnections.fromWindowId,
         toWindowId: workspaceConnections.toWindowId,
+        // O rótulo volta junto no "Desfazer": ele é texto que a pessoa
+        // escreveu, e restaurar a flecha muda seria desfazer só metade.
+        label: workspaceConnections.label,
       });
 
     return NextResponse.json({

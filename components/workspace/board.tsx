@@ -5,6 +5,7 @@ import {
   ArrowUpToLine,
   Download,
   Eraser,
+  ExternalLink,
   FilePlus2,
   Spline,
   FolderInput,
@@ -21,9 +22,11 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
+import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { AttachmentWindowBody } from "@/components/workspace/attachment-window-body";
 import { NotePicker } from "@/components/workspace/note-picker";
 import {
@@ -37,9 +40,11 @@ import {
   PendingConnection,
   connectionAt,
 } from "@/components/workspace/connection-layer";
+import { ConnectionLabels } from "@/components/workspace/connection-labels";
 import {
   DEFAULT_WINDOW_SIZE,
   frameHeightOf,
+  frameWidthOf,
 } from "@/lib/workspace/window-sizes";
 import {
   ContextMenu,
@@ -116,6 +121,14 @@ interface BoardProps {
   focusWindowId: string | null;
   /** Teto de elementos do plano, só para a mensagem quando ele é atingido. */
   windowCap: number;
+  /**
+   * Assinar resolveria o teto desta pessoa?
+   *
+   * No Gratuito, sim: o teto que ela encontra é o do plano. No Pro o teto é o
+   * absoluto (anti-abuso, igual para todos), e oferecer o Pro a quem já paga
+   * é a interface não saber com quem está falando.
+   */
+  canUpgrade: boolean;
 }
 
 export function Board({
@@ -124,6 +137,7 @@ export function Board({
   initialConnections,
   focusWindowId,
   windowCap,
+  canUpgrade,
 }: BoardProps) {
   const { viewport, restored, toBoard, zoomTo, panBy, fitTo } =
     useBoardViewport(workspace.id);
@@ -133,17 +147,23 @@ export function Board({
     dismissError,
     updateWindow,
     updateNote,
+    addNoteTag,
+    removeNoteTag,
+    updateTag,
     bringToFront,
     createWindow,
     closeWindow,
     connections,
     connect,
+    renameConnection,
     erase,
     lastErased,
     undoErase,
     dismissErased,
     deleteNote,
   } = useBoardWindows(workspace.id, initialWindows, initialConnections);
+
+  const router = useRouter();
 
   // Chegando apontada para uma janela, ela já nasce em destaque — em vez de
   // um efeito mexer nisso depois do primeiro paint.
@@ -181,6 +201,8 @@ export function Board({
   const [armedClear, setArmedClear] = useState(false);
   /** De onde a ligação em curso sai, e onde o ponteiro está agora. */
   const [linkingFrom, setLinkingFrom] = useState<string | null>(null);
+  /** A flecha com o campo de rótulo aberto. */
+  const [labelingId, setLabelingId] = useState<string | null>(null);
   const [pointerAt, setPointerAt] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -456,7 +478,7 @@ export function Board({
 
         const inside =
           at.x >= item.x &&
-          at.x <= item.x + item.width &&
+          at.x <= item.x + frameWidthOf(item) &&
           at.y >= item.y &&
           at.y <= item.y + frameHeightOf(item);
 
@@ -536,6 +558,20 @@ export function Board({
     setTool("none");
   }, []);
 
+  /**
+   * Pega uma ferramenta.
+   *
+   * Fecha o campo de rótulo no mesmo gesto: com a borracha na mão o que se
+   * faz é passar por cima, e um campo de texto aberto no meio disso seria uma
+   * segunda conversa por cima da primeira. Um caminho só para as quatro
+   * portas de entrada das ferramentas (os dois botões da barra e os dois
+   * itens do menu do fundo), para nenhuma delas esquecer disso.
+   */
+  const pickTool = useCallback((next: "eraser" | "link") => {
+    setLabelingId(null);
+    setTool(next);
+  }, []);
+
   const clearBoard = useCallback(() => {
     setArmedClear(false);
     // Só as janelas: as flechas caem junto por cascade, no banco.
@@ -559,22 +595,34 @@ export function Board({
         return;
       }
 
-      if (!linkingFrom) {
+      // A origem só vale enquanto a janela dela existe. Fechada aqui ou
+      // noutro dispositivo, `linkingFrom` continuaria apontando para uma
+      // linha que já não está na lousa: a ponta tracejada some (não há de
+      // onde sair), a barra segue pedindo o destino, e o toque seguinte
+      // gastaria uma ida ao servidor para voltar "Um dos elementos não está
+      // nesta lousa". Conferir aqui é conferir na hora em que a resposta
+      // importa.
+      const origin =
+        linkingFrom && windows.some((item) => item.id === linkingFrom)
+          ? linkingFrom
+          : null;
+
+      if (!origin) {
         setLinkingFrom(hit.id);
         return;
       }
 
-      if (hit.id === linkingFrom) {
+      if (hit.id === origin) {
         setLinkingFrom(null);
         return;
       }
 
-      void connect(linkingFrom, hit.id);
+      void connect(origin, hit.id);
       // Encadeia: o destino vira a origem seguinte, e desenhar uma corrente
       // deixa de custar um clique a mais por elo.
       setLinkingFrom(hit.id);
     },
-    [windowAt, linkingFrom, connect]
+    [windowAt, linkingFrom, windows, connect]
   );
 
   // Esc guarda a ferramenta. Um modo sem saída óbvia é um modo em que a
@@ -631,6 +679,30 @@ export function Board({
       : (visibleWindows.find((item) => item.id === linkingFrom) ?? null);
 
   const usingTool = tool !== "none";
+
+  /**
+   * A flecha que está com o campo aberto, **se ela ainda existir**.
+   *
+   * Derivado em vez de corrigido por efeito: apagar a flecha noutro
+   * dispositivo deixaria `labelingId` apontando para uma linha que não está
+   * mais na lista, e um campo flutuando sozinho no meio da lousa. Aqui a
+   * pergunta é feita na hora de desenhar, que é quando ela tem resposta.
+   */
+  const editingLabelId =
+    labelingId && connections.some((item) => item.id === labelingId)
+      ? labelingId
+      : null;
+
+  // Identidade estável: é o que faz o `memo` de cada flecha valer alguma
+  // coisa. Uma função nova a cada quadro de arraste re-renderizaria todas.
+  const removeConnection = useCallback(
+    (id: string) => void erase({ connections: [id] }),
+    [erase]
+  );
+  const commitConnectionLabel = useCallback(
+    (id: string, label: string) => void renameConnection(id, label),
+    [renameConnection]
+  );
 
   /** Retângulo que contém todas as janelas. */
   const bounds = boundsOf(visibleWindows);
@@ -768,7 +840,14 @@ export function Board({
   const atCap = windows.length >= windowCap;
   // Um lugar só para avisar: dois cartões empilhados no mesmo canto seriam
   // duas conversas ao mesmo tempo.
-  const notice = error ?? renameError;
+  //
+  // O aviso de teto vem por último porque ele é permanente enquanto a lousa
+  // estiver cheia — deixá-lo cobrir um erro de rede esconderia o transitório
+  // atrás do constante.
+  const notice: { message: string; upgrade: boolean } | null =
+    error ?? (renameError ? { message: renameError, upgrade: false } : null);
+  // Só quem tem para onde subir recebe o convite; no Pro o teto é o absoluto.
+  const capIsPlanLimit = atCap && canUpgrade;
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-clip bg-background">
@@ -878,7 +957,7 @@ export function Board({
             }
             disabled={tool !== "link" && windows.length < 2}
             expanded={tool === "link"}
-            onClick={() => (tool === "link" ? stopTool() : setTool("link"))}
+            onClick={() => (tool === "link" ? stopTool() : pickTool("link"))}
           >
             <Spline className="size-4" aria-hidden="true" />
           </ToolButton>
@@ -896,7 +975,7 @@ export function Board({
               connections.length === 0
             }
             expanded={tool === "eraser"}
-            onClick={() => (tool === "eraser" ? stopTool() : setTool("eraser"))}
+            onClick={() => (tool === "eraser" ? stopTool() : pickTool("eraser"))}
           >
             <Eraser className="size-4" aria-hidden="true" />
           </ToolButton>
@@ -983,7 +1062,21 @@ export function Board({
                   windows={visibleWindows}
                   zoom={viewport.zoom}
                   markedId={underEraserLink}
-                  onRemove={(id) => void erase({ connections: [id] })}
+                  onRemove={removeConnection}
+                  onLabel={setLabelingId}
+                  inert={usingTool}
+                />
+
+                {/* Os rótulos depois do traço e antes das janelas: pintam por
+                    cima da flecha e por baixo do conteúdo. */}
+                <ConnectionLabels
+                  connections={visibleConnections}
+                  windows={visibleWindows}
+                  zoom={viewport.zoom}
+                  editingId={editingLabelId}
+                  onEdit={setLabelingId}
+                  onCommit={commitConnectionLabel}
+                  onRemove={removeConnection}
                   inert={usingTool}
                 />
 
@@ -1048,6 +1141,13 @@ export function Board({
                               onChange={(patch) =>
                                 item.note && updateNote(item.note.id, patch)
                               }
+                              onAddTag={(name) =>
+                                item.note && addNoteTag(item.note.id, name)
+                              }
+                              onRemoveTag={(tagId) =>
+                                item.note && removeNoteTag(item.note.id, tagId)
+                              }
+                              onUpdateTag={updateTag}
                             />
                           ) : (
                             <ElementWindowBody
@@ -1070,8 +1170,13 @@ export function Board({
                                 })
                             : undefined
                         }
+                        onOpenEditor={
+                          item.note
+                            ? () => router.push(`/nota/${item.note!.id}`)
+                            : undefined
+                        }
                         onLink={() => {
-                          setTool("link");
+                          pickTool("link");
                           setLinkingFrom(item.id);
                         }}
                         onRaise={() => bringToFront(item.id)}
@@ -1142,7 +1247,7 @@ export function Board({
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
-              onSelect={() => setTool("link")}
+              onSelect={() => pickTool("link")}
               disabled={windows.length < 2}
             >
               <Spline className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
@@ -1151,7 +1256,7 @@ export function Board({
                 hint="Toque num, depois no outro. A flecha aponta para o segundo."
               />
             </ContextMenuItem>
-            <ContextMenuItem onSelect={() => setTool("eraser")}>
+            <ContextMenuItem onSelect={() => pickTool("eraser")}>
               <Eraser className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
               <ContextMenuItemLabel
                 label="Borracha"
@@ -1285,7 +1390,10 @@ export function Board({
             <p className="min-w-0 text-xs leading-snug text-muted-foreground">
               <span className="font-semibold text-foreground">
                 {tool === "link"
-                  ? linkingFrom
+                  ? // `linkOrigin`, não `linkingFrom`: a origem fechada no
+                    // meio do gesto deixaria a barra pedindo o destino de uma
+                    // janela que já não está na lousa.
+                    linkOrigin
                     ? "Agora toque no outro elemento."
                     : "Toque no elemento de onde a flecha sai."
                   : "Passe por cima para tirar da lousa."}
@@ -1373,10 +1481,29 @@ export function Board({
             className="absolute bottom-4 left-1/2 z-30 flex max-w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 items-start gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-[0_12px_40px_-12px] shadow-black/25"
           >
             <p className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
-              {notice ??
-                (lastErased
-                  ? eraseSummary(lastErased)
-                  : `Esta lousa chegou ao limite de ${windowCap} elementos. Feche algo, ou assine o Pro para não pensar em limite.`)}
+              {notice ? (
+                <>
+                  {notice.message}
+                  {notice.upgrade && (
+                    <>
+                      {" "}
+                      <UpgradeLink />
+                    </>
+                  )}
+                </>
+              ) : lastErased ? (
+                eraseSummary(lastErased)
+              ) : capIsPlanLimit ? (
+                <>
+                  Esta lousa chegou aos {windowCap} elementos do plano
+                  Gratuito. Feche algo, ou <UpgradeLink label="conheça o Pro" />
+                  , onde a lousa não tem esse teto.
+                </>
+              ) : (
+                // Teto absoluto: não é oferta, é proteção — e não há o que
+                // vender para quem já está no plano mais alto.
+                `Esta lousa chegou ao limite de ${windowCap} elementos. Feche algo para abrir espaço.`
+              )}
             </p>
 
             {/* O desfazer só existe enquanto o cartão está de pé, e é a
@@ -1455,6 +1582,7 @@ function WindowMenu({
   onClose,
   onDeleteNote,
   onOpenAttachment,
+  onOpenEditor,
 }: {
   window: BoardWindow;
   /** Entra na ferramenta de ligação já com esta janela como origem. */
@@ -1465,6 +1593,8 @@ function WindowMenu({
   onDeleteNote?: () => void;
   /** Só existe quando a nota desta janela nasceu de um arquivo. */
   onOpenAttachment?: () => void;
+  /** Só existe em janela de nota — abre a nota no editor cheio (/nota/[id]). */
+  onOpenEditor?: () => void;
 }) {
   const minimized = item.state === "minimized";
 
@@ -1496,6 +1626,16 @@ function WindowMenu({
           <ContextMenuItemLabel
             label="Abrir o arquivo"
             hint="O documento em si, ao lado do que a Nexo escreveu sobre ele."
+          />
+        </ContextMenuItem>
+      )}
+
+      {onOpenEditor && (
+        <ContextMenuItem onSelect={onOpenEditor}>
+          <ExternalLink className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
+          <ContextMenuItemLabel
+            label="Abrir no editor"
+            hint="Edição completa: negrito, títulos, listas e exportação em PDF."
           />
         </ContextMenuItem>
       )}
@@ -1746,7 +1886,7 @@ function frameBox(
   return {
     left: item.x * viewport.zoom + viewport.x,
     top: item.y * viewport.zoom + viewport.y,
-    width: item.width * viewport.zoom,
+    width: frameWidthOf(item) * viewport.zoom,
     height: frameHeightOf(item) * viewport.zoom,
   };
 }
