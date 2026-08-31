@@ -14,6 +14,8 @@ interface RichNode {
   type?: string;
   text?: string;
   content?: unknown[];
+  /** Só `taskItem.checked` é lido daqui — ver `countTaskItems`. */
+  attrs?: { checked?: unknown };
 }
 
 /**
@@ -29,6 +31,9 @@ const BLOCK_TYPES = new Set([
   "blockquote",
   "codeBlock",
   "listItem",
+  "taskItem",
+  "detailsSummary",
+  "detailsContent",
   "horizontalRule",
   "tableRow",
 ]);
@@ -100,6 +105,68 @@ export function richTextToPlain(document: unknown): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim()
     .slice(0, MAX_CHARS);
+}
+
+export interface TaskTally {
+  /** Quantos `taskItem` o documento tem, incluindo os aninhados. */
+  total: number;
+  /** Quantos deles estão com `attrs.checked === true`. */
+  done: number;
+}
+
+/**
+ * Conta as caixas de um documento.
+ *
+ * O irmão de `richTextToPlain`: a mesma travessia iterativa, o mesmo teto de
+ * nós, o mesmo contrato — **o servidor deriva, o cliente nunca informa**. É o
+ * que permite a Agenda listar trinta dias com "5 de 7" sem baixar o
+ * `content_rich` de nenhum deles.
+ *
+ * Não tem sentinela de fechamento (`CLOSE_BLOCK`) porque não há texto para
+ * montar: só nós para visitar.
+ *
+ * Fica separada de `richTextToPlain`, e não fundida numa travessia só, por
+ * três razões. A primeira é que esta função é pura e não leva `server-only`,
+ * então **a interface usa a mesma implementação no cliente** para repintar o
+ * contador no instante em que a caixa é marcada — o servidor grava o número
+ * autoritativo, e os dois lados saem do mesmo código. A segunda é que fundir
+ * exigiria interleavar um contador dentro do laço da sentinela, a parte mais
+ * sutil da função de que a busca inteira depende. A terceira é que duas
+ * projeções com consumidores diferentes não deveriam compartilhar tipo de
+ * retorno: no dia em que o tally crescer, ele arrastaria a busca junto.
+ *
+ * Se `MAX_NODES` cortar a travessia, a contagem é a de um prefixo — o mesmo
+ * acordo que `richTextToPlain` já faz com `MAX_CHARS`.
+ */
+export function countTaskItems(document: unknown): TaskTally {
+  if (!isRichNode(document)) return { total: 0, done: 0 };
+
+  const stack: RichNode[] = [document];
+  let visited = 0;
+  let total = 0;
+  let done = 0;
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (++visited > MAX_NODES) break;
+
+    if (current.type === "taskItem") {
+      total += 1;
+      // `=== true`, não coerção: o documento vem do cliente e
+      // `richDocumentSchema` é `looseObject` de propósito. Um `checked: "não"`
+      // forjado é uma tarefa pendente, não uma concluída — e a coerção diria
+      // o contrário, porque toda string não vazia é verdadeira.
+      if (current.attrs?.checked === true) done += 1;
+    }
+
+    const children = Array.isArray(current.content) ? current.content : [];
+    for (let index = children.length - 1; index >= 0; index--) {
+      const child = children[index];
+      if (isRichNode(child)) stack.push(child);
+    }
+  }
+
+  return { total, done };
 }
 
 /**

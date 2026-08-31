@@ -29,12 +29,14 @@ export async function POST(
   ctx: RouteContext<"/api/workspaces/[id]/connections">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `connections:create:${user.id}`,
@@ -120,8 +122,8 @@ export async function POST(
       return errorResponse(409, "Essas duas coisas já estão ligadas.");
     }
 
-    logServerError("POST /api/workspaces/[id]/connections", error);
-    return errorResponse(500, "Erro ao ligar os elementos.");
+    const code = await logServerError("POST /api/workspaces/[id]/connections", error, { userId }, request);
+    return errorResponse(500, "Erro ao ligar os elementos.", code);
   }
 }
 
@@ -143,12 +145,14 @@ export async function DELETE(
   ctx: RouteContext<"/api/workspaces/[id]/connections">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `connections:delete:${user.id}`,
@@ -201,8 +205,8 @@ export async function DELETE(
       connections: await listBoardConnections(user.id, workspaceId),
     });
   } catch (error) {
-    logServerError("DELETE /api/workspaces/[id]/connections", error);
-    return errorResponse(500, "Erro ao remover as ligações.");
+    const code = await logServerError("DELETE /api/workspaces/[id]/connections", error, { userId }, request);
+    return errorResponse(500, "Erro ao remover as ligações.", code);
   }
 }
 

@@ -25,6 +25,23 @@ export const PROSE_EDITOR_CLASS = [
   "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
   "[&_hr]:my-8 [&_hr]:border-border",
   "[&_a]:text-foreground [&_a]:underline [&_a]:decoration-border [&_a]:underline-offset-4",
+  "[&_mark]:rounded-[3px] [&_mark]:bg-highlight [&_mark]:px-0.5 [&_mark]:py-px [&_mark]:text-highlight-foreground [&_mark]:decoration-clone",
+  // Task list: a marca some, cada item vira caixa + texto lado a lado. O
+  // resto (cor do checkbox, texto riscado quando marcado) fica no globals.css,
+  // que alcança os atributos `data-*` que o TipTap põe.
+  "[&_ul[data-type=taskList]]:my-3 [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-1",
+  "[&_ul[data-type=taskList]_li]:my-1 [&_ul[data-type=taskList]_li]:flex [&_ul[data-type=taskList]_li]:items-start [&_ul[data-type=taskList]_li]:gap-2",
+  "[&_ul[data-type=taskList]_li>label]:mt-1 [&_ul[data-type=taskList]_li>label]:shrink-0 [&_ul[data-type=taskList]_li>label]:select-none",
+  // `flex-1` não é enfeite: sem ele o `div` de conteúdo encolhe até a largura
+  // do texto, e num item **vazio** isso é zero. A linha inteira fica clicável
+  // por fora da área editável, e o ProseMirror resolve o clique ora dentro do
+  // item, ora no gap cursor depois do `<ul>` — quem digita ganha um parágrafo
+  // em vez de uma tarefa, de forma intermitente. Com `flex-1` a área de texto
+  // ocupa a linha toda e o clique sempre cai onde parece que cai.
+  "[&_ul[data-type=taskList]_li>div]:min-w-0 [&_ul[data-type=taskList]_li>div]:flex-1 [&_ul[data-type=taskList]_li>div>p]:my-0",
+  // O bloco recolhível (`[data-type=details]`) é estilizado inteiro no
+  // globals.css — a extensão não usa `<details>` nativo e a marcação tem
+  // partes que não cabem bem em arbitrary variant.
   // O placeholder do TipTap é um pseudo-elemento no primeiro parágrafo vazio.
   "[&_p.is-editor-empty:first-child::before]:pointer-events-none [&_p.is-editor-empty:first-child::before]:float-left [&_p.is-editor-empty:first-child::before]:h-0 [&_p.is-editor-empty:first-child::before]:text-subtle-foreground [&_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
 ].join(" ");

@@ -85,10 +85,12 @@ export async function PATCH(
       connections: await listBoardConnections(user.id, workspaceId),
     });
   } catch (error) {
-    logServerError(
+    const code = await logServerError(
       "PATCH /api/workspaces/[id]/connections/[connectionId]",
-      error
+      error,
+      {},
+      request
     );
-    return errorResponse(500, "Erro ao salvar o rótulo.");
+    return errorResponse(500, "Erro ao salvar o rótulo.", code);
   }
 }

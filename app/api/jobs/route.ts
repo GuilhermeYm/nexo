@@ -19,7 +19,7 @@ export async function GET() {
 
     return NextResponse.json({ jobs: await listAiJobs(user.id) });
   } catch (error) {
-    logServerError("GET /api/jobs", error);
-    return errorResponse(500, "Erro ao carregar tarefas.");
+    const code = await logServerError("GET /api/jobs", error);
+    return errorResponse(500, "Erro ao carregar tarefas.", code);
   }
 }

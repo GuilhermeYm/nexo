@@ -19,6 +19,7 @@ import {
 } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
+import { ErrorReport } from "@/components/errors/error-report";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
 import type { RecentNote } from "@/lib/dashboard/queries";
 import { readApiFailure } from "@/lib/plan-limit";
@@ -48,7 +49,13 @@ type UploadState =
   | { phase: "done"; filename: string }
   // `upgrade` separa o teto do plano do defeito de verdade: um pede assinatura,
   // o outro pede tentar de novo, e a linha de rodapé diz coisas diferentes.
-  | { phase: "error"; message: string; upgrade?: boolean };
+  | {
+      phase: "error";
+      message: string;
+      upgrade?: boolean;
+      /** Código do relatório, quando o servidor registrou um defeito. */
+      code?: string | null;
+    };
 
 interface CommandBarProps {
   onOpenNote: (noteId: string) => void;
@@ -177,6 +184,7 @@ export function CommandBar({
                 ? "Limite de envios por hora atingido."
                 : failure.message,
             upgrade: failure.upgrade,
+            code: failure.code,
           });
           return;
         }
@@ -502,6 +510,22 @@ export function CommandBar({
           Powered by Groq
         </span>
       </div>
+
+      {/* Fora do `<p>` acima, e não dentro: o relato tem um campo de texto e
+          botões, e `<div>` dentro de `<p>` é HTML inválido — o navegador
+          fecharia o parágrafo sozinho e o layout iria junto.
+
+          Só aparece quando o servidor devolveu código, ou seja, quando houve
+          defeito de verdade. Teto de plano e arquivo recusado não têm o que
+          reportar: os dois já disseram o que fazer. */}
+      {upload.phase === "error" && upload.code ? (
+        <ErrorReport
+          className="mt-2 px-1"
+          code={upload.code}
+          route="/api/attachments"
+          compact
+        />
+      ) : null}
     </div>
   );
 }

@@ -48,6 +48,27 @@ export interface ClassifyOutput {
   result: DocumentClassification;
   /** false => veio do stub (sem chave ou falha na API). */
   usedAi: boolean;
+  /**
+   * Por que o modelo não atendeu — quando houve um "por quê".
+   *
+   * **Este campo é a correção de um defeito concreto.** Antes, a falha morria
+   * num `console.error` daqui e a linha de `ai_jobs` nascia `failed` com
+   * `error = NULL`: o feed dizia "não consegui classificar" e jogava fora se
+   * foi timeout, cota, modelo bloqueado na organização ou JSON malformado.
+   * Horas depois, quando a pessoa reclamava, o log já havia rotacionado.
+   *
+   * Nulo em dois casos que **não** são falha: quando o modelo respondeu, e
+   * quando não há chave nenhuma configurada — aí o stub é o comportamento
+   * esperado desta instalação, não um defeito para investigar.
+   */
+  failure: ClassifyFailure | null;
+}
+
+export interface ClassifyFailure {
+  /** Mensagem interna. Nunca vai crua ao cliente. */
+  message: string;
+  provider: string;
+  model: string;
 }
 
 // ~8k chars bastam para classificar e mantêm o custo por chamada mínimo.
@@ -109,24 +130,30 @@ export async function classifyDocument(
   const provider = resolveProvider();
 
   if (!provider) {
-    return { result: stubClassification(input), usedAi: false };
+    // Sem chave configurada não houve falha: é a instalação sem IA.
+    return { result: stubClassification(input), usedAi: false, failure: null };
   }
 
   try {
     const result = await classifyWithProvider(input, provider);
-    return { result, usedAi: true };
+    return { result, usedAi: true, failure: null };
   } catch (error) {
     // A falha nunca derruba o upload: o arquivo já está guardado, e uma nota
     // classificada pelo stub é melhor que nenhuma nota.
-    console.error(
-      `[AI] Classificação com ${provider.name} falhou; usando stub.`,
-      {
+    //
+    // Mas ela também não é mais **engolida** aqui. O `console.error` que
+    // ficava neste lugar era a única testemunha do motivo, e ele rotaciona;
+    // quem registra agora é a rota, que tem o usuário em mãos e devolve um
+    // código para a linha do feed carregar.
+    return {
+      result: stubClassification(input),
+      usedAi: false,
+      failure: {
+        message: error instanceof Error ? error.message : "Unknown",
+        provider: provider.name,
         model: provider.model,
-        error: error instanceof Error ? error.message : "Unknown",
-        timestamp: new Date().toISOString(),
-      }
-    );
-    return { result: stubClassification(input), usedAi: false };
+      },
+    };
   }
 }
 

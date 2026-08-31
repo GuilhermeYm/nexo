@@ -14,12 +14,14 @@ const querySchema = z.object({
 
 export async function GET(request: Request) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const parsed = querySchema.safeParse({
       q: new URL(request.url).searchParams.get("q") ?? "",
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
       notes: await searchNotes(user.id, parsed.data.q),
     });
   } catch (error) {
-    logServerError("GET /api/search", error);
-    return errorResponse(500, "Erro ao buscar.");
+    const code = await logServerError("GET /api/search", error, { userId }, request);
+    return errorResponse(500, "Erro ao buscar.", code);
   }
 }

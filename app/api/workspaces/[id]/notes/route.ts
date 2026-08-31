@@ -21,12 +21,14 @@ export async function GET(
   ctx: RouteContext<"/api/workspaces/[id]/notes">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const { id } = await ctx.params;
     const workspace = await getOwnedWorkspace(user.id, id);
@@ -42,7 +44,7 @@ export async function GET(
       notes: await listOpenableNotes(user.id, id, parsed.data.q),
     });
   } catch (error) {
-    logServerError("GET /api/workspaces/[id]/notes", error);
-    return errorResponse(500, "Erro ao carregar as notas.");
+    const code = await logServerError("GET /api/workspaces/[id]/notes", error, { userId }, request);
+    return errorResponse(500, "Erro ao carregar as notas.", code);
   }
 }

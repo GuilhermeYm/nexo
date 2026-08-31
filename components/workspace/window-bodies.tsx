@@ -1,9 +1,11 @@
 "use client";
 
 import { Plus, Sparkles, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 
 import { NOTE_TYPE_LABEL } from "@/components/dashboard/note-type-icon";
+import { useBoardRichEditor } from "@/hooks/use-board-rich-editor";
 import {
   TAG_DOT_CLASS,
   TAG_PALETTE,
@@ -19,10 +21,13 @@ import { cn } from "@/lib/utils";
  *
  * 1. Nada aqui gerencia o próprio salvamento — o `useBoardWindows` recebe
  *    cada tecla e decide quando escrever.
- * 2. O campo é sempre um controle nativo (`input`, `textarea`), nunca um
- *    `div` com `contentEditable`. Um `textarea` traz de graça o que um
- *    editor caseiro leva meses para reconstruir: seleção, desfazer, corretor
- *    ortográfico, teclado de celular e leitor de tela.
+ * 2. Os campos são controles nativos (`input`, `textarea`), nunca um `div`
+ *    com `contentEditable` caseiro. A exceção é o corpo da nota **quando a
+ *    preferência "Editor rico na lousa" está ligada** (Configurações →
+ *    Preferências): aí ele vira o `NoteWindowEditor`, cujo `contentEditable`
+ *    é o do TipTap/ProseMirror — seleção, desfazer, corretor, teclado de
+ *    celular e leitor de tela vêm prontos —, carregado por `next/dynamic`.
+ *    Desligada (o padrão), o corpo é um `textarea` como os outros.
  * 3. O foco é desenhado **por dentro** do campo, com `FIELD_FOCUS`. O anel
  *    padrão da aplicação é um `outline` com deslocamento de 2px: num campo
  *    que ocupa a largura inteira da janela, ele era desenhado para fora do
@@ -35,6 +40,26 @@ import { cn } from "@/lib/utils";
 /** Foco contido no próprio campo — ver a regra 3 acima. */
 const FIELD_FOCUS =
   "rounded-lg focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-subtle-foreground";
+
+/**
+ * O corpo da nota é o TipTap, carregado só quando uma janela de nota aparece
+ * na lousa. Enquanto o chunk desce, o texto puro fica visível — não uma faixa
+ * de "carregando".
+ */
+const NoteWindowEditor = dynamic(
+  () =>
+    import("@/components/workspace/note-window-editor").then(
+      (m) => m.NoteWindowEditor
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="min-h-0 flex-1 px-3.5 pb-2.5 text-sm text-subtle-foreground">
+        Carregando o editor…
+      </div>
+    ),
+  }
+);
 
 // As seis matizes de tag do tema, por posição.
 // A borda puxa a matiz do próprio texto da tag. No tema claro as superfícies
@@ -66,7 +91,11 @@ interface NoteBodyProps {
   window: BoardWindow;
   /** Foi criada agora: o título entra em edição sozinho. */
   autoFocus: boolean;
-  onChange: (patch: { title?: string; content?: string }) => void;
+  onChange: (patch: {
+    title?: string;
+    content?: string;
+    contentRich?: unknown;
+  }) => void;
   /** Marca a nota com uma tag nova ou já existente, pelo nome. */
   onAddTag: (name: string) => void;
   /** Tira uma tag da nota. */
@@ -88,6 +117,7 @@ export function NoteWindowBody({
 }: NoteBodyProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const note = item.note;
+  const richEditor = useBoardRichEditor();
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -147,22 +177,42 @@ export function NoteWindowBody({
         onUpdate={onUpdateTag}
       />
 
-      <label className="sr-only" htmlFor={`content-${item.id}`}>
-        Conteúdo da nota
-      </label>
-      <div className="flex min-h-0 flex-1 flex-col px-2.5 pb-2.5">
-        <textarea
-          id={`content-${item.id}`}
-          value={note.content ?? ""}
-          onChange={(event) => onChange({ content: event.target.value })}
-          placeholder="Escreva aqui. A Nexo guarda sozinha."
-          data-focus-ring="container"
-          className={cn(
-            "min-h-0 w-full flex-1 resize-none bg-transparent px-1 py-1 text-sm leading-relaxed text-muted-foreground outline-none placeholder:text-subtle-foreground",
-            FIELD_FOCUS
-          )}
-        />
-      </div>
+      {/* O corpo tem dois modos. Por padrão é um `textarea` leve; ligada a
+          preferência "editor rico na lousa" (Configurações → Preferências),
+          vira o mesmo TipTap da nota e do rascunho — sem barra fixa, só o
+          bubble menu, carregado por `next/dynamic`. Em ambos, o texto puro
+          alimenta a busca; no modo rico o servidor o deriva do documento a
+          cada salvamento (ver `PATCH /api/notes/[id]`). */}
+      {richEditor ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <NoteWindowEditor
+            key={note.id}
+            content={note.content}
+            contentRich={note.contentRich}
+            autoFocus={false}
+            onChange={(patch) => onChange(patch)}
+          />
+        </div>
+      ) : (
+        <>
+          <label className="sr-only" htmlFor={`content-${item.id}`}>
+            Conteúdo da nota
+          </label>
+          <div className="flex min-h-0 flex-1 flex-col px-2.5 pb-2.5">
+            <textarea
+              id={`content-${item.id}`}
+              value={note.content ?? ""}
+              onChange={(event) => onChange({ content: event.target.value })}
+              placeholder="Escreva aqui. A Nexo guarda sozinha."
+              data-focus-ring="container"
+              className={cn(
+                "min-h-0 w-full flex-1 resize-none bg-transparent px-1 py-1 text-sm leading-relaxed text-muted-foreground outline-none placeholder:text-subtle-foreground",
+                FIELD_FOCUS
+              )}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

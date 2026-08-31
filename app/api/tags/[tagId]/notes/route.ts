@@ -40,7 +40,7 @@ export async function GET(
 
     return NextResponse.json({ notes });
   } catch (error) {
-    logServerError("GET /api/tags/[tagId]/notes", error);
-    return errorResponse(500, "Erro ao listar as notas da tag.");
+    const code = await logServerError("GET /api/tags/[tagId]/notes", error);
+    return errorResponse(500, "Erro ao listar as notas da tag.", code);
   }
 }

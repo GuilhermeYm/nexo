@@ -38,12 +38,14 @@ export async function POST(
   ctx: RouteContext<"/api/workspaces/[id]/windows/restore">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `windows:restore:${user.id}`,
@@ -101,8 +103,8 @@ export async function POST(
 
     return NextResponse.json(await readBoard(user.id, workspaceId));
   } catch (error) {
-    logServerError("POST /api/workspaces/[id]/windows/restore", error);
-    return errorResponse(500, "Erro ao restaurar as janelas.");
+    const code = await logServerError("POST /api/workspaces/[id]/windows/restore", error, { userId }, request);
+    return errorResponse(500, "Erro ao restaurar as janelas.", code);
   }
 }
 

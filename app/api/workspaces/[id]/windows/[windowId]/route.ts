@@ -26,12 +26,14 @@ type Ctx = RouteContext<"/api/workspaces/[id]/windows/[windowId]">;
 
 export async function PATCH(request: Request, ctx: Ctx) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     // Teto alto de propósito: arrastar dez janelas em sequência é uso
     // normal. O que ele barra é um laço automatizado.
@@ -100,19 +102,21 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logServerError("PATCH /api/workspaces/[id]/windows/[windowId]", error);
-    return errorResponse(500, "Erro ao atualizar a janela.");
+    const code = await logServerError("PATCH /api/workspaces/[id]/windows/[windowId]", error, { userId }, request);
+    return errorResponse(500, "Erro ao atualizar a janela.", code);
   }
 }
 
 export async function DELETE(request: Request, ctx: Ctx) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const { id: workspaceId, windowId } = await ctx.params;
 
@@ -143,8 +147,8 @@ export async function DELETE(request: Request, ctx: Ctx) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logServerError("DELETE /api/workspaces/[id]/windows/[windowId]", error);
-    return errorResponse(500, "Erro ao fechar a janela.");
+    const code = await logServerError("DELETE /api/workspaces/[id]/windows/[windowId]", error, { userId }, request);
+    return errorResponse(500, "Erro ao fechar a janela.", code);
   }
 }
 

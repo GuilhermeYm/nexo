@@ -22,6 +22,10 @@
   /* Erros de formulário/validação — terracota rebaixado para a paleta papel */
   --nx-error: #a6462f;
 
+  /* Marca-texto — âmbar de papel, quente sem gritar */
+  --nx-highlight-bg: #f5e4a8;
+  --nx-highlight-text: #4a3d1a;
+
   /* Tags Light — 6 matizes, todas rebaixadas para conviver com o papel */
   --nx-tag-1-bg: #ede6d9;
   --nx-tag-1-text: #8b7355;
@@ -55,6 +59,8 @@
   --color-accent: var(--nx-accent);
   --color-accent-foreground: var(--nx-accent-text);
   --color-error: var(--nx-error);
+  --color-highlight: var(--nx-highlight-bg);
+  --color-highlight-foreground: var(--nx-highlight-text);
   --color-tag-1: var(--nx-tag-1-bg);
   --color-tag-1-foreground: var(--nx-tag-1-text);
   --color-tag-2: var(--nx-tag-2-bg);
@@ -89,6 +95,10 @@
   --nx-accent-text: #0f0f11;
   /* Erros no escuro — mais luminoso para manter contraste */
   --nx-error: #e0856d;
+
+  /* Marca-texto no escuro — âmbar fosco, texto claro por cima */
+  --nx-highlight-bg: #6b5a2a;
+  --nx-highlight-text: #f4ecd6;
 
   /* Tags Dark — mesmas 6 posições, aqui com brilho */
   --nx-tag-1-bg: #1e2a3a;
@@ -337,6 +347,149 @@ a {
   [data-live-dot] {
     animation: none !important;
   }
+}
+
+/* Editor: realce de sintaxe, lista de tarefas e bloco recolhível.
+
+   Escopado em `.tiptap` — o conteúdo é gerado pelo ProseMirror e não passa
+   pelas classes do Tailwind uma a uma; o `prose-classes.ts` cuida da
+   tipografia por descendência, e aqui ficam as regras que dependem de
+   atributos (`data-type`, `data-checked`) ou de muitos seletores irmãos
+   (`.hljs-*`).
+
+   As cores do realce puxam as matizes das tags (`--nx-tag-*`), que já viram
+   sozinhas nos dois temas — o realce pertence ao "Papel Amarelado" em vez de
+   trazer um tema pronto do highlight.js. */
+.tiptap pre code.hljs {
+  display: block;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.tiptap .hljs-comment,
+.tiptap .hljs-quote {
+  color: var(--nx-text-tertiary);
+  font-style: italic;
+}
+.tiptap .hljs-keyword,
+.tiptap .hljs-selector-tag,
+.tiptap .hljs-literal,
+.tiptap .hljs-section,
+.tiptap .hljs-doctag,
+.tiptap .hljs-name {
+  color: var(--nx-tag-6-text);
+}
+.tiptap .hljs-string,
+.tiptap .hljs-regexp,
+.tiptap .hljs-addition,
+.tiptap .hljs-meta-string {
+  color: var(--nx-tag-3-text);
+}
+.tiptap .hljs-number,
+.tiptap .hljs-attr,
+.tiptap .hljs-attribute,
+.tiptap .hljs-variable,
+.tiptap .hljs-template-variable,
+.tiptap .hljs-selector-attr,
+.tiptap .hljs-selector-pseudo {
+  color: var(--nx-tag-5-text);
+}
+.tiptap .hljs-title,
+.tiptap .hljs-title.function_,
+.tiptap .hljs-title.class_,
+.tiptap .hljs-built_in,
+.tiptap .hljs-type,
+.tiptap .hljs-selector-id,
+.tiptap .hljs-selector-class {
+  color: var(--nx-tag-4-text);
+}
+.tiptap .hljs-symbol,
+.tiptap .hljs-bullet,
+.tiptap .hljs-link,
+.tiptap .hljs-meta,
+.tiptap .hljs-tag {
+  color: var(--nx-tag-1-text);
+}
+.tiptap .hljs-deletion {
+  color: var(--nx-error);
+}
+.tiptap .hljs-emphasis {
+  font-style: italic;
+}
+.tiptap .hljs-strong {
+  font-weight: 700;
+}
+
+/* Lista de tarefas — a caixa segue o accent do tema; item marcado esmaece e
+   risca. O layout (flex, alinhamento) mora no `prose-classes.ts`. */
+.tiptap ul[data-type="taskList"] li > label input[type="checkbox"] {
+  accent-color: var(--nx-accent);
+  width: 0.95rem;
+  height: 0.95rem;
+  cursor: pointer;
+}
+.tiptap ul[data-type="taskList"] li[data-checked="true"] > div {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/* Bloco recolhível.
+
+   A extensão `Details` não usa `<details>` nativo: ela desenha um
+   `<div data-type="details">` com um `<button>` de gatilho (sem conteúdo
+   próprio) e esconde o corpo pelo atributo `hidden`. O triângulo e a moldura
+   são daqui. */
+.tiptap [data-type="details"] {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  border: 1px solid var(--nx-border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.tiptap [data-type="details"] > button {
+  margin-top: 0.3rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  cursor: pointer;
+  color: var(--nx-text-tertiary);
+}
+.tiptap [data-type="details"] > button::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform 0.15s ease;
+}
+.tiptap [data-type="details"].is-open > button::before {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tiptap [data-type="details"] > button::before {
+    transition: none;
+  }
+}
+.tiptap [data-type="details"] > div {
+  min-width: 0;
+  flex: 1;
+}
+.tiptap [data-type="details"] summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--nx-text-primary);
+}
+.tiptap [data-type="details"] summary::-webkit-details-marker {
+  display: none;
+}
+.tiptap [data-type="details"] div[data-type="detailsContent"] > :first-child {
+  margin-top: 0.35rem;
 }
 
 /* Exportação em PDF ("Exportar PDF" no editor, que usa window.print()).

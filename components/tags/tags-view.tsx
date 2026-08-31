@@ -2,7 +2,9 @@
 
 import {
   ArrowLeft,
+  GitFork,
   Hash,
+  List,
   LoaderCircle,
   Search,
   Tags as TagsIcon,
@@ -26,8 +28,9 @@ import {
   TAG_DOT_CLASS,
   tagTone,
 } from "@/lib/tags/palette";
-import type { TagWithUsage } from "@/lib/tags/queries";
+import type { TagWithUsage, TagGraph } from "@/lib/tags/queries";
 import { cn } from "@/lib/utils";
+import { TagsGraph } from "./tags-graph";
 
 /**
  * Quantas tags ficam à vista sem busca. A página existe para reencontrar, não
@@ -77,6 +80,8 @@ export function TagsView({
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<TagWithUsage | null>(null);
+  const [view, setView] = useState<"list" | "graph">("list");
+  const [graphData, setGraphData] = useState<TagGraph | "error" | null>(null);
 
   // O resultado carrega a busca que o originou (mesmo padrão da barra de
   // comando): “está buscando” é derivado, sem um segundo estado para zerar.
@@ -88,6 +93,33 @@ export function TagsView({
     tagId: string;
     items: RecentNote[];
   } | null>(null);
+
+  /* --- Dados do grafo (sob demanda) --------------------------------------- */
+
+  useEffect(() => {
+    if (view !== "graph") return;
+    if (graphData) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await fetch("/api/tags/graph");
+        if (!response.ok || cancelled) {
+          if (!cancelled) setGraphData("error");
+          return;
+        }
+        const payload = await response.json();
+        if (!cancelled) setGraphData(payload);
+      } catch {
+        if (!cancelled) setGraphData("error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [view, graphData]);
 
   /* --- Busca de notas (servidor) --------------------------------------- */
 
@@ -217,6 +249,23 @@ export function TagsView({
                 {tags.length}
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => setView(view === "list" ? "graph" : "list")}
+              className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
+            >
+              {view === "list" ? (
+                <>
+                  <GitFork className="size-4" aria-hidden="true" />
+                  Ver como grafo
+                </>
+              ) : (
+                <>
+                  <List className="size-4" aria-hidden="true" />
+                  Voltar para lista
+                </>
+              )}
+            </button>
           </div>
 
           <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
@@ -276,7 +325,26 @@ export function TagsView({
           </div>
 
           <div className="mt-10">
-            {trimmedQuery ? (
+            {view === "graph" ? (
+              <div className="space-y-3">
+                {graphData === "error" ? (
+                  <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">
+                    <span className="text-sm text-muted-foreground">
+                      Não foi possível carregar o grafo.
+                    </span>
+                  </div>
+                ) : graphData ? (
+                  <TagsGraph {...graphData} />
+                ) : (
+                  <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">
+                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
+                      Carregando o grafo…
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : trimmedQuery ? (
               <SearchResults
                 matchedTags={matchedTags}
                 notes={currentSearch}

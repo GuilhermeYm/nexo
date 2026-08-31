@@ -43,8 +43,8 @@ export async function GET(
 
     return NextResponse.json({ workspace });
   } catch (error) {
-    logServerError("GET /api/workspaces/[id]", error);
-    return errorResponse(500, "Erro ao carregar o workspace.");
+    const code = await logServerError("GET /api/workspaces/[id]", error);
+    return errorResponse(500, "Erro ao carregar o workspace.", code);
   }
 }
 
@@ -69,12 +69,14 @@ export async function PATCH(
   ctx: RouteContext<"/api/workspaces/[id]">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `workspaces:rename:${user.id}`,
@@ -123,8 +125,8 @@ export async function PATCH(
 
     return NextResponse.json({ workspace: updated });
   } catch (error) {
-    logServerError("PATCH /api/workspaces/[id]", error);
-    return errorResponse(500, "Erro ao renomear o workspace.");
+    const code = await logServerError("PATCH /api/workspaces/[id]", error, { userId }, request);
+    return errorResponse(500, "Erro ao renomear o workspace.", code);
   }
 }
 
@@ -133,12 +135,14 @@ export async function DELETE(
   ctx: RouteContext<"/api/workspaces/[id]">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const { id } = await ctx.params;
 
@@ -187,7 +191,7 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true, unlinkedNotes: context?.noteCount ?? 0 });
   } catch (error) {
-    logServerError("DELETE /api/workspaces/[id]", error);
-    return errorResponse(500, "Erro ao excluir o workspace.");
+    const code = await logServerError("DELETE /api/workspaces/[id]", error, { userId }, request);
+    return errorResponse(500, "Erro ao excluir o workspace.", code);
   }
 }

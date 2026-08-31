@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { richTextToPlain } from "@/lib/editor/document";
+import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
 import { notes, workspaceWindows } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
@@ -31,12 +31,14 @@ export async function PATCH(
   ctx: RouteContext<"/api/notes/[id]">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `notes:update:${user.id}`,
@@ -80,6 +82,18 @@ export async function PATCH(
         ? richTextToPlain(input.contentRich)
         : input.content;
 
+    // As caixas saem do mesmo documento, no mesmo lugar e pelo mesmo motivo
+    // que o texto puro: o cliente não pode ser a fonte da verdade sobre o que
+    // ele mesmo mandou. É o que faz o "5 de 7" da Agenda bater com as caixas
+    // na tela mesmo diante de uma requisição forjada.
+    //
+    // Derivado para **toda** nota que manda documento, não só as da Agenda:
+    // uma nota comum com caixas dentro é coisa real, custa uma travessia, e
+    // uma condicional por tipo criaria um caminho onde os números envelhecem.
+    // Nota em prosa fica em 0/0.
+    const tally =
+      input.contentRich !== undefined ? countTaskItems(input.contentRich) : null;
+
     const [updated] = await db
       .update(notes)
       // Campo a campo. O corpo validado nunca entra inteiro num `set()`:
@@ -90,6 +104,7 @@ export async function PATCH(
         ...(input.title !== undefined && { title: input.title }),
         ...(content !== undefined && { content }),
         ...(input.contentRich !== undefined && { contentRich: input.contentRich }),
+        ...(tally !== null && { tasksTotal: tally.total, tasksDone: tally.done }),
         updatedAt: new Date(),
       })
       .where(scope)
@@ -111,8 +126,8 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logServerError("PATCH /api/notes/[id]", error);
-    return errorResponse(500, "Erro ao salvar a nota.");
+    const code = await logServerError("PATCH /api/notes/[id]", error, { userId }, request);
+    return errorResponse(500, "Erro ao salvar a nota.", code);
   }
 }
 
@@ -132,12 +147,14 @@ export async function DELETE(
   ctx: RouteContext<"/api/notes/[id]">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const { id } = await ctx.params;
 
@@ -173,7 +190,7 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logServerError("DELETE /api/notes/[id]", error);
-    return errorResponse(500, "Erro ao excluir a nota.");
+    const code = await logServerError("DELETE /api/notes/[id]", error, { userId }, request);
+    return errorResponse(500, "Erro ao excluir a nota.", code);
   }
 }

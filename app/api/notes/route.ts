@@ -4,7 +4,11 @@ import { z } from "zod";
 import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
 import { db } from "@/lib/db";
 import { notes } from "@/lib/db/schema";
-import { richDocumentSchema, richTextToPlain } from "@/lib/editor/document";
+import {
+  countTaskItems,
+  richDocumentSchema,
+  richTextToPlain,
+} from "@/lib/editor/document";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { getNoteCaptureContext } from "@/lib/usage/queries";
@@ -30,12 +34,14 @@ const createNoteSchema = z.object({
 
 export async function POST(request: Request) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `notes:create:${user.id}`,
@@ -91,6 +97,11 @@ export async function POST(request: Request) {
       );
     }
 
+    const tally =
+      input.contentRich !== undefined
+        ? countTaskItems(input.contentRich)
+        : { total: 0, done: 0 };
+
     const [created] = await db
       .insert(notes)
       .values({
@@ -100,6 +111,10 @@ export async function POST(request: Request) {
         title: input.title || firstLine(content) || "Sem título",
         content,
         contentRich: input.contentRich ?? null,
+        // O rascunho pode conter uma lista de tarefas, então os contadores
+        // nascem certos aqui também — mesma derivação do PATCH.
+        tasksTotal: tally.total,
+        tasksDone: tally.done,
         type: "note",
         source: "user",
       })
@@ -107,8 +122,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ note: created }, { status: 201 });
   } catch (error) {
-    logServerError("POST /api/notes", error);
-    return errorResponse(500, "Erro ao guardar a nota.");
+    const code = await logServerError("POST /api/notes", error, { userId }, request);
+    return errorResponse(500, "Erro ao guardar a nota.", code);
   }
 }
 

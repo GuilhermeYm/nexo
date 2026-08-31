@@ -23,12 +23,14 @@ export async function GET(
   ctx: RouteContext<"/api/workspaces/[id]/attachments">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const { id } = await ctx.params;
     const workspace = await getOwnedWorkspace(user.id, id);
@@ -43,7 +45,7 @@ export async function GET(
       attachments: await listOpenableAttachments(user.id, id, parsed.data.q),
     });
   } catch (error) {
-    logServerError("GET /api/workspaces/[id]/attachments", error);
-    return errorResponse(500, "Erro ao carregar os arquivos.");
+    const code = await logServerError("GET /api/workspaces/[id]/attachments", error, { userId }, request);
+    return errorResponse(500, "Erro ao carregar os arquivos.", code);
   }
 }

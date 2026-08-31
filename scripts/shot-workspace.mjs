@@ -82,7 +82,9 @@ async function seedNotes(sql, userId) {
  */
 async function waitForEditorFocus(page) {
   await page.waitForFunction(
-    () => ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? ""),
+    () =>
+      ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? "") ||
+      document.activeElement?.isContentEditable === true,
     null,
     { timeout: 15_000 }
   );

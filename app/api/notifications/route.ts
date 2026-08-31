@@ -29,7 +29,7 @@ export async function GET() {
 
     return NextResponse.json({ notifications, unreadCount });
   } catch (error) {
-    logServerError("GET /api/notifications", error);
-    return errorResponse(500, "Erro ao carregar as notificações.");
+    const code = await logServerError("GET /api/notifications", error);
+    return errorResponse(500, "Erro ao carregar as notificações.", code);
   }
 }

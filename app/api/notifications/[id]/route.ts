@@ -56,7 +56,7 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logServerError("PATCH /api/notifications/[id]", error);
-    return errorResponse(500, "Erro ao atualizar a notificação.");
+    const code = await logServerError("PATCH /api/notifications/[id]", error);
+    return errorResponse(500, "Erro ao atualizar a notificação.", code);
   }
 }

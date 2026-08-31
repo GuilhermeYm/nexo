@@ -174,3 +174,73 @@ function buildExcerpt(content: string | null): string | null {
   const lastSpace = cut.lastIndexOf(" ");
   return `${cut.slice(0, lastSpace > 90 ? lastSpace : 140)}…`;
 }
+
+/* ---------------------------------------------------------------------- */
+
+/**
+ * O que a API `/api/tags/graph` devolve para o modo grafo.
+ *
+ * `links` usa `source`/`target` porque é o formato que `react-force-graph-2d`
+ * espera; o componente mapeia `source` para o id da nota e `target` para o id
+ * da tag.
+ */
+export interface TagGraph {
+  notes: Array<{
+    id: string;
+    title: string;
+    type: string;
+    workspaceId: string | null;
+  }>;
+  tags: Array<{
+    id: string;
+    name: string;
+    color: string | null;
+  }>;
+  links: Array<{ source: string; target: string }>;
+}
+
+/**
+ * As notas, as tags e as relações para desenhar o grafo.
+ *
+ * Três consultas independentes, sem join — uma nota com cinco tags não
+ * multiplica a linha por cinco, e uma tag sem nota não desaparece. O limite
+ * de notas é o teto de nós que o canvas consegue segurar sem engasgar; o
+ * cliente avisa quando o grafo foi truncado.
+ */
+export async function listTagGraph(
+  userId: string,
+  noteLimit = 200
+): Promise<TagGraph> {
+  const [noteRows, tagRows] = await Promise.all([
+    db
+      .select({
+        id: notes.id,
+        title: notes.title,
+        type: notes.type,
+        workspaceId: notes.workspaceId,
+      })
+      .from(notes)
+      .where(and(eq(notes.userId, userId), ne(notes.status, "deleted")))
+      .orderBy(desc(notes.updatedAt))
+      .limit(noteLimit),
+    db
+      .select({ id: tags.id, name: tags.name, color: tags.color })
+      .from(tags)
+      .where(eq(tags.userId, userId)),
+  ]);
+
+  const noteIds = noteRows.map((row) => row.id);
+  const linkRows =
+    noteIds.length === 0
+      ? []
+      : await db
+          .select({ noteId: noteTags.noteId, tagId: noteTags.tagId })
+          .from(noteTags)
+          .where(inArray(noteTags.noteId, noteIds));
+
+  return {
+    notes: noteRows,
+    tags: tagRows,
+    links: linkRows.map((row) => ({ source: row.noteId, target: row.tagId })),
+  };
+}

@@ -14,6 +14,8 @@ import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { HOME_TAB, useOpenTabs } from "@/hooks/use-open-tabs";
 import { usePersistedFlag } from "@/hooks/use-persisted-flag";
 import { firstName, greetingFor } from "@/lib/dashboard/format";
+import { ErrorReport } from "@/components/errors/error-report";
+import { isErrorCode } from "@/lib/errors/code";
 import { readApiFailure } from "@/lib/plan-limit";
 import type {
   AiJobItem,
@@ -184,10 +186,16 @@ export function DashboardShell({
   const [notice, setNotice] = useState<{
     message: string;
     upgrade?: boolean;
+    /**
+     * O código do relatório de erro, quando houve defeito. Como o `upgrade`,
+     * ele muda o aviso de pílula para bloco e **desliga o sumiço sozinho**:
+     * um código que desaparece em 3,6s é um código que ninguém anota.
+     */
+    code?: string | null;
   } | null>(null);
 
   useEffect(() => {
-    if (!notice || notice.upgrade) return;
+    if (!notice || notice.upgrade || notice.code) return;
     const timer = setTimeout(() => setNotice(null), 3600);
     return () => clearTimeout(timer);
   }, [notice]);
@@ -220,6 +228,9 @@ export function DashboardShell({
           setWorkspaces(previous);
           setNotice({
             message: body?.error ?? "Não foi possível excluir o workspace.",
+            // O corpo já foi lido acima, então o código sai daqui em vez de
+            // `readApiFailure` — o `body` de uma resposta só se lê uma vez.
+            code: isErrorCode(body?.code) ? body.code : null,
           });
           return;
         }
@@ -275,11 +286,12 @@ export function DashboardShell({
         });
 
         if (!response.ok) {
-          const body = await response.json().catch(() => null);
+          const failure = await readApiFailure(
+            response,
+            "Não foi possível renomear o workspace."
+          );
           setWorkspaces(previous);
-          setNotice({
-            message: body?.error ?? "Não foi possível renomear o workspace.",
-          });
+          setNotice({ message: failure.message, code: failure.code });
           return;
         }
 
@@ -520,31 +532,43 @@ export function DashboardShell({
         aria-live="polite"
         className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4"
       >
-        <p
+        <div
           className={cn(
-            "flex max-w-[min(38rem,100%)] items-center gap-2 border border-border bg-background px-4 py-2 text-sm text-foreground",
+            "flex max-w-[min(38rem,100%)] items-start gap-2 border border-border bg-background px-4 py-2 text-sm text-foreground",
             "shadow-[0_8px_28px_-10px] shadow-black/35",
             "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-            // O aviso do plano carrega link e um "×", então ele é um bloco com
-            // cantos suaves; o aviso comum continua a pílula de sempre.
-            notice?.upgrade ? "rounded-2xl" : "rounded-full",
+            // O aviso do plano — e o de erro com código — carregam link, campo
+            // e um "×", então viram um bloco com cantos suaves; o aviso comum
+            // continua a pílula de sempre.
+            notice?.upgrade || notice?.code ? "rounded-2xl" : "rounded-full",
             notice
               ? "pointer-events-auto translate-y-0 opacity-100"
               : "pointer-events-none translate-y-2 opacity-0"
           )}
         >
-          <span className="min-w-0">
-            {notice?.message ?? ""}
-            {notice?.upgrade && (
-              <>
-                {" "}
-                <UpgradeLink />
-              </>
-            )}
-          </span>
+          <div className="min-w-0">
+            <p className={cn(notice?.upgrade || notice?.code ? "" : "leading-6")}>
+              {notice?.message ?? ""}
+              {notice?.upgrade && (
+                <>
+                  {" "}
+                  <UpgradeLink />
+                </>
+              )}
+            </p>
 
-          {/* Sem auto-dismiss, o aviso do plano precisa de uma saída própria. */}
-          {notice?.upgrade && (
+            {notice?.code && (
+              <ErrorReport
+                className="mt-1.5"
+                code={notice.code}
+                route="dashboard"
+                compact
+              />
+            )}
+          </div>
+
+          {/* Sem auto-dismiss, os dois avisos que ficam precisam de saída. */}
+          {(notice?.upgrade || notice?.code) && (
             <button
               type="button"
               onClick={() => setNotice(null)}
@@ -554,7 +578,7 @@ export function DashboardShell({
               <span className="sr-only">Fechar o aviso</span>
             </button>
           )}
-        </p>
+        </div>
       </div>
     </div>
   );

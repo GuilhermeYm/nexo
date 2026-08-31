@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { aiJobs, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
@@ -96,7 +96,21 @@ export async function listRecentNotes(
     })
     .from(notes)
     .leftJoin(workspaces, eq(notes.workspaceId, workspaces.id))
-    .where(and(eq(notes.userId, userId), ne(notes.status, "deleted")))
+    .where(
+      and(
+        eq(notes.userId, userId),
+        ne(notes.status, "deleted"),
+        // A lista do dia da Agenda fica de fora. Ela muda o `updated_at` a
+        // cada caixa marcada e sozinha empurraria as outras oito notas para
+        // fora do painel — e ela já tem sala própria, a um clique no trilho.
+        //
+        // O filtro é pela DATA, e não por `type = 'task'`: a IA classifica
+        // upload como tarefa (`lib/ai/classify-document.ts`), e essa nota é
+        // uma captura de verdade que **deve** aparecer aqui. Só a lista de um
+        // dia tem `task_date`.
+        isNull(notes.taskDate)
+      )
+    )
     .orderBy(desc(notes.updatedAt))
     .limit(limit);
 

@@ -1,10 +1,14 @@
 "use client";
 
-import { ArrowLeft, Settings } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Settings } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { ErrorCodeChip, ErrorReport } from "@/components/errors/error-report";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useBoardRichEditor } from "@/hooks/use-board-rich-editor";
+import type { OwnErrorReport } from "@/lib/errors/queries";
+import { writeBoardRichEditor } from "@/lib/preferences";
 import type { UsageSnapshot } from "@/lib/usage/queries";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -12,8 +16,10 @@ import { cn, formatBytes } from "@/lib/utils";
  * A página de configurações da conta.
  *
  * Mesma "janela" do dashboard e da página de Tags — moldura arredondada sobre
- * o fundo secundário — para ler como mais um cômodo da mesma casa. Duas abas:
- * "Conta" com a identidade, e "Uso" com o consumo contra os tetos do plano.
+ * o fundo secundário — para ler como mais um cômodo da mesma casa. Quatro
+ * abas: "Uso" com o consumo contra os tetos do plano, "Conta" com a
+ * identidade, "Erros" com o que quebrou nesta conta e "Preferências" com as
+ * escolhas de interface que moram no navegador.
  */
 
 interface SettingsViewProps {
@@ -22,15 +28,18 @@ interface SettingsViewProps {
   /** ISO de `profiles.created_at`, ou `null` se o perfil ainda não existe. */
   memberSince: string | null;
   usage: UsageSnapshot;
+  /** Os relatórios de erro desta conta — só as colunas seguras. */
+  errorReports: OwnErrorReport[];
 }
 
-type TabId = "uso" | "conta";
+type TabId = "uso" | "conta" | "erros" | "preferencias";
 
 export function SettingsView({
   userName,
   userEmail,
   memberSince,
   usage,
+  errorReports,
 }: SettingsViewProps) {
   // Abre em "Uso": é o que esta tela ganhou de novo, e "Conta" ainda é só
   // leitura.
@@ -61,7 +70,8 @@ export function SettingsView({
           </div>
 
           <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-            A sua conta e quanto do plano você já usou neste mês.
+            A sua conta, quanto do plano você já usou neste mês, o que falhou
+            por aqui e as preferências deste navegador.
           </p>
 
           <Tabs
@@ -72,6 +82,8 @@ export function SettingsView({
             <TabsList aria-label="Seções das configurações">
               <TabsTrigger value="uso">Uso</TabsTrigger>
               <TabsTrigger value="conta">Conta</TabsTrigger>
+              <TabsTrigger value="erros">Erros</TabsTrigger>
+              <TabsTrigger value="preferencias">Preferências</TabsTrigger>
             </TabsList>
 
             <TabsContent value="uso" className="mt-8">
@@ -85,6 +97,14 @@ export function SettingsView({
                 memberSince={memberSince}
                 plan={usage.plan}
               />
+            </TabsContent>
+
+            <TabsContent value="erros" className="mt-8">
+              <ErrorsPanel reports={errorReports} />
+            </TabsContent>
+
+            <TabsContent value="preferencias" className="mt-8">
+              <PreferencesPanel />
             </TabsContent>
           </Tabs>
         </div>
@@ -335,18 +355,324 @@ function AccountPanel({
   ];
 
   return (
-    <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
-      {rows.map((row) => (
-        <div
-          key={row.label}
-          className="flex items-center justify-between gap-4 px-4 py-3.5"
+    <div className="space-y-8">
+      <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex items-center justify-between gap-4 px-4 py-3.5"
+          >
+            <dt className="text-sm text-muted-foreground">{row.label}</dt>
+            <dd className="min-w-0 truncate text-sm text-foreground">
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <DangerZone />
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+
+const RESET_PHRASE = "apagar tudo";
+
+/**
+ * Recomeçar do zero.
+ *
+ * Apaga tudo o que a pessoa construiu — workspaces, notas, arquivos, a lousa,
+ * as Tarefas e a Entrada — e mantém o login e o plano. É irreversível, então
+ * o gatilho não é um clique: a pessoa digita a frase, e só então o botão
+ * acende. A rota (`POST /api/account/reset`) confere a frase de novo.
+ */
+function DangerZone() {
+  const [phrase, setPhrase] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const armed = phrase.trim().toLowerCase() === RESET_PHRASE;
+
+  async function handleReset() {
+    if (!armed || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/account/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: phrase.trim() }),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        setError(data?.error ?? "Não foi possível apagar os dados.");
+        setPending(false);
+        return;
+      }
+      // Ambiente limpo: o dashboard recria um workspace padrão ao carregar.
+      // `replace` para o botão "voltar" não trazer esta tela de volta.
+      window.location.replace("/dashboard");
+    } catch {
+      setError("Sem conexão. Tente de novo.");
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-error/40 bg-error/5 p-5">
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden="true"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-error/10 text-error"
         >
-          <dt className="text-sm text-muted-foreground">{row.label}</dt>
-          <dd className="min-w-0 truncate text-sm text-foreground">
-            {row.value}
-          </dd>
+          <AlertTriangle className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium text-foreground">
+            Recomeçar do zero
+          </h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+            Apaga <strong className="font-medium text-foreground">tudo</strong> o
+            que você construiu: workspaces, notas, arquivos enviados, o arranjo
+            das lousas, o feed de Tarefas e a Entrada. O seu login, o e-mail e o
+            plano continuam como estão.
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-error">
+            Não dá para desfazer. Os arquivos saem do armazenamento e as notas
+            não vão para lugar nenhum — somem.
+          </p>
         </div>
-      ))}
-    </dl>
+      </div>
+
+      <div className="mt-4 border-t border-error/25 pt-4">
+        <label
+          htmlFor="reset-confirm"
+          className="text-xs text-muted-foreground"
+        >
+          Para confirmar, digite{" "}
+          <span className="font-semibold text-foreground">{RESET_PHRASE}</span>{" "}
+          abaixo.
+        </label>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <input
+            id="reset-confirm"
+            type="text"
+            value={phrase}
+            onChange={(event) => setPhrase(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={RESET_PHRASE}
+            disabled={pending}
+            className="h-9 w-44 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-subtle-foreground focus-visible:border-error/60"
+          />
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={!armed || pending}
+            className={cn(
+              "inline-flex h-9 items-center rounded-full px-4 text-sm font-semibold transition-colors duration-150 pointer-coarse:h-11",
+              armed && !pending
+                ? "bg-error text-white hover:bg-error/90"
+                : "cursor-not-allowed bg-tertiary text-subtle-foreground"
+            )}
+          >
+            {pending ? "Apagando…" : "Apagar tudo e recomeçar"}
+          </button>
+        </div>
+        {error && (
+          <p className="mt-2.5 text-xs font-medium text-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Preferências de interface — escolhas de vista que moram no `localStorage`
+ * deste navegador (como o tema), não na conta. Trocá-las num aparelho não
+ * mexe nos outros.
+ */
+function PreferencesPanel() {
+  // A fonte é o `localStorage`; o hook mantém esta tela em sincronia com
+  // outras abas e com a própria lousa.
+  const boardRich = useBoardRichEditor();
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-2xl border border-border bg-secondary/50 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium text-foreground">
+              Editor rico na lousa
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              Ao editar uma nota dentro de uma lousa, use o mesmo editor da
+              nota inteira — títulos, listas, bloco de código, checklist — no
+              lugar do campo de texto simples.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={boardRich}
+            aria-label="Editor rico na lousa"
+            onClick={() => writeBoardRichEditor(!boardRich)}
+            className={cn(
+              "relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-150 motion-reduce:transition-none",
+              boardRich ? "bg-accent" : "bg-tertiary"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block size-5 rounded-full bg-background shadow-sm transition-transform duration-150 motion-reduce:transition-none",
+                boardRich ? "translate-x-[22px]" : "translate-x-0.5"
+              )}
+            />
+          </button>
+        </div>
+
+        <p className="mt-3 border-t border-border pt-3 text-xs leading-relaxed text-subtle-foreground">
+          Pode pesar em lousas com muitas janelas ou em aparelhos mais fracos:
+          o editor carrega o ProseMirror. Fora da lousa, a edição de nota já é
+          sempre a completa.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+
+const ERROR_KIND_LABEL: Record<OwnErrorReport["kind"], string> = {
+  api: "No servidor",
+  client: "No navegador",
+  ai_job: "Na classificação por IA",
+  unhandled: "Inesperado",
+};
+
+const errorDateFormat = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/**
+ * "Meus erros" — o que quebrou nesta conta, e em que pé está.
+ *
+ * **Ela existe para fechar o ciclo.** Sem esta aba, apertar "Reportar" num
+ * aviso que some em três segundos é escrever para um endereço que a pessoa
+ * não sabe se existe. Aqui ela vê o relato dela registrado, com o código do
+ * lado, e vê quando alguém marcou como resolvido — que é a única prova de que
+ * a mensagem chegou a algum lugar.
+ *
+ * **O que ela não mostra: o erro.** Nem mensagem, nem stack, nem contexto —
+ * nada disso sai do servidor, por duas travas independentes (o `select` de
+ * `lib/errors/queries.ts` e o `GRANT` por coluna de 0015). Mostrar stack
+ * trace ao usuário é o item 8 da tabela de problemas comuns do `AGENTS.md`, e
+ * não vira boa ideia por o usuário ser o dono da linha.
+ *
+ * O que sobra é o que serve para ele: o código para citar, quando foi,
+ * quantas vezes, e o estado do chamado.
+ */
+function ErrorsPanel({ reports }: { reports: OwnErrorReport[] }) {
+  if (reports.length === 0) {
+    return (
+      <section className="rounded-2xl border border-border bg-secondary/50 p-8 text-center">
+        <h2 className="text-sm font-medium text-foreground">
+          Nenhum erro registrado
+        </h2>
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+          É o estado que a gente quer. Se alguma coisa falhar, ela aparece aqui
+          com um código — e daí você pode nos contar o que estava fazendo.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        O que falhou por aqui. Cada linha tem um código: cite ele no suporte e
+        a gente encontra exatamente o que o servidor viu naquele momento.
+      </p>
+
+      <ul className="space-y-2">
+        {reports.map((report) => (
+          <li
+            key={report.code}
+            className="rounded-2xl border border-border bg-secondary/50 p-4"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <h3 className="text-sm font-medium text-foreground">
+                {ERROR_KIND_LABEL[report.kind]}
+              </h3>
+              <ErrorStatus report={report} />
+            </div>
+
+            <p className="mt-1 text-xs text-subtle-foreground">
+              {errorDateFormat.format(new Date(report.lastSeenAt))}
+              {report.occurrences > 1
+                ? ` · ${report.occurrences} vezes no mesmo dia`
+                : ""}
+            </p>
+
+            {report.userReport && (
+              <p className="mt-2.5 border-l-2 border-border pl-3 text-sm leading-relaxed text-muted-foreground">
+                {report.userReport}
+              </p>
+            )}
+
+            {/* Já reportado não ganha o botão de novo: um segundo relato
+                sobrescreveria o primeiro, e ver "Reportar" ali sugeriria que
+                o primeiro não chegou. O código continua copiável — é ele que
+                a pessoa precisa ter à mão. */}
+            <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span>Código:</span>
+              <ErrorCodeChip code={report.code} />
+            </p>
+
+            {!report.userReportedAt && (
+              <ErrorReport
+                className="mt-2"
+                code={report.code}
+                route={report.route}
+                showCode={false}
+                compact
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Reportado, resolvido, ou nem uma coisa nem outra. */
+function ErrorStatus({ report }: { report: OwnErrorReport }) {
+  if (report.resolvedAt) {
+    return (
+      <span className="rounded-full bg-tag-3 px-2 py-0.5 text-[11px] text-tag-3-foreground">
+        Resolvido
+      </span>
+    );
+  }
+  if (report.userReportedAt) {
+    return (
+      <span className="rounded-full bg-tag-4 px-2 py-0.5 text-[11px] text-tag-4-foreground">
+        Enviado — estamos vendo
+      </span>
+    );
+  }
+  return (
+    <span className="text-[11px] text-subtle-foreground">Não reportado</span>
   );
 }

@@ -9,6 +9,12 @@ import { errorResponse, getClientIp, logServerError } from "@/lib/api";
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 export async function POST(request: Request) {
+  // Só existe depois do sign-in bem-sucedido — a maioria das quebras aqui
+  // acontece antes disso (validação, rate limit, credenciais erradas), então
+  // fica nulo na maior parte dos relatórios, e isso está certo: um erro em
+  // "credenciais inválidas" não tem dono.
+  let userId: string | null = null;
+
   try {
     const ip = getClientIp(request);
 
@@ -57,6 +63,8 @@ export async function POST(request: Request) {
       return errorResponse(401, "Credenciais inválidas.");
     }
 
+    userId = data.user.id;
+
     // Login bem-sucedido não consome o bucket: devolve os tokens gastos.
     await resetRateLimit({
       key: `login:${ip}:${email}`,
@@ -73,7 +81,7 @@ export async function POST(request: Request) {
       user: { id: data.user.id, email: data.user.email },
     });
   } catch (error) {
-    logServerError("/api/auth/login", error);
-    return errorResponse(500, "Erro interno. Tente novamente.");
+    const code = await logServerError("/api/auth/login", error, { userId }, request);
+    return errorResponse(500, "Erro interno. Tente novamente.", code);
   }
 }

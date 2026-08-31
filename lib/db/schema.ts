@@ -6,6 +6,7 @@ import {
   boolean,
   bigint,
   integer,
+  date,
   jsonb,
   primaryKey,
   pgEnum,
@@ -140,6 +141,25 @@ export const notes = pgTable(
     source: noteSourceEnum("source").default("user").notNull(),
     status: noteStatusEnum("status").default("active").notNull(),
     metadata: jsonb("metadata"),
+    /**
+     * O dia desta lista de tarefas, no fuso de **quem escreveu**. Ver
+     * drizzle/0016 e docs/AGENDA.md.
+     *
+     * Nulo em toda nota que não é da Agenda — inclusive nas `type = 'task'`
+     * que a IA cria ao classificar um upload. Por isso o discriminador da
+     * Agenda é esta coluna, e nunca `type` sozinho.
+     */
+    taskDate: date("task_date"),
+    /**
+     * Quantas caixas o documento tem, e quantas estão marcadas.
+     *
+     * Derivadas de `contentRich` pelo servidor a cada escrita, no mesmo lugar
+     * e pelo mesmo motivo que `content` já é derivado: o cliente não pode ser
+     * a fonte da verdade sobre o que ele mesmo mandou. Existem para a Agenda
+     * listar trinta dias com "5 de 7" sem baixar o documento de nenhum.
+     */
+    tasksTotal: integer("tasks_total").default(0).notNull(),
+    tasksDone: integer("tasks_done").default(0).notNull(),
     // Busca full-text em português (coluna gerada no banco — ver drizzle/0003).
     searchVector: tsvector("search_vector").generatedAlwaysAs(
       sql`to_tsvector('portuguese', coalesce(title, '') || ' ' || coalesce(content, ''))`
@@ -154,6 +174,24 @@ export const notes = pgTable(
     statusIdx: index("notes_status_idx").on(table.status),
     // Mesmo papel do índice equivalente em workspaces: alvo da FK composta.
     idUserKey: unique("notes_id_user_id_key").on(table.id, table.userId),
+    /**
+     * Uma lista da Agenda por dia, por pessoa — a invariante mora aqui, no
+     * banco, e não numa checagem da aplicação. Ver drizzle/0016.
+     *
+     * O predicado tem três partes e nenhuma é decorativa: `task_date` não
+     * nulo porque a IA cria `type = 'task'` sem data ao classificar upload
+     * (essas não podem colidir entre si), e `status <> 'deleted'` porque
+     * apagar a lista de um dia precisa liberar o dia.
+     *
+     * Quem usa `onConflictDoNothing` contra este índice tem de repetir o
+     * predicado inteiro no `where`, senão o Postgres levanta 42P10 em toda
+     * requisição — não só nas concorrentes.
+     */
+    taskDateKey: uniqueIndex("notes_user_task_date_key")
+      .on(table.userId, table.taskDate)
+      .where(
+        sql`${table.type} = 'task' and ${table.taskDate} is not null and ${table.status} <> 'deleted'`
+      ),
   })
 );
 
@@ -337,8 +375,26 @@ export const aiJobs = pgTable(
     detail: text("detail"),
     /** O que a tarefa produziu (tags criadas, tipo escolhido, resumo). */
     result: jsonb("result"),
-    /** Mensagem de erro interna — nunca devolvida crua ao cliente. */
+    /**
+     * Por que a tarefa falhou, em texto.
+     *
+     * **Atenção ao alcance.** Desde 0005 `ai_jobs` é SELECT-only para o dono,
+     * então esta coluna é legível pelo cliente via PostgREST — ao contrário
+     * de `error_reports.message`, que tem GRANT por coluna. Quem escreve aqui
+     * passa o texto por `redactAndTrim` (`lib/errors/redact.ts`) antes: corpo
+     * de erro de provedor às vezes ecoa a chave que recebeu.
+     */
     error: text("error"),
+    /**
+     * O código de `error_reports` que explica a falha, quando houve uma.
+     *
+     * Texto solto e não chave estrangeira, de propósito: a retenção de
+     * `error_reports` apaga relatórios antigos, e um `ON DELETE SET NULL`
+     * limparia justamente o código que esta linha do feed já mostrou para a
+     * pessoa. O job guarda o que ele exibiu; se o relatório expirou, o
+     * suporte responde que expirou — e não que nunca existiu.
+     */
+    errorCode: text("error_code"),
     /** Custo em créditos, para a retomada saber o que cobrar. */
     creditsCost: integer("credits_cost").default(0).notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -694,5 +750,123 @@ export const notifications = pgTable(
       table.createdAt
     ),
     unreadIdx: index("notifications_unread_idx").on(table.userId, table.read),
+  })
+);
+
+/* -------------------------------------------------------------------------
+ * Relatórios de erro
+ * ---------------------------------------------------------------------- */
+
+/**
+ * De onde o erro veio.
+ *
+ * - `api`: exceção numa rota do servidor (o caminho de `logServerError`).
+ * - `ai_job`: o provedor de IA recusou, expirou ou devolveu lixo.
+ * - `client`: quebrou no navegador e o error boundary reportou.
+ * - `unhandled`: promessa rejeitada sem dono, erro de janela.
+ *
+ * Enum e não texto livre pelo mesmo motivo de `notification_type`: são quatro
+ * origens conhecidas, e uma quinta escrita com erro de digitação sumiria de
+ * toda consulta de triagem sem avisar ninguém.
+ */
+export const errorReportKindEnum = pgEnum("error_report_kind", [
+  "api",
+  "client",
+  "ai_job",
+  "unhandled",
+]);
+
+/**
+ * Um erro que aconteceu, com um código que a pessoa consegue ditar.
+ *
+ * **Por que uma tabela e não o log do servidor.** O log responde "o que
+ * aconteceu no servidor às 18h16" para quem tem acesso ao servidor, e some na
+ * rotação. Esta tabela responde "o que aconteceu com **este** usuário, e o
+ * que ele estava tentando fazer" — que é a pergunta que o suporte tem, e é a
+ * pergunta que o log não consegue responder porque a reclamação chega horas
+ * depois, sem hora e sem endpoint.
+ *
+ * **Por que não estender `ai_jobs` ou `audit_logs`.** `audit_logs` é a trilha
+ * de quem-mudou-o-quê; misturar erro ali dilui a única tabela que precisa
+ * continuar legível numa investigação, e ela não pode ter retenção. `ai_jobs`
+ * é o feed do usuário — metade dos erros não vem de tarefa de IA nenhuma.
+ *
+ * **Quem escreve.** Só o servidor, pela `DATABASE_URL` — mesma porta de
+ * `writeAuditLog` e `notifySystem`. A migration 0015 revoga INSERT/UPDATE/
+ * DELETE de `authenticated` e de `anon`, e o `GRANT SELECT` é **por coluna**:
+ * `message`, `stack`, `context`, `fingerprint`, `ip_address` e `user_agent`
+ * ficam fora do alcance do PostgREST. O dono lê o próprio relatório; ele não
+ * lê o que o relatório diz por dentro.
+ */
+export const errorReports = pgTable(
+  "error_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    /** `NX-7F3A-2K9` — ver `lib/errors/code.ts`. Único. */
+    code: text("code").notNull(),
+    /** Do token, nunca do corpo. Nulo em fluxo não autenticado. */
+    userId: uuid("user_id"),
+    /** `/api/attachments`, `dashboard/page`, `board:connect`… */
+    route: text("route").notNull(),
+    kind: errorReportKindEnum("kind").notNull(),
+    /** Mensagem interna, já censurada (`lib/errors/redact.ts`). Nunca sai. */
+    message: text("message").notNull(),
+    /** Idem — interna, com teto de tamanho. */
+    stack: text("stack"),
+    /** `{ model, status }` e afins. Sem token, sem caminho, sem PII. */
+    context: jsonb("context"),
+    /**
+     * A chave de agrupamento: hash de (kind, rota, mensagem normalizada,
+     * dono). Interna — o cliente não a lê, e ela não significa nada para ele.
+     */
+    fingerprint: text("fingerprint").notNull(),
+    /**
+     * O dia (UTC) em que este agrupamento começou.
+     *
+     * O dedupe é `(fingerprint, dedupe_day)`, e não `fingerprint` sozinho: um
+     * código que agrupa para sempre acaba dizendo "isto aconteceu 4.000 vezes"
+     * sobre uma janela de três meses, e a única pergunta que o suporte tem —
+     * "ainda está acontecendo?" — deixa de ter resposta. A janela é o dia do
+     * relógio do banco, o mesmo corte de `countMonthlyCaptures`.
+     */
+    dedupeDay: date("dedupe_day")
+      // O default é do banco, e não do runtime, pelo mesmo motivo de
+      // `date_trunc('month', now())` em `countMonthlyCaptures`: o corte
+      // precisa ser o mesmo para todo mundo, sem depender do fuso de quem
+      // está executando.
+      .default(sql`(now() AT TIME ZONE 'utc')::date`)
+      .notNull(),
+    /** O que a **pessoa** escreveu ao reportar. Nulo até ela reportar. */
+    userReport: text("user_report"),
+    userReportedAt: timestamp("user_reported_at", { withTimezone: true }),
+    occurrences: integer("occurrences").default(1).notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    /** Triagem do suporte (`bun run errors -- --resolver <código>`). */
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+  },
+  (table) => ({
+    codeKey: uniqueIndex("error_reports_code_idx").on(table.code),
+    // O alvo do `ON CONFLICT`: é ele que transforma a segunda ocorrência num
+    // `occurrences + 1` em vez de uma linha nova.
+    dedupeKey: uniqueIndex("error_reports_dedupe_idx").on(
+      table.fingerprint,
+      table.dedupeDay
+    ),
+    // "Meus erros" é "os meus, do mais recente para o mais antigo".
+    userRecentIdx: index("error_reports_user_last_seen_idx").on(
+      table.userId,
+      table.lastSeenAt
+    ),
+    // A fila da triagem: o que alguém reportou e ninguém resolveu.
+    reportedIdx: index("error_reports_reported_idx").on(table.userReportedAt),
+    // A varredura da retenção.
+    lastSeenIdx: index("error_reports_last_seen_idx").on(table.lastSeenAt),
   })
 );

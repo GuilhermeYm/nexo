@@ -12,7 +12,12 @@ import {
   notes,
   tags,
 } from "@/lib/db/schema";
-import { classifyDocument } from "@/lib/ai/classify-document";
+import {
+  classifyDocument,
+  type ClassifyFailure,
+} from "@/lib/ai/classify-document";
+import { redactAndTrim } from "@/lib/errors/redact";
+import { reportError } from "@/lib/errors/report";
 import { rateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit";
 import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
@@ -93,6 +98,9 @@ async function extractText(file: File): Promise<string> {
 export async function POST(request: Request) {
   let uploadedPath: string | null = null;
   const supabase = await createClient();
+  // Declarado fora do `try`: o `catch` precisa dele para o relatório de erro
+  // não nascer órfão, e `const user` dentro do `try` não é visível lá fora.
+  let userId: string | null = null;
 
   try {
     const {
@@ -101,6 +109,7 @@ export async function POST(request: Request) {
     if (!user) {
       return errorResponse(401, "Não autenticado.");
     }
+    userId = user.id;
 
     // Classificação com IA custa dinheiro — limite por usuário.
     const limit = await rateLimit({
@@ -171,23 +180,71 @@ export async function POST(request: Request) {
       .from(BUCKET)
       .upload(uploadedPath, file, { contentType: file.type, upsert: false });
     if (uploadError) {
-      logServerError("/api/attachments (storage)", uploadError, {
-        userId: user.id,
-      });
+      const code = await logServerError(
+        "/api/attachments (storage)",
+        uploadError,
+        { userId: user.id },
+        request
+      );
       uploadedPath = null;
-      return errorResponse(500, "Não foi possível salvar o arquivo.");
+      return errorResponse(500, "Não foi possível salvar o arquivo.", code);
     }
 
     // 2) Extrai texto e classifica (Groq ou OpenAI se houver chave; stub
     //    caso contrário — ver lib/ai/classify-document.ts).
     const text = await extractText(file);
     const classifyStartedAt = new Date();
-    const { result: classification, usedAi } = await classifyDocument({
+    const {
+      result: classification,
+      usedAi,
+      failure: classifyFailure,
+    } = await classifyDocument({
       text,
       filename: file.name,
       mimeType: file.type,
     });
     const classifyFinishedAt = new Date();
+
+    // A classificação falhou, o upload seguiu — e agora o motivo sobrevive.
+    //
+    // Nada disto muda a resposta: o arquivo está guardado e a nota existe. O
+    // que muda é que a linha do feed passa a carregar um código, e o código
+    // leva a uma linha de `error_reports` com o corpo do erro do provedor.
+    // Era exatamente o que faltava no caso que motivou tudo isto.
+    //
+    // O nome do arquivo **não** entra no contexto (`sanitizeContext` o
+    // descarta pelo nome da chave): nome de arquivo é conteúdo da pessoa, e o
+    // feed de Tarefas já o mostra para quem tem direito de vê-lo.
+    // `reportError` direto, e não `logServerError`: esta falha é `ai_job` e
+    // não `api` — a rota respondeu 201, o produto não quebrou, e a triagem
+    // precisa distinguir "o provedor de IA recusou" de "a rota explodiu". O
+    // `console.error` fica escrito à mão para o operador continuar tendo a
+    // mesma linha de sempre no stdout.
+    let classifyErrorCode: string | null = null;
+    if (classifyFailure) {
+      console.error(
+        `[AI] Classificação com ${classifyFailure.provider} falhou; usando stub.`,
+        {
+          model: classifyFailure.model,
+          error: classifyFailure.message,
+          timestamp: new Date().toISOString(),
+        }
+      );
+      classifyErrorCode = await reportError({
+        route: "/api/attachments (classify)",
+        kind: "ai_job",
+        message: classifyFailure.message,
+        userId: user.id,
+        context: {
+          provider: classifyFailure.provider,
+          model: classifyFailure.model,
+          mimeType: file.type,
+          sizeBytes: file.size,
+          hadText: text.length > 0,
+        },
+        request,
+      });
+    }
 
     // 3) Cria a nota com o resultado da classificação.
     const [note] = await db
@@ -220,6 +277,8 @@ export async function POST(request: Request) {
       filename: file.name,
       classification,
       usedAi,
+      failure: classifyFailure,
+      errorCode: classifyErrorCode,
       startedAt: classifyStartedAt,
       finishedAt: classifyFinishedAt,
     });
@@ -291,8 +350,8 @@ export async function POST(request: Request) {
     if (error instanceof PdfReadError) {
       return errorResponse(422, "Não foi possível ler o PDF.");
     }
-    logServerError("/api/attachments", error);
-    return errorResponse(500, "Erro interno. Tente novamente.");
+    const code = await logServerError("/api/attachments", error, { userId }, request);
+    return errorResponse(500, "Erro interno. Tente novamente.", code);
   }
 }
 
@@ -313,6 +372,10 @@ async function recordClassifyJob(options: {
   filename: string;
   classification: { noteType: string; tags: string[]; summary: string };
   usedAi: boolean;
+  /** O que o provedor respondeu quando não classificou. */
+  failure: ClassifyFailure | null;
+  /** O código do relatório dessa falha, para a pessoa poder citá-lo. */
+  errorCode: string | null;
   startedAt: Date;
   finishedAt: Date;
 }): Promise<void> {
@@ -331,12 +394,31 @@ async function recordClassifyJob(options: {
         : `Não conseguiu classificar ${options.filename}`,
       detail: usedAi
         ? `${typeLabel} · ${tagCount} tag${tagCount === 1 ? "" : "s"} · resumo de ${classification.summary.length} caracteres`
-        : "O arquivo está guardado e a nota foi criada com o nome dele. Ajuste o tipo e as tags quando quiser.",
+        : options.errorCode
+          ? `O arquivo está guardado e a nota foi criada com o nome dele. Ajuste o tipo e as tags quando quiser — e informe o código ${options.errorCode} se quiser que a gente veja o que houve.`
+          : "O arquivo está guardado e a nota foi criada com o nome dele. Ajuste o tipo e as tags quando quiser.",
+      // A coluna existia desde 0004 e o caminho da classificação **nunca** a
+      // preenchia: a linha registrava que falhou e jogava fora o porquê.
+      //
+      // Censurada, e isso não é excesso de zelo: desde 0005 `ai_jobs` é
+      // SELECT-only **para o dono**, ou seja, ele lê esta coluna pelo
+      // PostgREST. O corpo de erro de um provedor às vezes ecoa o começo da
+      // chave enviada, e sem `redactAndTrim` a chave da instalação sairia
+      // pela porta da frente. É a mesma função que protege `error_reports`,
+      // aqui pelo motivo oposto: lá porque a coluna nunca é lida pelo
+      // cliente, aqui porque esta sempre é.
+      error: options.failure
+        ? redactAndTrim(
+            `${options.failure.provider} (${options.failure.model}): ${options.failure.message}`,
+            1000
+          )
+        : null,
+      errorCode: options.errorCode,
       startedAt: options.startedAt,
       finishedAt: options.finishedAt,
     });
   } catch (error) {
-    logServerError("recordClassifyJob", error, { noteId: options.noteId });
+    void logServerError("recordClassifyJob", error, { noteId: options.noteId });
   }
 }
 

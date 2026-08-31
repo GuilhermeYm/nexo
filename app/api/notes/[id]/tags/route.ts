@@ -122,8 +122,8 @@ export async function POST(
 
     return NextResponse.json({ tag }, { status: 201 });
   } catch (error) {
-    logServerError("POST /api/notes/[id]/tags", error);
-    return errorResponse(500, "Erro ao marcar a tag.");
+    const code = await logServerError("POST /api/notes/[id]/tags", error);
+    return errorResponse(500, "Erro ao marcar a tag.", code);
   }
 }
 
@@ -157,7 +157,7 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logServerError("DELETE /api/notes/[id]/tags", error);
-    return errorResponse(500, "Erro ao remover a tag.");
+    const code = await logServerError("DELETE /api/notes/[id]/tags", error);
+    return errorResponse(500, "Erro ao remover a tag.", code);
   }
 }

@@ -30,6 +30,7 @@ const EXPECTED_TABLES = [
   "ai_jobs",
   "attachments",
   "audit_logs",
+  "error_reports",
   "note_tags",
   "notes",
   "notifications",
@@ -51,6 +52,28 @@ const COLUMN_GRANTS = [
   { table: "profiles", privilege: "UPDATE", columns: ["display_name", "avatar_url"] },
   { table: "notifications", privilege: "UPDATE", columns: ["read", "read_at"] },
   { table: "workspace_connections", privilege: "UPDATE", columns: ["label"] },
+  // O único GRANT por coluna que é de **leitura**, e o mais fácil de perder:
+  // `message`, `stack`, `context` e `fingerprint` de `error_reports` são texto
+  // interno — mensagem crua do Postgres, corpo de erro do provedor de IA,
+  // stack com caminhos do servidor. O dono lê o próprio relatório; ele não lê
+  // o que o relatório diz por dentro. Se alguém rodar um `GRANT SELECT` de
+  // tabela inteira aqui (a forma mais natural de "consertar" uma consulta que
+  // não funciona pelo PostgREST), esta linha é o que avisa.
+  {
+    table: "error_reports",
+    privilege: "SELECT",
+    columns: [
+      "code",
+      "first_seen_at",
+      "kind",
+      "last_seen_at",
+      "occurrences",
+      "resolved_at",
+      "route",
+      "user_report",
+      "user_reported_at",
+    ],
+  },
 ];
 
 /**
@@ -64,7 +87,20 @@ const COLUMN_GRANTS = [
 const SERVER_ONLY_WRITES = [
   { table: "ai_jobs", privileges: ["INSERT", "UPDATE", "DELETE"] },
   { table: "audit_logs", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  // `notes` entrou em 0017, e é a única aqui que o cliente **lê** — o Realtime
+  // depende do SELECT. Escrever, não escreve nada: não há um `.from("notes")`
+  // no projeto, e as rotas entram pela `DATABASE_URL`. Enquanto o GRANT de
+  // tabela esteve de pé, o dono podia reescrever `created_at` pelo PostgREST e
+  // **zerar a cota do mês**, que `noteCaptures` mede por `created_at`; e forjar
+  // `tasks_done`, `tasks_total` e `task_date`, que o servidor deriva de
+  // `content_rich`.
+  { table: "notes", privileges: ["INSERT", "UPDATE", "DELETE"] },
   { table: "notifications", privileges: ["INSERT", "DELETE"] },
+  // Inclusive UPDATE: o único campo que a pessoa escreve num relatório de
+  // erro é o relato dela, e ele entra por `PATCH /api/errors/[code]`, que
+  // confere a sessão. Solto pelo PostgREST, o mesmo caminho serviria para
+  // reescrever o que o servidor registrou.
+  { table: "error_reports", privileges: ["INSERT", "UPDATE", "DELETE"] },
 ];
 
 /** Funções internas que nenhuma rota chama por RPC. */
@@ -167,10 +203,23 @@ async function main() {
     for (const rule of SERVER_ONLY_WRITES) {
       const held = [];
       for (const privilege of rule.privileges) {
+        // As duas perguntas, porque `has_table_privilege` responde só pelo
+        // nível de tabela: um `GRANT UPDATE (coluna)` solto passaria batido por
+        // ela. `has_any_column_privilege` é quem enxerga esse caso. Nestas
+        // tabelas o cliente não escreve coluna nenhuma, então qualquer uma das
+        // duas dizendo "sim" já é o problema.
+        //
+        // Só que DELETE não existe por coluna — o Postgres só concede SELECT,
+        // INSERT, UPDATE e REFERENCES assim, e perguntar por DELETE levanta
+        // `unrecognized privilege type`. Daí a segunda pergunta ser condicional.
+        const byColumn = ["SELECT", "INSERT", "UPDATE", "REFERENCES"].includes(
+          privilege
+        );
         const {
           rows: [row],
         } = await sql.query(
-          `select has_table_privilege('authenticated', $1, $2) as ok`,
+          `select has_table_privilege('authenticated', $1, $2)
+               ${byColumn ? "or has_any_column_privilege('authenticated', $1, $2)" : ""} as ok`,
           [`public.${rule.table}`, privilege]
         );
         if (row.ok) held.push(privilege);

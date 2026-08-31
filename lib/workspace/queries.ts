@@ -122,6 +122,12 @@ export interface BoardWindow {
     id: string;
     title: string;
     content: string | null;
+    /**
+     * O documento do editor. Nulo nas notas anteriores ao editor rico e nas
+     * escritas pela IA — a janela monta o documento a partir do texto puro na
+     * primeira abertura, e ele passa a existir no primeiro salvamento.
+     */
+    contentRich: unknown;
     type: string;
     /** Quem escreveu a nota — diferente de quem abriu a janela. */
     source: string;
@@ -168,6 +174,7 @@ export async function listBoardWindows(
       noteId: workspaceWindows.noteId,
       noteTitle: notes.title,
       noteContent: notes.content,
+      noteContentRich: notes.contentRich,
       noteType: notes.type,
       noteSource: notes.source,
       noteUpdatedAt: notes.updatedAt,
@@ -225,6 +232,7 @@ export async function listBoardWindows(
           id: row.noteId,
           title: row.noteTitle,
           content: row.noteContent,
+          contentRich: row.noteContentRich ?? null,
           type: row.noteType,
           source: row.noteSource,
           updatedAt: row.noteUpdatedAt,

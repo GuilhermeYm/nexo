@@ -1,8 +1,6 @@
 "use client";
 
-import { Placeholder } from "@tiptap/extensions";
 import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 import { ArrowLeft, Download, LayoutGrid, Paperclip, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,8 +22,10 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { EditorBubbleMenu } from "@/components/editor/editor-bubble-menu";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
 import type { WorkspaceSummary } from "@/lib/dashboard/queries";
+import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { plainToRichDocument } from "@/lib/editor/document";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
 import type { EditableNote } from "@/lib/notes/queries";
@@ -118,20 +118,10 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
     // Obrigatório no App Router: renderizar o editor já no servidor produz
     // HTML que não bate com o do cliente, e a hidratação quebra.
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        link: {
-          openOnClick: false,
-          HTMLAttributes: {
-            rel: "noreferrer noopener",
-            target: "_blank",
-          },
-        },
-      }),
-      Placeholder.configure({
-        placeholder: "Escreva. A Nexo guarda sozinha.",
-      }),
-    ],
+    extensions: buildEditorExtensions({
+      placeholder: "Escreva. A Nexo guarda sozinha.",
+      slash: true,
+    }),
     content: note.contentRich ?? plainToRichDocument(note.content),
     editorProps: {
       attributes: {
@@ -308,6 +298,7 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
       </header>
 
       <EditorToolbar editor={editor} className="print:hidden" />
+      <EditorBubbleMenu editor={editor} />
 
       <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
         <div className="mx-auto w-full max-w-2xl px-6 pt-10 pb-32">

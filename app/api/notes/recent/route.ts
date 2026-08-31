@@ -19,7 +19,7 @@ export async function GET() {
 
     return NextResponse.json({ notes: await listRecentNotes(user.id) });
   } catch (error) {
-    logServerError("GET /api/notes/recent", error);
-    return errorResponse(500, "Erro ao carregar notas recentes.");
+    const code = await logServerError("GET /api/notes/recent", error);
+    return errorResponse(500, "Erro ao carregar notas recentes.", code);
   }
 }

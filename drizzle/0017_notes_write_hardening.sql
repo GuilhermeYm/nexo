@@ -1,0 +1,49 @@
+-- =========================================================================
+-- 0017 — `notes` fica só de leitura para o cliente
+--
+-- O buraco que o `docs/AGENDA.md` registrou como conhecido: `notes` tinha
+-- GRANT de tabela, e a policy `Users manage own notes` (0001) é `FOR ALL`.
+-- Pela porta do PostgREST — a chave anônima é `NEXT_PUBLIC_`, então está no
+-- navegador de todo mundo — a RLS respondia "é a linha dela, pode" e não
+-- havia segunda trava: sem GRANT por coluna, todas as 17 colunas de `notes`
+-- eram escrevíveis pelo dono, inclusive as que o servidor considera suas.
+--
+-- **Isto era explorável hoje**, e é o que separa esta migration de 0013/0014,
+-- onde o GRANT sobrava mas nenhuma policy o acompanhava:
+--
+--   * `created_at` — `noteCaptures` (`lib/usage/queries.ts`) conta o mês por
+--     `created_at >= date_trunc('month', now())`. Reescrevê-lo nas próprias
+--     notas zera a cota. É o teto do Gratuito contornado por fora da rota.
+--   * `tasks_total` / `tasks_done` — derivados pelo servidor a partir de
+--     `content_rich` justamente porque o cliente não pode ser fonte da
+--     verdade sobre o que ele mesmo mandou. `listAgendaDays` lê esses números
+--     do banco para pintar "5 de 7" sem baixar documento nenhum: forjados,
+--     eles mentem sobre um documento que ninguém releu.
+--   * `task_date` — é o discriminador da Agenda inteira e a coluna do índice
+--     único parcial. Escrita por fora, move a lista de dia, ou põe data numa
+--     nota comum e a tira de Recentes.
+--   * `search_vector` — a projeção da busca, que passaria a divergir do texto.
+--
+-- `user_id` era a exceção que já estava coberta: o `WITH CHECK` da policy
+-- recusa a linha de destino de outra conta. Uma trava só, como sempre.
+--
+-- A correção **não** é GRANT por coluna, e vale dizer por quê, porque o
+-- `docs/AGENDA.md` previa aquele formato: `profiles`, `notifications` e
+-- `workspace_connections` têm grant por coluna porque existe alguma coluna
+-- que o cliente escreve. Em `notes` não existe nenhuma. O navegador usa o
+-- Supabase só para auth e Realtime — não há um `.from("notes")` no projeto
+-- inteiro —, e toda escrita entra pelas rotas, com a `DATABASE_URL`, como
+-- `postgres`, que não passa por estes GRANTs. Então vale a doutrina do
+-- `docs/SECURITY.md`: onde o cliente não escreve nada, o GRANT some inteiro,
+-- como em `ai_jobs` (0005), `audit_logs` (0014) e `error_reports` (0015).
+--
+-- **SELECT continua.** `notes` está na publicação do Realtime (0004) e o
+-- cliente assina `postgres_changes` nela (`hooks/use-live-resource.ts`); a
+-- autorização do Realtime se apoia no SELECT. Tirá-lo mataria o feed em
+-- silêncio — que é exatamente a armadilha descrita em `docs/REALTIME.md`.
+--
+-- Idempotente.
+-- =========================================================================
+
+REVOKE INSERT, UPDATE, DELETE ON public.notes FROM authenticated;
+REVOKE INSERT, UPDATE, DELETE ON public.notes FROM anon;

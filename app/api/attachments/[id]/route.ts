@@ -41,12 +41,14 @@ export async function GET(
   ctx: RouteContext<"/api/attachments/[id]">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     // Cada abertura de janela pede uma URL, e o visualizador pede outra
     // quando a anterior expira. O teto é alto para uso normal e baixo para
@@ -93,10 +95,13 @@ export async function GET(
       );
 
     if (error || !data?.signedUrl) {
-      logServerError("GET /api/attachments/[id] (storage)", error, {
-        attachmentId: id,
-      });
-      return errorResponse(500, "Não foi possível abrir o arquivo.");
+      const code = await logServerError(
+        "GET /api/attachments/[id] (storage)",
+        error,
+        { attachmentId: id },
+        request
+      );
+      return errorResponse(500, "Não foi possível abrir o arquivo.", code);
     }
 
     return NextResponse.json(
@@ -113,7 +118,7 @@ export async function GET(
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
-    logServerError("GET /api/attachments/[id]", error);
-    return errorResponse(500, "Não foi possível abrir o arquivo.");
+    const code = await logServerError("GET /api/attachments/[id]", error, { userId }, request);
+    return errorResponse(500, "Não foi possível abrir o arquivo.", code);
   }
 }

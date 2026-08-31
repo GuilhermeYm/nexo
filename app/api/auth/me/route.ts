@@ -28,7 +28,7 @@ export async function GET() {
       profile: profile ?? null,
     });
   } catch (error) {
-    logServerError("/api/auth/me", error);
-    return errorResponse(500, "Erro interno. Tente novamente.");
+    const code = await logServerError("/api/auth/me", error);
+    return errorResponse(500, "Erro interno. Tente novamente.", code);
   }
 }

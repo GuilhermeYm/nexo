@@ -33,7 +33,7 @@ export async function PATCH() {
     const count = await markAllNotificationsRead(user.id);
     return NextResponse.json({ ok: true, count });
   } catch (error) {
-    logServerError("PATCH /api/notifications/read-all", error);
-    return errorResponse(500, "Erro ao marcar notificações como lidas.");
+    const code = await logServerError("PATCH /api/notifications/read-all", error);
+    return errorResponse(500, "Erro ao marcar notificações como lidas.", code);
   }
 }

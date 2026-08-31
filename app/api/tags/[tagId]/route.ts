@@ -129,8 +129,8 @@ export async function PATCH(
       return errorResponse(409, "Você já tem uma tag com esse nome.");
     }
 
-    logServerError("PATCH /api/tags/[tagId]", error);
-    return errorResponse(500, "Erro ao salvar a tag.");
+    const code = await logServerError("PATCH /api/tags/[tagId]", error);
+    return errorResponse(500, "Erro ao salvar a tag.", code);
   }
 }
 

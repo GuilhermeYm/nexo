@@ -59,8 +59,8 @@ export async function GET(
 
     return NextResponse.json(await readBoard(user.id, id));
   } catch (error) {
-    logServerError("GET /api/workspaces/[id]/windows", error);
-    return errorResponse(500, "Erro ao carregar a lousa.");
+    const code = await logServerError("GET /api/workspaces/[id]/windows", error);
+    return errorResponse(500, "Erro ao carregar a lousa.", code);
   }
 }
 
@@ -69,12 +69,14 @@ export async function POST(
   ctx: RouteContext<"/api/workspaces/[id]/windows">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `windows:create:${user.id}`,
@@ -202,8 +204,8 @@ export async function POST(
       return errorResponse(409, "Isto já está aberto nesta lousa.");
     }
 
-    logServerError("POST /api/workspaces/[id]/windows", error);
-    return errorResponse(500, "Erro ao abrir a janela.");
+    const code = await logServerError("POST /api/workspaces/[id]/windows", error, { userId }, request);
+    return errorResponse(500, "Erro ao abrir a janela.", code);
   }
 }
 
@@ -229,12 +231,14 @@ export async function DELETE(
   ctx: RouteContext<"/api/workspaces/[id]/windows">
 ) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     // Teto baixo de propósito, ao contrário do de criação: uma pessoa limpa
     // a lousa algumas vezes por sessão. Um laço automatizado apagando e
@@ -369,8 +373,8 @@ export async function DELETE(
       ...(await readBoard(user.id, workspaceId)),
     });
   } catch (error) {
-    logServerError("DELETE /api/workspaces/[id]/windows", error);
-    return errorResponse(500, "Erro ao limpar a lousa.");
+    const code = await logServerError("DELETE /api/workspaces/[id]/windows", error, { userId }, request);
+    return errorResponse(500, "Erro ao limpar a lousa.", code);
   }
 }
 

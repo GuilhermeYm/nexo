@@ -9,13 +9,13 @@ export async function POST() {
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      logServerError("/api/auth/logout", error);
-      return errorResponse(500, "Erro interno. Tente novamente.");
+      const code = await logServerError("/api/auth/logout", error);
+      return errorResponse(500, "Erro interno. Tente novamente.", code);
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    logServerError("/api/auth/logout", error);
-    return errorResponse(500, "Erro interno. Tente novamente.");
+    const code = await logServerError("/api/auth/logout", error);
+    return errorResponse(500, "Erro interno. Tente novamente.", code);
   }
 }

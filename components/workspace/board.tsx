@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
+import { ErrorReport } from "@/components/errors/error-report";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { AttachmentWindowBody } from "@/components/workspace/attachment-window-body";
 import { NotePicker } from "@/components/workspace/note-picker";
@@ -56,6 +57,7 @@ import {
 } from "@/components/ui/context-menu";
 import {
   useBoardWindows,
+  type BoardNotice,
   type CreateWindowInput,
   type ErasedBatch,
 } from "@/hooks/use-board-windows";
@@ -844,8 +846,11 @@ export function Board({
   // O aviso de teto vem por último porque ele é permanente enquanto a lousa
   // estiver cheia — deixá-lo cobrir um erro de rede esconderia o transitório
   // atrás do constante.
-  const notice: { message: string; upgrade: boolean } | null =
-    error ?? (renameError ? { message: renameError, upgrade: false } : null);
+  const notice: BoardNotice | null =
+    error ??
+    (renameError
+      ? { message: renameError, upgrade: false, code: null }
+      : null);
   // Só quem tem para onde subir recebe o convite; no Pro o teto é o absoluto.
   const capIsPlanLimit = atCap && canUpgrade;
 
@@ -1480,7 +1485,7 @@ export function Board({
             role="status"
             className="absolute bottom-4 left-1/2 z-30 flex max-w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 items-start gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-[0_12px_40px_-12px] shadow-black/25"
           >
-            <p className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
+            <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
               {notice ? (
                 <>
                   {notice.message}
@@ -1489,6 +1494,18 @@ export function Board({
                       {" "}
                       <UpgradeLink />
                     </>
+                  )}
+                  {/* O relato precisa de campo e botões — por isso o
+                      contêiner virou `div`: `<div>` dentro de `<p>` faz o
+                      navegador fechar o parágrafo sozinho, e o cartão iria
+                      junto. */}
+                  {notice.code && (
+                    <ErrorReport
+                      className="mt-2"
+                      code={notice.code}
+                      route="workspace/[id]"
+                      compact
+                    />
                   )}
                 </>
               ) : lastErased ? (
@@ -1504,7 +1521,7 @@ export function Board({
                 // vender para quem já está no plano mais alto.
                 `Esta lousa chegou ao limite de ${windowCap} elementos. Feche algo para abrir espaço.`
               )}
-            </p>
+            </div>
 
             {/* O desfazer só existe enquanto o cartão está de pé, e é a
                 única rede de proteção do post-it: fechar uma nota é

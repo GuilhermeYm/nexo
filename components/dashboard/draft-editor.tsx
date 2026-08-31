@@ -1,10 +1,9 @@
 "use client";
 
-import { Placeholder } from "@tiptap/extensions";
 import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 
-import { EditorToolbar } from "@/components/editor/editor-toolbar";
+import { EditorBubbleMenu } from "@/components/editor/editor-bubble-menu";
+import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { plainToRichDocument } from "@/lib/editor/document";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
 import { cn } from "@/lib/utils";
@@ -43,18 +42,11 @@ export function DraftEditor({
     // Obrigatório no App Router: renderizar já no servidor produz HTML que
     // não bate com o do cliente e a hidratação quebra.
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        link: {
-          openOnClick: false,
-          HTMLAttributes: { rel: "noreferrer noopener", target: "_blank" },
-        },
-      }),
-      Placeholder.configure({
-        placeholder:
-          "Escreva à vontade. Nada daqui sai do seu navegador até você mandar.",
-      }),
-    ],
+    extensions: buildEditorExtensions({
+      placeholder:
+        "Escreva à vontade. Nada daqui sai do seu navegador até você mandar.",
+      slash: true,
+    }),
     // O `??` e não `||`: um documento vazio válido (`{type:"doc",...}`) é um
     // começo legítimo e não deve cair no texto puro.
     content: initialDoc ?? plainToRichDocument(plainFallback),
@@ -74,16 +66,15 @@ export function DraftEditor({
 
   return (
     <div className="mt-1 border-t border-border">
-      <EditorToolbar
-        editor={editor}
-        className="h-10 border-b-0 px-1 sm:px-1"
-        innerClassName="max-w-none"
-      />
+      {/* Sem barra fixa: o rascunho é para uma ideia meia-feita, e a
+          formatação vem pelo bubble menu sobre a seleção, pelo "/" e pelos
+          atalhos — nada de chrome ocupando o cartão. */}
+      <EditorBubbleMenu editor={editor} compact />
       {/* Altura e rolagem são desta tela; a tipografia vem compartilhada. */}
       <EditorContent
         editor={editor}
         className={cn(
-          "overflow-y-auto px-2.5 pt-1 pb-2.5 [&_.tiptap]:min-h-[7rem]",
+          "overflow-y-auto px-2.5 pt-2 pb-2.5 [&_.tiptap]:min-h-[7rem]",
           expanded
             ? "max-h-[calc(100vh-15rem)]"
             : "max-h-[46vh]",

@@ -114,7 +114,7 @@ export interface CreateWindowInput {
   y?: number;
 }
 
-type NotePatch = { title?: string; content?: string };
+type NotePatch = { title?: string; content?: string; contentRich?: unknown };
 
 /**
  * O aviso que a lousa mostra.
@@ -126,6 +126,12 @@ type NotePatch = { title?: string; content?: string };
 export interface BoardNotice {
   message: string;
   upgrade: boolean;
+  /**
+   * O código do relatório de erro, quando o servidor registrou um defeito.
+   * Nulo no teto de plano e em tudo que não é defeito nosso — ver
+   * `lib/plan-limit.ts`.
+   */
+  code?: string | null;
 }
 
 /**
@@ -136,7 +142,7 @@ export interface BoardNotice {
  * dependência nova para chamá-la.
  */
 function plainNotice(message: string): BoardNotice {
-  return { message, upgrade: false };
+  return { message, upgrade: false, code: null };
 }
 
 export function useBoardWindows(

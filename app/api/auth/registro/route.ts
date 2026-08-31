@@ -7,6 +7,9 @@ import { writeAuditLog } from "@/lib/audit";
 import { errorResponse, getClientIp, logServerError } from "@/lib/api";
 
 export async function POST(request: Request) {
+  // Só existe depois do `signUp` bem-sucedido — mesma razão de login.
+  let userId: string | null = null;
+
   try {
     const ip = getClientIp(request);
     const limit = await rateLimit({
@@ -51,6 +54,8 @@ export async function POST(request: Request) {
       return errorResponse(400, "Não foi possível criar a conta.");
     }
 
+    userId = data.user?.id ?? null;
+
     // Sem sessão => confirmação de e-mail pendente no projeto Supabase.
     const emailConfirmationPending = !data.session;
 
@@ -62,7 +67,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    logServerError("/api/auth/registro", error);
-    return errorResponse(500, "Erro interno. Tente novamente.");
+    const code = await logServerError("/api/auth/registro", error, { userId }, request);
+    return errorResponse(500, "Erro interno. Tente novamente.", code);
   }
 }

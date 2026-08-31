@@ -1,5 +1,8 @@
+import { isErrorCode } from "@/lib/errors/code";
+
 /**
- * Ler a recusa por teto de plano do lado do cliente.
+ * Ler a recusa do servidor do lado do cliente: teto de plano, ou defeito com
+ * código de relatório.
  *
  * A contrapartida de `planLimitResponse` (`lib/api.ts`). O servidor marca a
  * resposta com `upgrade: true`, e é essa marca — não o status, não o texto —
@@ -19,6 +22,19 @@ export interface ApiFailure {
   message: string;
   /** `true` quando a recusa foi um teto de plano, não um defeito. */
   upgrade: boolean;
+  /**
+   * O código do relatório de erro (`NX-7F3A-2K9`), quando houve um.
+   *
+   * Existe só onde houve **defeito**: 500 e afins. Teto de plano não tem
+   * código, 404 não tem código, validação não tem código — nenhum dos três é
+   * um erro nosso para investigar, e oferecer "reportar" neles ensinaria a
+   * pessoa a mandar chamado sobre o produto funcionando.
+   *
+   * Vem como campo próprio do JSON, e não recortado da frase: o dia em que
+   * alguém reescrever a mensagem não pode ser o dia em que o botão de
+   * reportar some.
+   */
+  code: string | null;
 }
 
 /**
@@ -34,6 +50,7 @@ export async function readApiFailure(
   const body = (await response.json().catch(() => null)) as {
     error?: unknown;
     upgrade?: unknown;
+    code?: unknown;
   } | null;
 
   return {
@@ -42,5 +59,6 @@ export async function readApiFailure(
         ? body.error
         : fallback,
     upgrade: body?.upgrade === true,
+    code: isErrorCode(body?.code) ? body.code : null,
   };
 }

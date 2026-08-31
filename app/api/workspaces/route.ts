@@ -36,19 +36,21 @@ export async function GET() {
 
     return NextResponse.json({ workspaces: await listWorkspaces(user.id) });
   } catch (error) {
-    logServerError("GET /api/workspaces", error);
-    return errorResponse(500, "Erro ao carregar workspaces.");
+    const code = await logServerError("GET /api/workspaces", error);
+    return errorResponse(500, "Erro ao carregar workspaces.", code);
   }
 }
 
 export async function POST(request: Request) {
   const supabase = await createClient();
+  let userId: string | null = null;
 
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
 
     const limit = await rateLimit({
       key: `workspaces:create:${user.id}`,
@@ -111,7 +113,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    logServerError("POST /api/workspaces", error);
-    return errorResponse(500, "Erro ao criar workspace.");
+    const code = await logServerError("POST /api/workspaces", error, { userId }, request);
+    return errorResponse(500, "Erro ao criar workspace.", code);
   }
 }
