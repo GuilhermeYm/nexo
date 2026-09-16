@@ -23,6 +23,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
 import { formatBytes } from "@/lib/utils";
 import { getUploadQuotaContext } from "@/lib/usage/queries";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { matchesSignature, readSignature } from "@/lib/validations/file-signature";
 
 const BUCKET = "files";
@@ -333,6 +334,8 @@ export async function POST(request: Request) {
       },
       request,
     });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json(
       { note, attachment, tags: allTags, aiClassified: usedAi },

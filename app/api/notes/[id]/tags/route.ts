@@ -6,6 +6,7 @@ import { errorResponse, logServerError } from "@/lib/api";
 import { db } from "@/lib/db";
 import { noteTags, notes, tags } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { createClient } from "@/lib/supabase/server";
 import { paletteFromName } from "@/lib/tags/palette";
 
@@ -120,6 +121,8 @@ export async function POST(
       .values({ noteId: id, tagId: tag.id })
       .onConflictDoNothing();
 
+    await invalidateNoteListCache(user.id);
+
     return NextResponse.json({ tag }, { status: 201 });
   } catch (error) {
     const code = await logServerError("POST /api/notes/[id]/tags", error);
@@ -154,6 +157,8 @@ export async function DELETE(
     await db
       .delete(noteTags)
       .where(and(eq(noteTags.noteId, id), eq(noteTags.tagId, tagId)));
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

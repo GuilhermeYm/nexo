@@ -47,7 +47,7 @@ const NAV_ITEMS: NavItem[] = [
   // Logo abaixo de Entrada: é sala de uso diário, e não pode ficar depois de
   // dois links que ainda não existem.
   { label: "Agenda", href: "/dashboard/agenda", icon: CalendarDays, ready: true },
-  { label: "Notas", href: "/dashboard/notas", icon: FileText },
+  { label: "Notas", href: "/dashboard/notas", icon: FileText, ready: true },
   { label: "Tags", href: "/dashboard/tags", icon: Tags, ready: true },
   { label: "Arquivos", href: "/dashboard/arquivos", icon: Paperclip },
 ];

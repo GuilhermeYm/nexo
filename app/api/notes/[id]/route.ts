@@ -1,5 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
@@ -7,8 +8,56 @@ import { db } from "@/lib/db";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
 import { notes, workspaceWindows } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
+import { getOwnedNotePreview } from "@/lib/notes/queries";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { createClient } from "@/lib/supabase/server";
 import { updateNoteSchema } from "@/lib/validations/workspace";
+
+const noteIdSchema = z.string().uuid();
+
+/**
+ * Conteúdo de leitura rápida para o acervo.
+ *
+ * A identidade da nota não é suficiente para conceder leitura: o id vindo da
+ * rota é validado e a query sempre o cruza com a pessoa autenticada. Uma nota
+ * de outra conta e uma inexistente devolvem a mesma resposta.
+ */
+export async function GET(
+  request: Request,
+  ctx: RouteContext<"/api/notes/[id]">
+) {
+  const supabase = await createClient();
+  let userId: string | null = null;
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
+
+    const { id } = await ctx.params;
+    const parsedId = noteIdSchema.safeParse(id);
+    if (!parsedId.success) return errorResponse(400, "Nota inválida.");
+
+    const limit = await rateLimit({
+      key: `notes:preview:${user.id}`,
+      limit: 180,
+      windowMs: 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas consultas seguidas. Aguarde um instante.");
+    }
+
+    const note = await getOwnedNotePreview(user.id, parsedId.data);
+    if (!note) return errorResponse(404, "Nota não encontrada.");
+
+    return NextResponse.json({ note });
+  } catch (error) {
+    const code = await logServerError("GET /api/notes/[id]", error, { userId }, request);
+    return errorResponse(500, "Erro ao carregar a nota.", code);
+  }
+}
 
 /**
  * Editar uma nota.
@@ -124,6 +173,8 @@ export async function PATCH(
       });
     }
 
+    await invalidateNoteListCache(user.id);
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     const code = await logServerError("PATCH /api/notes/[id]", error, { userId }, request);
@@ -187,6 +238,8 @@ export async function DELETE(
       oldData: { title: removed.title },
       request,
     });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -6,6 +6,7 @@ import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { notes, workspaces } from "@/lib/db/schema";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnedWorkspace } from "@/lib/workspace/queries";
@@ -123,6 +124,8 @@ export async function PATCH(
       request,
     });
 
+    await invalidateNoteListCache(user.id);
+
     return NextResponse.json({ workspace: updated });
   } catch (error) {
     const code = await logServerError("PATCH /api/workspaces/[id]", error, { userId }, request);
@@ -188,6 +191,8 @@ export async function DELETE(
       oldData: { name: removed.name, unlinkedNotes: context?.noteCount ?? 0 },
       request,
     });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ ok: true, unlinkedNotes: context?.noteCount ?? 0 });
   } catch (error) {

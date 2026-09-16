@@ -12,6 +12,13 @@ import {
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { getNoteCaptureContext } from "@/lib/usage/queries";
+import { NOTE_TYPES } from "@/lib/notes/list";
+import { listOwnedNotes } from "@/lib/notes/queries";
+import {
+  invalidateNoteListCache,
+  readNoteListCache,
+  writeNoteListCache,
+} from "@/lib/notes/cache";
 
 /**
  * Cria uma nota fora de qualquer lousa.
@@ -31,6 +38,69 @@ const createNoteSchema = z.object({
   // sai derivado no servidor, mesma regra do `PATCH /api/notes/[id]`.
   contentRich: richDocumentSchema.optional(),
 });
+
+const listNotesSchema = z.object({
+  q: z.string().trim().max(120).default(""),
+  source: z.enum(["all", "user", "ai"]).default("all"),
+  type: z.enum(["all", ...NOTE_TYPES]).default("all"),
+  sort: z.enum(["updated", "created", "title"]).default("updated"),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+});
+
+export async function GET(request: Request) {
+  const supabase = await createClient();
+  let userId: string | null = null;
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
+
+    const params = new URL(request.url).searchParams;
+    const parsed = listNotesSchema.safeParse({
+      q: params.get("q") ?? "",
+      source: params.get("source") ?? "all",
+      type: params.get("type") ?? "all",
+      sort: params.get("sort") ?? "updated",
+      page: params.get("page") ?? "1",
+    });
+    if (!parsed.success) return errorResponse(400, "Filtros inválidos.");
+
+    const limit = await rateLimit({
+      key: `notes:list:${user.id}`,
+      limit: 180,
+      windowMs: 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas consultas seguidas. Aguarde um instante.");
+    }
+
+    const options = {
+      query: parsed.data.q,
+      source: parsed.data.source,
+      type: parsed.data.type,
+      sort: parsed.data.sort,
+      page: parsed.data.page,
+    } as const;
+    const cached = await readNoteListCache(user.id, options);
+    if (cached.value) {
+      return NextResponse.json(cached.value, {
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
+
+    const result = await listOwnedNotes(user.id, options);
+    await writeNoteListCache(user.id, options, cached.version, result);
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    const code = await logServerError("GET /api/notes", error, { userId }, request);
+    return errorResponse(500, "Erro ao carregar as notas.", code);
+  }
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -119,6 +189,8 @@ export async function POST(request: Request) {
         source: "user",
       })
       .returning({ id: notes.id, title: notes.title });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ note: created }, { status: 201 });
   } catch (error) {

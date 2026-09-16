@@ -6,6 +6,7 @@ import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { tags } from "@/lib/db/schema";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { TAG_PALETTE } from "@/lib/tags/palette";
@@ -121,6 +122,8 @@ export async function PATCH(
         newData: { name: updated.name },
       });
     }
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ tag: updated });
   } catch (error) {
