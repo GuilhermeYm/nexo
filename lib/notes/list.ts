@@ -33,6 +33,17 @@ export interface NoteListResult {
   hasMore: boolean;
 }
 
+/** Conteúdo seguro para a leitura rápida no acervo, sem o documento do editor. */
+export interface NotePreview {
+  id: string;
+  title: string;
+  content: string | null;
+  type: string;
+  source: string;
+  workspaceName: string | null;
+  updatedAt: Date | string;
+}
+
 export interface NoteListOptions {
   query?: string;
   source?: NoteListSource;

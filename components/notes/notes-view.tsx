@@ -3,9 +3,12 @@
 import {
   ArrowDownAZ,
   ArrowLeft,
+  BookOpen,
   CalendarClock,
   ChevronDown,
   CircleDashed,
+  Clock3,
+  ExternalLink,
   FileText,
   LoaderCircle,
   Search,
@@ -14,7 +17,6 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -30,6 +32,7 @@ import {
 import {
   NOTE_TYPES,
   type NoteListItem,
+  type NotePreview,
   type NoteListResult,
   type NoteListSort,
   type NoteListSource,
@@ -39,6 +42,14 @@ import { TAG_CHIP_CLASS, tagTone } from "@/lib/tags/palette";
 import { cn } from "@/lib/utils";
 
 const SEARCH_DELAY_MS = 250;
+
+const EMPTY_NOTE_LIST: NoteListResult = {
+  notes: [],
+  total: 0,
+  page: 1,
+  pageSize: 18,
+  hasMore: false,
+};
 
 type TypeFilter = NoteListType | "all";
 
@@ -52,21 +63,28 @@ export function NotesView({
   initial,
   renderedAt,
 }: {
-  initial: NoteListResult;
+  initial: NoteListResult | null;
   renderedAt: number;
 }) {
-  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const previewRequestRef = useRef<AbortController | null>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<NoteListSource>("all");
   const [type, setType] = useState<TypeFilter>("all");
   const [sort, setSort] = useState<NoteListSort>("updated");
-  const [result, setResult] = useState(initial);
+  const [result, setResult] = useState(initial ?? EMPTY_NOTE_LIST);
   const [status, setStatus] = useState<"idle" | "loading" | "more" | "error">(
+    initial ? "idle" : "loading"
+  );
+  const [hasLoadedInitial, setHasLoadedInitial] = useState(initial !== null);
+  const [now, setNow] = useState(renderedAt);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<NotePreview | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">(
     "idle"
   );
-  const [now, setNow] = useState(renderedAt);
   const firstRequest = useRef(true);
 
   useEffect(() => {
@@ -77,6 +95,7 @@ export function NotesView({
   useEffect(() => {
     if (firstRequest.current) {
       firstRequest.current = false;
+      if (!initial) void loadPage(1, false);
       return;
     }
 
@@ -114,10 +133,50 @@ export function NotesView({
         ...next,
         notes: append ? [...current.notes, ...next.notes] : next.notes,
       }));
+      if (!append) setHasLoadedInitial(true);
       setStatus("idle");
     } catch (error) {
       if ((error as Error).name !== "AbortError") setStatus("error");
     }
+  }
+
+  async function showPreview(noteId: string) {
+    previewRequestRef.current?.abort();
+    const controller = new AbortController();
+    previewRequestRef.current = controller;
+    setSelectedNoteId(noteId);
+    setPreview(null);
+    setPreviewStatus("loading");
+
+    window.requestAnimationFrame(() => {
+      previewRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "nearest",
+      });
+    });
+
+    try {
+      const response = await fetch(`/api/notes/${noteId}`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("preview request failed");
+      const body = (await response.json()) as { note: NotePreview };
+      if (!controller.signal.aborted) {
+        setPreview(body.note);
+        setPreviewStatus("idle");
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") setPreviewStatus("error");
+    }
+  }
+
+  function closePreview() {
+    previewRequestRef.current?.abort();
+    setSelectedNoteId(null);
+    setPreview(null);
+    setPreviewStatus("idle");
   }
 
   const filtered = query.trim() || source !== "all" || type !== "all";
@@ -162,7 +221,9 @@ export function NotesView({
               className="text-sm tabular-nums text-subtle-foreground"
             >
               {status === "loading"
-                ? "Atualizando…"
+                ? hasLoadedInitial
+                  ? "Atualizando…"
+                  : "Buscando no servidor…"
                 : `${result.total} ${result.total === 1 ? "nota" : "notas"}`}
             </p>
           </header>
@@ -250,7 +311,13 @@ export function NotesView({
                 action={{ label: "Tentar novamente", onClick: () => void loadPage(1, false) }}
               />
             ) : status === "loading" ? (
-              <NotesSkeleton />
+              <NotesSkeleton
+                message={
+                  hasLoadedInitial
+                    ? "Atualizando suas notas…"
+                    : "Buscando suas notas no servidor…"
+                }
+              />
             ) : result.notes.length === 0 ? (
               <MessageState
                 title={filtered ? "Nenhuma nota combina com isso" : "Seu acervo começa aqui"}
@@ -263,16 +330,40 @@ export function NotesView({
               />
             ) : (
               <>
-                <ul className="divide-y divide-border border-y border-border">
-                  {result.notes.map((note) => (
-                    <NoteRow
-                      key={note.id}
-                      note={note}
-                      now={now}
-                      onOpen={() => router.push(`/nota/${note.id}`)}
-                    />
-                  ))}
-                </ul>
+                <div
+                  className={cn(
+                    "grid min-h-0 gap-6",
+                    selectedNoteId && "lg:grid-cols-[minmax(0,1fr)_minmax(21rem,0.8fr)]"
+                  )}
+                >
+                  <ul className="divide-y divide-border border-y border-border">
+                    {result.notes.map((note) => (
+                      <NoteRow
+                        key={note.id}
+                        note={note}
+                        now={now}
+                        selected={note.id === selectedNoteId}
+                        onSelect={() => void showPreview(note.id)}
+                      />
+                    ))}
+                  </ul>
+
+                  {selectedNoteId && (
+                    <aside
+                      ref={previewRef}
+                      className="order-first lg:order-none lg:sticky lg:top-5 lg:max-h-[calc(100dvh-3.5rem)]"
+                      aria-label="Prévia da nota"
+                    >
+                      <NotePreviewPanel
+                        preview={preview}
+                        status={previewStatus}
+                        now={now}
+                        onClose={closePreview}
+                        onRetry={() => void showPreview(selectedNoteId)}
+                      />
+                    </aside>
+                  )}
+                </div>
 
                 {result.hasMore && (
                   <button
@@ -361,18 +452,25 @@ function SelectControl({
 function NoteRow({
   note,
   now,
-  onOpen,
+  selected,
+  onSelect,
 }: {
   note: NoteListItem;
   now: number;
-  onOpen: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   return (
     <li>
       <button
         type="button"
-        onClick={onOpen}
-        className="group grid w-full grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-1 py-5 text-left transition-colors hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:px-4"
+        onClick={onSelect}
+        aria-pressed={selected}
+        title="Clique para ler a prévia"
+        className={cn(
+          "group grid w-full grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-1 py-5 text-left transition-colors hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:px-4",
+          selected && "bg-secondary/65"
+        )}
       >
         <span className="mt-0.5 flex size-9 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-colors group-hover:text-foreground">
           <NoteTypeIcon type={note.type} className="size-[18px]" />
@@ -433,6 +531,160 @@ function NoteRow({
   );
 }
 
+function NotePreviewPanel({
+  preview,
+  status,
+  now,
+  onClose,
+  onRetry,
+}: {
+  preview: NotePreview | null;
+  status: "idle" | "loading" | "error";
+  now: number;
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  if (status === "loading") {
+    return <PreviewSkeleton onClose={onClose} />;
+  }
+
+  if (status === "error") {
+    return (
+      <section className="rounded-2xl border border-border bg-background p-5 lg:h-full">
+        <PreviewHeader onClose={onClose} />
+        <div className="flex min-h-52 flex-col items-center justify-center px-4 text-center">
+          <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-subtle-foreground">
+            <BookOpen className="size-5" aria-hidden="true" />
+          </span>
+          <h2 className="mt-4 text-sm font-semibold text-foreground">
+            A prévia não carregou
+          </h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+            Confira a conexão e tente novamente.
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-5 rounded-xl bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (!preview) return null;
+
+  return (
+    <section className="flex max-h-[min(34rem,calc(100dvh-3.5rem))] flex-col rounded-2xl border border-border bg-background animate-row-in motion-reduce:animate-none lg:h-full lg:max-h-none">
+      <div className="shrink-0 border-b border-border px-5 py-4">
+        <PreviewHeader onClose={onClose} />
+        <div className="mt-4 flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-subtle-foreground">
+            <NoteTypeIcon type={preview.type} className="size-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold leading-snug tracking-tight text-foreground">
+              {preview.title}
+            </h2>
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle-foreground">
+              <span>{NOTE_TYPE_LABEL[preview.type] ?? "Nota"}</span>
+              {preview.source === "ai" && (
+                <span className="inline-flex items-center gap-1 text-accent">
+                  <Sparkles className="size-3" aria-hidden="true" />
+                  pela Nexo
+                </span>
+              )}
+              {preview.workspaceName && <><Dot /><span>{preview.workspaceName}</span></>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        {preview.content ? (
+          <p className="whitespace-pre-wrap break-words text-sm leading-7 text-muted-foreground">
+            {preview.content}
+          </p>
+        ) : (
+          <div className="flex min-h-40 flex-col items-center justify-center text-center">
+            <CircleDashed className="size-5 text-subtle-foreground" aria-hidden="true" />
+            <p className="mt-3 text-sm text-muted-foreground">
+              Esta nota ainda está vazia.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-5 py-3.5">
+        <span
+          className="flex min-w-0 items-center gap-1.5 text-xs tabular-nums text-subtle-foreground"
+          title={formatAbsolute(preview.updatedAt)}
+        >
+          <Clock3 className="size-3.5 shrink-0" aria-hidden="true" />
+          Atualizada {formatRelative(preview.updatedAt, now)}
+        </span>
+        <Link
+          href={`/nota/${preview.id}`}
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-accent px-3 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        >
+          Abrir no editor
+          <ExternalLink className="size-3.5" aria-hidden="true" />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function PreviewHeader({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs font-medium text-subtle-foreground">Prévia</span>
+      <button
+        type="button"
+        onClick={onClose}
+        className="flex size-7 items-center justify-center rounded-lg text-subtle-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <X className="size-4" aria-hidden="true" />
+        <span className="sr-only">Fechar prévia</span>
+      </button>
+    </div>
+  );
+}
+
+function PreviewSkeleton({ onClose }: { onClose: () => void }) {
+  return (
+    <section
+      className="rounded-2xl border border-border bg-background p-5 animate-row-in motion-reduce:animate-none lg:h-full"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <PreviewHeader onClose={onClose} />
+      <div className="mt-5 flex items-center gap-2 text-sm text-subtle-foreground">
+        <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        Carregando prévia…
+      </div>
+      <div className="mt-5 flex items-start gap-3">
+        <span className="size-9 shrink-0 animate-pulse rounded-xl bg-secondary motion-reduce:animate-none" />
+        <span className="min-w-0 flex-1 space-y-2">
+          <span className="block h-5 w-3/4 animate-pulse rounded bg-secondary motion-reduce:animate-none" />
+          <span className="block h-3 w-2/5 animate-pulse rounded bg-secondary motion-reduce:animate-none" />
+        </span>
+      </div>
+      <div className="mt-8 space-y-3">
+        {[100, 88, 94, 64, 76].map((width) => (
+          <span
+            key={width}
+            className="block h-3 animate-pulse rounded bg-secondary motion-reduce:animate-none"
+            style={{ width: `${width}%` }}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Dot() {
   return <span aria-hidden="true" className="size-0.5 rounded-full bg-subtle-foreground" />;
 }
@@ -462,11 +714,19 @@ function MessageState({
   );
 }
 
-function NotesSkeleton() {
+function NotesSkeleton({ message }: { message: string }) {
   return (
-    <div className="divide-y divide-border border-y border-border" aria-label="Carregando notas">
+    <div className="divide-y divide-border border-y border-border" aria-busy="true" aria-live="polite">
+      <p className="flex items-center gap-2 px-1 py-3 text-sm text-subtle-foreground sm:px-4">
+        <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        {message}
+      </p>
       {Array.from({ length: 6 }).map((_, index) => (
-        <div key={index} className="flex gap-3 px-1 py-5 sm:px-4">
+        <div
+          key={index}
+          className="flex gap-3 px-1 py-5 animate-row-in motion-reduce:animate-none sm:px-4"
+          style={{ animationDelay: `${index * 45}ms` }}
+        >
           <span className="size-9 shrink-0 animate-pulse rounded-xl bg-secondary motion-reduce:animate-none" />
           <span className="flex-1">
             <span className="block h-4 w-2/5 animate-pulse rounded bg-secondary motion-reduce:animate-none" />

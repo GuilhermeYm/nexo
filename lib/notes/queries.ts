@@ -21,6 +21,7 @@ import {
   NOTE_LIST_PAGE_SIZE,
   type NoteListItem,
   type NoteListOptions,
+  type NotePreview,
   type NoteListResult,
 } from "@/lib/notes/list";
 
@@ -152,6 +153,43 @@ export async function listOwnedNotes(
     pageSize,
     hasMore: page * pageSize < total,
   };
+}
+
+/**
+ * Leitura rápida de uma nota dentro do acervo.
+ *
+ * O preview leva apenas texto puro, não o JSON do TipTap: além de manter o
+ * painel leve, isso garante que conteúdo da pessoa nunca seja transformado em
+ * HTML no navegador. A consulta repete a posse da nota, pois `DATABASE_URL`
+ * pode passar por cima da RLS.
+ */
+export async function getOwnedNotePreview(
+  userId: string,
+  noteId: string
+): Promise<NotePreview | null> {
+  const [note] = await db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      content: notes.content,
+      type: notes.type,
+      source: notes.source,
+      workspaceName: workspaces.name,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .leftJoin(workspaces, eq(notes.workspaceId, workspaces.id))
+    .where(
+      and(
+        eq(notes.id, noteId),
+        eq(notes.userId, userId),
+        ne(notes.status, "deleted"),
+        isNull(notes.taskDate)
+      )
+    )
+    .limit(1);
+
+  return note ?? null;
 }
 
 function noteExcerpt(content: string | null): string | null {
