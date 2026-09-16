@@ -493,7 +493,7 @@ export const workspaceWindows = pgTable(
      * da IA nunca é apagada (princípio nº 4).
      */
     source: noteSourceEnum("source").default("user").notNull(),
-    /** Conteúdo dos elementos que não são nota: `{ text, tone }`. */
+    /** Conteúdo dos elementos que não são nota: texto e aparência. */
     content: jsonb("content"),
     x: integer("x").default(0).notNull(),
     y: integer("y").default(0).notNull(),

@@ -21,6 +21,24 @@ const height = z.number().int().min(96).max(4000);
 
 /** Uma das seis matizes de tag do tema, por posição. Cor livre não entra. */
 export const toneSchema = z.enum(["1", "2", "3", "4", "5", "6"]);
+export const backgroundToneSchema = z.enum([
+  "none",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+]);
+export const textToneSchema = z.enum([
+  "default",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+]);
 
 export const windowStateSchema = z.enum([
   "normal",
@@ -44,6 +62,8 @@ export const createWindowSchema = z
     title: z.string().trim().min(1).max(200).optional(),
     text: z.string().max(4000).optional(),
     tone: toneSchema.optional(),
+    backgroundTone: backgroundToneSchema.optional(),
+    textTone: textToneSchema.optional(),
     // Opcionais: quem abre uma nota vindo do dashboard não está olhando
     // para a lousa e não tem como escolher um ponto. Sem eles, o servidor
     // coloca a janela logo abaixo do que já existe — sempre ao alcance do
@@ -54,6 +74,16 @@ export const createWindowSchema = z
     height: height.optional(),
   })
   .superRefine((value, ctx) => {
+    if (
+      value.kind !== "text" &&
+      (value.backgroundTone !== undefined || value.textTone !== undefined)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Só a caixa de texto tem fundo e cor de texto próprios.",
+      });
+    }
+
     if (value.kind === "attachment") {
       if (!value.attachmentId) {
         ctx.addIssue({
@@ -119,6 +149,8 @@ export const updateWindowSchema = z
     state: windowStateSchema.optional(),
     text: z.string().max(4000).optional(),
     tone: toneSchema.optional(),
+    backgroundTone: backgroundToneSchema.optional(),
+    textTone: textToneSchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Nada para atualizar.",
@@ -263,6 +295,8 @@ const restorableWindowSchema = z
       .object({
         text: z.string().max(4000).optional(),
         tone: toneSchema.optional(),
+        backgroundTone: backgroundToneSchema.optional(),
+        textTone: textToneSchema.optional(),
       })
       .nullish(),
     x: coordinate,

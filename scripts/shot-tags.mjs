@@ -261,6 +261,68 @@ async function main() {
     );
     await page.screenshot({ path: `${OUT}/search-light.png` });
 
+    // ---- modo grafo ----
+    //
+    // O grafo é a outra face da página: zoom com controles, highlight de
+    // vizinhança em hover e troca de cor no clique da tag. Aqui se confere o
+    // que dá para conferir sem mirar nó em canvas: renderização, os botões de
+    // zoom de fato mudando o zoom, e as duas capturas (claro/escuro) para o
+    // revisor humano — o tema escuro só funciona no canvas porque as cores
+    // são resolvidas via estilo computado com observer em `data-theme`.
+    console.log("→ modo grafo");
+    await page.fill('input[aria-label="Buscar notas e tags"]', "");
+    await page.click("button:has-text('Ver como grafo')");
+    await page.waitForSelector("canvas", { timeout: 20_000 });
+    await page.waitForTimeout(2500); // a simulação assenta
+
+    const canvasSize = await page.$eval("canvas", (el) => ({
+      w: el.width,
+      h: el.height,
+    }));
+    check(
+      problems,
+      "o canvas do grafo renderiza",
+      canvasSize.w > 0 && canvasSize.h > 0,
+      `${canvasSize.w}x${canvasSize.h}`
+    );
+
+    const zoomLevel = () =>
+      page
+        .locator('div:has(> button[aria-label="Aproximar"]) > span')
+        .textContent()
+        .then((text) => parseInt(text ?? "0", 10));
+    const zoomBefore = await zoomLevel();
+    await page.click('button[aria-label="Aproximar"]');
+    await page.waitForTimeout(600);
+    const zoomAfter = await zoomLevel();
+    check(
+      problems,
+      "o botão de zoom aproxima de verdade",
+      zoomAfter > zoomBefore,
+      `${zoomBefore}% → ${zoomAfter}%`
+    );
+
+    await page.click('button[aria-label="Ajustar ao conteúdo"]');
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: `${OUT}/graph-light.png` });
+
+    await page.evaluate(() => {
+      try {
+        localStorage.setItem("nexo-theme", "dark");
+      } catch {}
+      document.documentElement.setAttribute("data-theme", "dark");
+    });
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: `${OUT}/graph-dark.png` });
+    await page.evaluate(() => {
+      try {
+        localStorage.setItem("nexo-theme", "light");
+      } catch {}
+      document.documentElement.setAttribute("data-theme", "light");
+    });
+    await page.click("button:has-text('Voltar para lista')");
+    await page.waitForTimeout(400);
+
     // ---- editar a tag na janela da lousa ----
     //
     // A tag é da conta, não da nota: o painel que abre no chip renomeia e

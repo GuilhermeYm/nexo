@@ -71,7 +71,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
     // O conteúdo é um campo só no banco, então a atualização parcial é
     // resolvida aqui: mandar só `tone` não pode apagar o texto.
     const nextContent =
-      input.text === undefined && input.tone === undefined
+      input.text === undefined &&
+      input.tone === undefined &&
+      input.backgroundTone === undefined &&
+      input.textTone === undefined
         ? undefined
         : mergeContent(current.content as WindowContent | null, input);
 
@@ -79,6 +82,16 @@ export async function PATCH(request: Request, ctx: Ctx) {
       return errorResponse(
         400,
         "Uma janela de nota guarda o conteúdo na nota, não na janela."
+      );
+    }
+
+    if (
+      current.kind !== "text" &&
+      (input.backgroundTone !== undefined || input.textTone !== undefined)
+    ) {
+      return errorResponse(
+        400,
+        "Só a caixa de texto tem fundo e cor de texto próprios."
       );
     }
 
@@ -170,10 +183,18 @@ function scopeOf(userId: string, workspaceId: string, windowId: string) {
 
 function mergeContent(
   current: WindowContent | null,
-  input: { text?: string; tone?: string }
+  input: {
+    text?: string;
+    tone?: string;
+    backgroundTone?: WindowContent["backgroundTone"];
+    textTone?: WindowContent["textTone"];
+  }
 ): WindowContent {
   return {
     text: input.text ?? current?.text ?? "",
     tone: input.tone ?? current?.tone ?? "1",
+    backgroundTone:
+      input.backgroundTone ?? current?.backgroundTone ?? "none",
+    textTone: input.textTone ?? current?.textTone ?? "default",
   };
 }

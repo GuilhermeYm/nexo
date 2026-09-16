@@ -8,12 +8,15 @@ import {
   Pin,
   Sparkles,
   Tags,
+  Trash2,
   WandSparkles,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { EmptyState, Panel, QuietFooter } from "@/components/dashboard/panel";
+import { ErrorReport } from "@/components/errors/error-report";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useLiveResource } from "@/hooks/use-live-resource";
 import { useNewItems } from "@/hooks/use-new-items";
 import {
@@ -23,6 +26,7 @@ import {
   toIsoString,
 } from "@/lib/dashboard/format";
 import type { AiJobItem } from "@/lib/dashboard/queries";
+import { readApiFailure } from "@/lib/plan-limit";
 import { cn } from "@/lib/utils";
 
 /** Tabelas cuja mudança invalida este painel. Constante no módulo para o
@@ -110,16 +114,31 @@ export function TasksPanel({
     tables: [...TABLES],
   });
 
-  const fresh = useNewItems(items, jobId);
+  // A resposta do DELETE é suficiente para tirar a linha da tela. A rebusca
+  // continua acontecendo em seguida para preencher o espaço com o próximo
+  // item do histórico, mas uma queda de rede nesse segundo request não pode
+  // ressuscitar visualmente uma tarefa que o servidor já excluiu.
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
+  const visibleItems = items.filter((job) => !deletedIds.has(job.id));
+
+  const handleDeleted = useCallback(
+    async function handleDeleted(id: string) {
+      setDeletedIds((current) => new Set(current).add(id));
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const fresh = useNewItems(visibleItems, jobId);
 
   useEffect(() => {
     registerRefresh?.(refresh);
   }, [registerRefresh, refresh]);
 
-  const pinned = items.filter(
+  const pinned = visibleItems.filter(
     (job) => job.status === "insufficient_credits"
   );
-  const history = items.filter(
+  const history = visibleItems.filter(
     (job) => job.status !== "insufficient_credits"
   );
 
@@ -136,7 +155,7 @@ export function TasksPanel({
       status={status}
       isRefreshing={isRefreshing}
     >
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <EmptyState
           icon={<WandSparkles className="size-5" aria-hidden="true" />}
           title="Nenhuma tarefa ainda"
@@ -177,6 +196,7 @@ export function TasksPanel({
                   job={job}
                   now={clock}
                   isNew={fresh.has(job.id)}
+                  onDeleted={handleDeleted}
                 />
               ))}
             </ul>
@@ -208,16 +228,53 @@ function JobRow({
   now,
   isNew,
   pinned,
+  onDeleted,
 }: {
   job: AiJobItem;
   now: number;
   isNew: boolean;
   pinned?: boolean;
+  onDeleted?: (id: string) => void | Promise<void>;
 }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailure, setDeleteFailure] = useState<{
+    message: string;
+    code: string | null;
+  } | null>(null);
   const state = STATUS[job.status] ?? STATUS.queued;
   const StatusIcon = state.icon;
   const KindIcon = KIND_ICON[job.kind] ?? WandSparkles;
   const timestamp = job.finishedAt ?? job.createdAt;
+
+  async function deleteFailedJob() {
+    if (deleting || job.status !== "failed") return;
+
+    setDeleting(true);
+    setDeleteFailure(null);
+
+    try {
+      const response = await fetch(`/api/jobs/${job.id}`, { method: "DELETE" });
+
+      if (!response.ok) {
+        const failure = await readApiFailure(
+          response,
+          "Não foi possível excluir esta falha."
+        );
+        setDeleteFailure({ message: failure.message, code: failure.code });
+        return;
+      }
+
+      await onDeleted?.(job.id);
+    } catch {
+      setDeleteFailure({
+        message: "Erro de conexão. Tente novamente.",
+        code: null,
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <li
@@ -284,7 +341,56 @@ function JobRow({
               {job.creditsCost > 0 && ` · ${job.creditsCost} créditos`}
             </button>
           )}
+
+          {job.status === "failed" && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteFailure(null);
+                setConfirmingDelete(true);
+              }}
+              className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-subtle-foreground transition-colors hover:bg-error/10 hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label={`Excluir tarefa que falhou: ${job.label}`}
+            >
+              <Trash2 className="size-3" aria-hidden="true" />
+              Excluir
+            </button>
+          )}
         </div>
+
+        <ConfirmDialog
+          open={job.status === "failed" && confirmingDelete}
+          title="Excluir tarefa do histórico?"
+          subject={job.label}
+          description={
+            <>
+              A tarefa falha e o relatório técnico ligado a ela serão removidos.
+              A nota e o arquivo continuam guardados.
+            </>
+          }
+          confirmLabel="Excluir tarefa"
+          busyLabel="Excluindo…"
+          busy={deleting}
+          error={
+            deleteFailure ? (
+              <>
+                <span>{deleteFailure.message}</span>
+                {deleteFailure.code && (
+                  <ErrorReport
+                    code={deleteFailure.code}
+                    route={`/api/jobs/${job.id}`}
+                    compact
+                  />
+                )}
+              </>
+            ) : undefined
+          }
+          onOpenChange={(open) => {
+            setConfirmingDelete(open);
+            if (!open) setDeleteFailure(null);
+          }}
+          onConfirm={() => void deleteFailedJob()}
+        />
       </div>
     </li>
   );

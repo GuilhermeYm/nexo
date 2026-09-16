@@ -65,6 +65,26 @@ export function TagsView({
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // As tags moram em estado: a troca de cor feita no grafo precisa chegar à
+  // lista quando a pessoa volta para ela, sem novo fetch.
+  const [allTags, setAllTags] = useState(tags);
+
+  function handleTagColorChange(tagId: string, color: string | null) {
+    setAllTags((current) =>
+      current.map((tag) => (tag.id === tagId ? { ...tag, color } : tag))
+    );
+    setGraphData((current) =>
+      current && current !== "error"
+        ? {
+            ...current,
+            tags: current.tags.map((tag) =>
+              tag.id === tagId ? { ...tag, color } : tag
+            ),
+          }
+        : current
+    );
+  }
+
   // Relógio no padrão do dashboard: começa no instante do servidor para o
   // HTML bater, e só depois de montado passa a marcar o tempo de verdade.
   const [now, setNow] = useState(renderedAt);
@@ -203,7 +223,7 @@ export function TagsView({
   // Filtrar tag no cliente custa nada — a lista já está aqui — e é o que
   // torna as tags antigas alcançáveis sem poluir a tela de descanso.
   const matchedTags = foldedQuery
-    ? tags.filter((tag) => fold(tag.name).includes(foldedQuery))
+    ? allTags.filter((tag) => fold(tag.name).includes(foldedQuery))
     : [];
 
   const currentSearch =
@@ -244,9 +264,9 @@ export function TagsView({
             <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
               Tags
             </h1>
-            {tags.length > 0 && (
+            {allTags.length > 0 && (
               <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                {tags.length}
+                {allTags.length}
               </span>
             )}
             <button
@@ -334,7 +354,7 @@ export function TagsView({
                     </span>
                   </div>
                 ) : graphData ? (
-                  <TagsGraph {...graphData} />
+                  <TagsGraph {...graphData} onTagColorChange={handleTagColorChange} />
                 ) : (
                   <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">
                     <span className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -363,7 +383,7 @@ export function TagsView({
                 onOpenNote={openNote}
               />
             ) : (
-              <RecentTags tags={tags} onSelectTag={selectTag} />
+              <RecentTags tags={allTags} onSelectTag={selectTag} />
             )}
           </div>
         </div>

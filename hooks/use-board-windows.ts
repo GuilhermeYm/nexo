@@ -10,6 +10,7 @@ import type {
   BoardConnection,
   BoardNoteTag,
   BoardWindow,
+  WindowContent,
 } from "@/lib/workspace/queries";
 
 /**
@@ -43,6 +44,8 @@ export interface WindowPatch {
   state?: BoardWindow["state"];
   text?: string;
   tone?: string;
+  backgroundTone?: WindowContent["backgroundTone"];
+  textTone?: WindowContent["textTone"];
 }
 
 /**
@@ -1190,14 +1193,22 @@ function maxZ(items: BoardWindow[]): number {
 }
 
 function applyPatch(window: BoardWindow, patch: WindowPatch): BoardWindow {
-  const { text, tone, ...geometry } = patch;
+  const { text, tone, backgroundTone, textTone, ...geometry } = patch;
 
   const next: BoardWindow = { ...window, ...geometry };
 
-  if (text !== undefined || tone !== undefined) {
+  if (
+    text !== undefined ||
+    tone !== undefined ||
+    backgroundTone !== undefined ||
+    textTone !== undefined
+  ) {
     next.content = {
       text: text ?? window.content?.text ?? "",
       tone: tone ?? window.content?.tone ?? "1",
+      backgroundTone:
+        backgroundTone ?? window.content?.backgroundTone ?? "none",
+      textTone: textTone ?? window.content?.textTone ?? "default",
     };
   }
 

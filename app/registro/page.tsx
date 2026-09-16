@@ -52,11 +52,17 @@ export default function RegistroPage() {
       });
       const data = (await response.json()) as {
         emailConfirmationPending?: boolean;
+        error?: string;
       };
 
       if (!response.ok) {
         if (response.status === 409) {
           setFormError("Este e-mail já está em uso.");
+        } else if (response.status === 422) {
+          // Senha recusada (fraca ou vazada) — o texto vem do servidor.
+          setFormError(
+            data.error ?? "Escolha uma senha mais forte."
+          );
         } else if (response.status === 429) {
           setFormError(
             "Muitas tentativas. Tente novamente em alguns minutos."

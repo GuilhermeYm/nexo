@@ -237,6 +237,33 @@ async function main() {
 
     check("três janelas criadas", (await readLayout(page)).length === 3);
 
+    // ---- propriedades da ferramenta de texto ----
+    const properties = "aside[aria-label='Propriedades da caixa de texto']";
+    await page.waitForSelector(properties);
+    check(
+      "selecionar a caixa abre as propriedades da ferramenta",
+      Boolean(await page.$(properties))
+    );
+    await page.click(`${properties} button[aria-label='Cor de fundo 4']`);
+    await page.click(`${properties} button[aria-label='Cor de texto 5']`);
+    await page.waitForTimeout(900);
+    await page.screenshot({ path: `${OUT}/text-properties-light.png` });
+    await setTheme(page, "dark");
+    await page.screenshot({ path: `${OUT}/text-properties-dark.png` });
+    await setTheme(page, "light");
+
+    const { rows: styledText } = await sql.query(
+      `select content from workspace_windows
+       where user_id = $1 and kind = 'text' limit 1`,
+      [userId]
+    );
+    check(
+      "fundo e cor do texto gravam no banco",
+      styledText[0]?.content?.backgroundTone === "4" &&
+        styledText[0]?.content?.textTone === "5",
+      JSON.stringify(styledText[0]?.content ?? null)
+    );
+
     // ---- trazer da conta ----
     await page.click('button[title^="Trazer da conta"]');
     await page.waitForSelector("aside[aria-label='Trazer da conta'] li button");
@@ -634,6 +661,16 @@ async function main() {
       persisted.rows.reduce((sum, row) => sum + row.total, 0) === 4,
       persisted.rows.map((row) => `${row.kind}:${row.total}`).join(" ")
     );
+    const { rows: styleAfterReload } = await sql.query(
+      `select content from workspace_windows
+       where user_id = $1 and kind = 'text' limit 1`,
+      [userId]
+    );
+    check(
+      "a aparência da caixa volta depois do recarregamento",
+      styleAfterReload[0]?.content?.backgroundTone === "4" &&
+        styleAfterReload[0]?.content?.textTone === "5"
+    );
 
     console.log("→ lousa preenchida");
     await page.screenshot({ path: `${OUT}/full-light.png` });
@@ -695,6 +732,11 @@ async function main() {
       `${visibleOnPhone} de ${onBoard} janelas na tela`
     );
     await mobilePage.screenshot({ path: `${OUT}/mobile-light.png` });
+    await mobilePage.click('button[aria-label^="Mover rascunho"]');
+    await mobilePage.waitForSelector(properties);
+    await mobilePage.waitForTimeout(300);
+    await mobilePage.screenshot({ path: `${OUT}/mobile-text-properties.png` });
+    await mobilePage.click(`${properties} button[title='Fechar propriedades']`);
     await mobilePage.click('button[title^="Trazer da conta"]');
     await mobilePage.waitForTimeout(700);
     await mobilePage.screenshot({ path: `${OUT}/mobile-picker.png` });

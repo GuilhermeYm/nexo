@@ -85,6 +85,16 @@ const TONE_DOT: Record<string, string> = {
 
 export const TONES = ["1", "2", "3", "4", "5", "6"];
 
+export const TEXT_TONE_CLASS: Record<string, string> = {
+  default: "text-muted-foreground",
+  "1": "text-tag-1-foreground",
+  "2": "text-tag-2-foreground",
+  "3": "text-tag-3-foreground",
+  "4": "text-tag-4-foreground",
+  "5": "text-tag-5-foreground",
+  "6": "text-tag-6-foreground",
+};
+
 /* ---------------------------------------------------------------------- */
 
 interface NoteBodyProps {
@@ -528,6 +538,7 @@ export function ElementWindowBody({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const isSticky = item.kind === "sticky";
   const tone = item.content?.tone ?? "1";
+  const textTone = item.content?.textTone ?? "default";
 
   useEffect(() => {
     if (autoFocus) textRef.current?.focus();
@@ -551,7 +562,10 @@ export function ElementWindowBody({
             FIELD_FOCUS,
             isSticky
               ? "text-sm leading-relaxed font-medium text-foreground"
-              : "text-sm leading-relaxed text-muted-foreground"
+              : cn(
+                  "text-sm leading-relaxed",
+                  TEXT_TONE_CLASS[textTone] ?? TEXT_TONE_CLASS.default
+                )
           )}
         />
       </div>

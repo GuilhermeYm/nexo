@@ -77,6 +77,10 @@ export interface WindowContent {
   text?: string;
   /** Posição na paleta de tags do tema, "1".."6". */
   tone?: string;
+  /** Fundo da caixa de texto: sem preenchimento ou posição da paleta. */
+  backgroundTone?: "none" | "1" | "2" | "3" | "4" | "5" | "6";
+  /** Cor do texto: padrão da interface ou posição da paleta. */
+  textTone?: "default" | "1" | "2" | "3" | "4" | "5" | "6";
 }
 
 /** Uma tag da nota, para a janela da lousa exibir com a cor da paleta. */

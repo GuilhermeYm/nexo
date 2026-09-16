@@ -30,6 +30,7 @@ import { ErrorReport } from "@/components/errors/error-report";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { AttachmentWindowBody } from "@/components/workspace/attachment-window-body";
 import { NotePicker } from "@/components/workspace/note-picker";
+import { ToolPropertiesPanel } from "@/components/workspace/tool-properties-panel";
 import {
   ElementWindowBody,
   NoteWindowBody,
@@ -681,6 +682,23 @@ export function Board({
       : (visibleWindows.find((item) => item.id === linkingFrom) ?? null);
 
   const usingTool = tool !== "none";
+  const selectedTextWindow =
+    !usingTool && !pickerOpen
+      ? (visibleWindows.find(
+          (item) => item.id === focusedId && item.kind === "text"
+        ) ?? null)
+      : null;
+
+  useEffect(() => {
+    if (!selectedTextWindow) return;
+
+    function closeProperties(event: KeyboardEvent) {
+      if (event.key === "Escape") setFocusedId(null);
+    }
+
+    window.addEventListener("keydown", closeProperties);
+    return () => window.removeEventListener("keydown", closeProperties);
+  }, [selectedTextWindow]);
 
   /**
    * A flecha que está com o campo aberto, **se ela ainda existir**.
@@ -1112,17 +1130,7 @@ export function Board({
                               <Paperclip className="size-3.5 shrink-0 text-subtle-foreground" />
                             ) : null
                           }
-                          toneClass={
-                            item.kind === "sticky"
-                              ? TONE_SURFACE[item.content?.tone ?? "1"]
-                              : item.kind === "text"
-                                ? // Transparente de verdade não funciona numa lousa: o
-                                  // texto se sobrepõe ao da janela de baixo e nenhum
-                                  // dos dois se lê. Fundo translúcido com desfoque
-                                  // mantém a caixa mais leve que uma nota, sem sumir.
-                                  "border-border/60 bg-background/80 backdrop-blur-sm"
-                                : undefined
-                          }
+                          toneClass={surfaceClassOf(item)}
                           focused={focusedId === item.id}
                           onFocus={() => {
                             setFocusedId(item.id);
@@ -1555,6 +1563,16 @@ export function Board({
           </div>
         )}
 
+        {selectedTextWindow && (
+          <ToolPropertiesPanel
+            window={selectedTextWindow}
+            onChange={(patch) =>
+              updateWindow(selectedTextWindow.id, patch)
+            }
+            onClose={() => setFocusedId(null)}
+          />
+        )}
+
         <NotePicker
           workspaceId={workspace.id}
           open={pickerOpen}
@@ -1839,6 +1857,21 @@ function titleOf(item: BoardWindow): string {
   if (item.kind === "note") return item.note?.title || "Sem título";
   if (item.kind === "sticky") return firstLine(item.content?.text) || "Post-it";
   return firstLine(item.content?.text) || "Texto";
+}
+
+function surfaceClassOf(item: BoardWindow): string | undefined {
+  if (item.kind === "sticky") {
+    return TONE_SURFACE[item.content?.tone ?? "1"];
+  }
+  if (item.kind !== "text") return undefined;
+
+  const backgroundTone = item.content?.backgroundTone ?? "none";
+  if (backgroundTone !== "none") return TONE_SURFACE[backgroundTone];
+
+  // Transparente de verdade não funciona numa lousa: o texto se sobrepõe ao
+  // da janela de baixo. A superfície neutra mantém a caixa leve sem fazê-la
+  // desaparecer.
+  return "border-border/60 bg-background/80 backdrop-blur-sm";
 }
 
 /**

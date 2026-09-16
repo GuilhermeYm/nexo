@@ -177,7 +177,14 @@ export async function POST(
         source: "user",
         content:
           input.kind === "sticky" || input.kind === "text"
-            ? { text: input.text ?? "", tone: input.tone ?? "1" }
+            ? {
+                text: input.text ?? "",
+                tone: input.tone ?? "1",
+                ...(input.kind === "text" && {
+                  backgroundTone: input.backgroundTone ?? "none",
+                  textTone: input.textTone ?? "default",
+                }),
+              }
             : null,
         x: input.x ?? context.nextX,
         y: input.y ?? context.nextY,

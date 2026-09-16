@@ -50,6 +50,17 @@ export async function POST(request: Request) {
         });
         return errorResponse(409, "Este e-mail já está cadastrado.");
       }
+      // Senha recusada pelo Supabase: ou fraca demais para a política do
+      // projeto, ou presente no HaveIBeenPwned (leaked password protection).
+      // Precisa de texto próprio — com a mensagem genérica a pessoa tenta a
+      // mesma senha de novo, e falha de novo, sem nunca saber o porquê.
+      if (error.code === "weak_password") {
+        return errorResponse(
+          422,
+          "Essa senha é fraca ou apareceu em vazamentos conhecidos. Escolha outra."
+        );
+      }
+
       console.warn("[AUTH] signUp rejeitado:", error.code);
       return errorResponse(400, "Não foi possível criar a conta.");
     }
