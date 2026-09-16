@@ -204,11 +204,15 @@ export function Board({
   const [armedClear, setArmedClear] = useState(false);
   /** De onde a ligação em curso sai, e onde o ponteiro está agora. */
   const [linkingFrom, setLinkingFrom] = useState<string | null>(null);
+  const [linkingPending, setLinkingPending] = useState(false);
+  const linkSession = useRef(0);
   /** A flecha com o campo de rótulo aberto. */
   const [labelingId, setLabelingId] = useState<string | null>(null);
   const [pointerAt, setPointerAt] = useState<{ x: number; y: number } | null>(
     null
   );
+  const linkPointerFrame = useRef<number | null>(null);
+  const pendingLinkPointer = useRef<{ x: number; y: number } | null>(null);
   // A fonte da verdade da passada em andamento. O estado acima é o reflexo
   // dela para o React desenhar — quem lê no meio do gesto lê daqui, e assim
   // nenhum atualizador de estado precisa deixar de ser puro.
@@ -548,6 +552,7 @@ export function Board({
 
   /** Guarda a ferramenta e devolve à lousa o que o gesto ainda não gravou. */
   const stopTool = useCallback(() => {
+    linkSession.current += 1;
     sweeping.current = false;
     sweptRef.current = EMPTY_SET;
     sweptLinksRef.current = EMPTY_SET;
@@ -557,9 +562,40 @@ export function Board({
     setUnderEraserLink(null);
     setArmedClear(false);
     setLinkingFrom(null);
+    setLinkingPending(false);
     setPointerAt(null);
+    pendingLinkPointer.current = null;
+    if (linkPointerFrame.current !== null) {
+      cancelAnimationFrame(linkPointerFrame.current);
+      linkPointerFrame.current = null;
+    }
     setTool("none");
   }, []);
+
+  useEffect(
+    () => () => {
+      if (linkPointerFrame.current !== null) {
+        cancelAnimationFrame(linkPointerFrame.current);
+      }
+    },
+    []
+  );
+
+  const trackLinkPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      const point = toContainer(clientX, clientY);
+      pendingLinkPointer.current = toBoard(point.x, point.y);
+      if (linkPointerFrame.current !== null) return;
+
+      linkPointerFrame.current = requestAnimationFrame(() => {
+        linkPointerFrame.current = null;
+        const next = pendingLinkPointer.current;
+        pendingLinkPointer.current = null;
+        if (next) setPointerAt(next);
+      });
+    },
+    [toBoard, toContainer]
+  );
 
   /**
    * Pega uma ferramenta.
@@ -571,6 +607,7 @@ export function Board({
    * itens do menu do fundo), para nenhuma delas esquecer disso.
    */
   const pickTool = useCallback((next: "eraser" | "link") => {
+    linkSession.current += 1;
     setLabelingId(null);
     setTool(next);
   }, []);
@@ -590,7 +627,8 @@ export function Board({
    * errado.
    */
   const pickForLink = useCallback(
-    (clientX: number, clientY: number) => {
+    async (clientX: number, clientY: number) => {
+      if (linkingPending) return;
       const hit = windowAt(clientX, clientY);
       if (!hit) {
         // No vazio, a escolha se desfaz. Sair da ferramenta é o "×" ou o Esc.
@@ -620,12 +658,16 @@ export function Board({
         return;
       }
 
-      void connect(origin, hit.id);
-      // Encadeia: o destino vira a origem seguinte, e desenhar uma corrente
-      // deixa de custar um clique a mais por elo.
-      setLinkingFrom(hit.id);
+      setLinkingPending(true);
+      const session = linkSession.current;
+      const created = await connect(origin, hit.id);
+      if (session !== linkSession.current) return;
+      setLinkingPending(false);
+      // Só encadeia depois da confirmação. Antes, a interface avançava de
+      // etapa sem a flecha existir e parecia ter ignorado o segundo toque.
+      if (created) setLinkingFrom(hit.id);
     },
-    [windowAt, linkingFrom, windows, connect]
+    [windowAt, linkingFrom, windows, connect, linkingPending]
   );
 
   // Esc guarda a ferramenta. Um modo sem saída óbvia é um modo em que a
@@ -680,6 +722,10 @@ export function Board({
     linkingFrom === null
       ? null
       : (visibleWindows.find((item) => item.id === linkingFrom) ?? null);
+  const linkTarget =
+    tool !== "link" || underEraser === null
+      ? null
+      : (visibleWindows.find((item) => item.id === underEraser) ?? null);
 
   const usingTool = tool !== "none";
   const selectedTextWindow =
@@ -1331,12 +1377,13 @@ export function Board({
             }}
             onPointerMove={(event) => {
               if (tool === "link") {
+                const hit = windowAt(event.clientX, event.clientY);
+                setUnderEraser(hit?.id ?? null);
                 // A ponta solta acompanha o ponteiro. Só enquanto existe uma
                 // origem: sem ela não há o que desenhar, e guardar a posição
                 // à toa seria um render por movimento do mouse.
                 if (!linkingFrom) return;
-                const point = toContainer(event.clientX, event.clientY);
-                setPointerAt(toBoard(point.x, point.y));
+                trackLinkPointer(event.clientX, event.clientY);
                 return;
               }
 
@@ -1354,31 +1401,64 @@ export function Board({
               tool === "link" ? "cursor-cell" : "cursor-crosshair"
             )}
           >
+            {/* No primeiro passo, todas as janelas se apresentam como alvos.
+                Depois, a origem fica marcada e as demais continuam discretas:
+                a pessoa não precisa descobrir onde é possível tocar. */}
+            {tool === "link" &&
+              visibleWindows.map((item) => {
+                const origin = item.id === linkOrigin?.id;
+                const hovered = item.id === linkTarget?.id;
+                if (origin || hovered) return null;
+
+                return (
+                  <div
+                    key={item.id}
+                    aria-hidden="true"
+                    style={frameBox(item, viewport)}
+                    className="pointer-events-none absolute rounded-lg border border-dashed border-accent/35 bg-accent/[0.025]"
+                  />
+                );
+              })}
+
             {/* O alvo, marcado antes de sumir — ou antes de ser ligado. Sem
                 isto a ferramenta age sobre o que estiver embaixo sem nunca
                 ter dito o que era. */}
-            {eraserTarget && (
+            {tool === "eraser" && eraserTarget && (
               <div
                 aria-hidden="true"
                 style={frameBox(eraserTarget, viewport)}
-                className={cn(
-                  "pointer-events-none absolute rounded-lg border-2",
-                  tool === "link"
-                    ? "border-accent bg-accent/10"
-                    : "border-error bg-error/10"
-                )}
+                className="pointer-events-none absolute rounded-lg border-2 border-error bg-error/10"
               />
             )}
 
             {/* A origem escolhida continua marcada enquanto o segundo toque
                 não vem: sem isso, no meio de uma corrente de ligações, não
                 dá para saber de onde a próxima sai. */}
-            {linkOrigin && linkOrigin.id !== eraserTarget?.id && (
+            {linkOrigin && linkOrigin.id !== linkTarget?.id && (
               <div
                 aria-hidden="true"
                 style={frameBox(linkOrigin, viewport)}
-                className="pointer-events-none absolute rounded-lg border-2 border-dashed border-accent"
-              />
+                className="pointer-events-none absolute rounded-lg border-2 border-accent bg-accent/5 shadow-[0_8px_24px_-16px] shadow-accent"
+              >
+                <span className="absolute -top-3 left-3 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground shadow-sm">
+                  Origem
+                </span>
+              </div>
+            )}
+
+            {tool === "link" && linkTarget && (
+              <div
+                aria-hidden="true"
+                style={frameBox(linkTarget, viewport)}
+                className={cn(
+                  "pointer-events-none absolute rounded-lg border-2 border-accent bg-accent/10 transition-colors duration-150 motion-reduce:transition-none",
+                  linkingPending && "animate-pulse motion-reduce:animate-none"
+                )}
+              >
+                <span className="absolute -top-3 left-3 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground shadow-sm">
+                  {linkingPending ? "Ligando…" : linkOrigin ? "Destino" : "Começar aqui"}
+                </span>
+              </div>
             )}
           </div>
         )}
@@ -1406,14 +1486,18 @@ export function Board({
                   ? // `linkOrigin`, não `linkingFrom`: a origem fechada no
                     // meio do gesto deixaria a barra pedindo o destino de uma
                     // janela que já não está na lousa.
-                    linkOrigin
-                    ? "Agora toque no outro elemento."
-                    : "Toque no elemento de onde a flecha sai."
+                    linkingPending
+                    ? "Criando a ligação…"
+                    : linkOrigin
+                      ? `De “${shortTitle(titleOf(linkOrigin))}” para onde?`
+                      : "Escolha de onde a flecha deve sair."
                   : "Passe por cima para tirar da lousa."}
               </span>{" "}
               <span className="hidden sm:inline">
                 {tool === "link"
-                  ? "A flecha aponta para o segundo."
+                  ? linkTarget && linkOrigin
+                    ? `Destino: “${shortTitle(titleOf(linkTarget))}”.`
+                    : "Passe sobre uma nota e toque para confirmar."
                   : "Notas e arquivos continuam na sua conta."}
               </span>
             </p>
@@ -1939,6 +2023,11 @@ function frameBox(
     width: frameWidthOf(item) * viewport.zoom,
     height: frameHeightOf(item) * viewport.zoom,
   };
+}
+
+/** Mantém os nomes do gesto legíveis sem deixar a barra crescer sem limite. */
+function shortTitle(value: string): string {
+  return value.length > 28 ? `${value.slice(0, 27).trimEnd()}…` : value;
 }
 
 /** O que o cartão de "apagado" diz. */

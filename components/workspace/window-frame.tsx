@@ -3,6 +3,7 @@
 import { Minus, Square, X } from "lucide-react";
 import {
   useCallback,
+  useEffect,
   useRef,
   type ComponentProps,
   type ReactNode,
@@ -102,6 +103,30 @@ export function WindowFrame({
     originHeight: number;
     latest: WindowPatch;
   } | null>(null);
+  // Eventos de ponteiro podem chegar mais rápido que a tela consegue pintar.
+  // Um único preview por quadro evita enfileirar renders da lousa inteira e
+  // mantém o último movimento — justamente o que o olho precisa acompanhar.
+  const previewFrame = useRef<number | null>(null);
+  const pendingPreview = useRef<WindowPatch | null>(null);
+
+  const flushPreview = useCallback(() => {
+    if (previewFrame.current !== null) {
+      cancelAnimationFrame(previewFrame.current);
+      previewFrame.current = null;
+    }
+    const patch = pendingPreview.current;
+    pendingPreview.current = null;
+    if (patch) onPreview(patch);
+  }, [onPreview]);
+
+  useEffect(
+    () => () => {
+      if (previewFrame.current !== null) {
+        cancelAnimationFrame(previewFrame.current);
+      }
+    },
+    []
+  );
 
   const minimized = item.state === "minimized";
 
@@ -153,7 +178,15 @@ export function WindowFrame({
             };
 
       current.latest = patch;
-      onPreview(patch);
+      pendingPreview.current = patch;
+      if (previewFrame.current === null) {
+        previewFrame.current = requestAnimationFrame(() => {
+          previewFrame.current = null;
+          const next = pendingPreview.current;
+          pendingPreview.current = null;
+          if (next) onPreview(next);
+        });
+      }
     },
     [zoom, onPreview]
   );
@@ -165,11 +198,14 @@ export function WindowFrame({
 
       gesture.current = null;
       event.currentTarget.releasePointerCapture?.(event.pointerId);
+      // Garante que a posição visual final e a posição persistida sejam a
+      // mesma mesmo quando a pessoa solta entre dois quadros de animação.
+      flushPreview();
 
       // Um clique sem arrastar não gera escrita nenhuma.
       if (Object.keys(current.latest).length > 0) onCommit(current.latest);
     },
-    [onCommit]
+    [flushPreview, onCommit]
   );
 
   const handleKeyMove = useCallback(

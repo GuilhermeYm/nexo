@@ -978,8 +978,8 @@ export function useBoardWindows(
    * existia ou porque a lousa chegou ao teto.
    */
   const connect = useCallback(
-    async (fromWindowId: string, toWindowId: string) => {
-      if (fromWindowId === toWindowId) return;
+    async (fromWindowId: string, toWindowId: string): Promise<boolean> => {
+      if (fromWindowId === toWindowId) return false;
 
       // Ligar de novo o que já está ligado não é erro nem pedido: é o segundo
       // toque de quem clicou duas vezes, ou o encadeamento passando por um
@@ -990,13 +990,13 @@ export function useBoardWindows(
         (item) =>
           item.fromWindowId === fromWindowId && item.toWindowId === toWindowId
       );
-      if (already) return;
+      if (already) return true;
 
       // A mesma corrida, dentro de um quadro: dois toques rápidos disparam
       // dois POST antes de o primeiro voltar, e o espelho ainda não tem a
       // linha. A trava vive até a resposta chegar.
       const pair = `${fromWindowId}>${toWindowId}`;
-      if (connecting.current.has(pair)) return;
+      if (connecting.current.has(pair)) return false;
       connecting.current.add(pair);
 
       try {
@@ -1013,12 +1013,14 @@ export function useBoardWindows(
           // precisa ler um aviso sobre isso.
           if (response.status === 409) scheduleRefresh();
           else setError(plainNotice(body?.error ?? "Não foi possível ligar."));
-          return;
+          return response.status === 409;
         }
 
         applySnapshot(body);
+        return true;
       } catch {
         setError(plainNotice("Sem conexão. A ligação não foi criada."));
+        return false;
       } finally {
         connecting.current.delete(pair);
       }
