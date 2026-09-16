@@ -1,9 +1,28 @@
 import "server-only";
 
-import { and, eq, ne } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { attachments, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
+import {
+  NOTE_LIST_PAGE_SIZE,
+  type NoteListItem,
+  type NoteListOptions,
+  type NoteListResult,
+} from "@/lib/notes/list";
 
 export interface EditableNote {
   id: string;
@@ -25,6 +44,120 @@ export interface EditableNote {
    * janela": o vínculo mora em `attachments.note_id`, do lado do arquivo.
    */
   attachment: { id: string; filename: string; type: string } | null;
+}
+
+/**
+ * Inventário paginado das notas da pessoa.
+ *
+ * A Agenda também é persistida em `notes`, mas é uma estrutura interna com
+ * tela própria. O `taskDate` nulo separa capturas e documentos reais dessas
+ * listas diárias, evitando que um detalhe de implementação polua "Notas".
+ */
+export async function listOwnedNotes(
+  userId: string,
+  options: NoteListOptions = {}
+): Promise<NoteListResult> {
+  const page = Math.max(1, options.page ?? 1);
+  const pageSize = Math.min(48, Math.max(1, options.pageSize ?? NOTE_LIST_PAGE_SIZE));
+  const query = options.query?.trim() ?? "";
+
+  const conditions: SQL[] = [
+    eq(notes.userId, userId),
+    ne(notes.status, "deleted"),
+    isNull(notes.taskDate),
+  ];
+
+  if (options.source && options.source !== "all") {
+    conditions.push(eq(notes.source, options.source));
+  }
+  if (options.type && options.type !== "all") {
+    conditions.push(eq(notes.type, options.type));
+  }
+  if (query) {
+    const tsQuery = sql`websearch_to_tsquery('portuguese', ${query})`;
+    conditions.push(
+      or(
+        sql`${notes.searchVector} @@ ${tsQuery}`,
+        ilike(notes.title, `%${query}%`)
+      )!
+    );
+  }
+
+  const where = and(...conditions)!;
+  const orderBy =
+    options.sort === "created"
+      ? [desc(notes.createdAt), desc(notes.id)]
+      : options.sort === "title"
+        ? [asc(notes.title), desc(notes.updatedAt)]
+        : [desc(notes.updatedAt), desc(notes.id)];
+
+  const [rows, [totalRow]] = await Promise.all([
+    db
+      .select({
+        id: notes.id,
+        title: notes.title,
+        content: notes.content,
+        type: notes.type,
+        source: notes.source,
+        workspaceName: workspaces.name,
+        updatedAt: notes.updatedAt,
+        createdAt: notes.createdAt,
+      })
+      .from(notes)
+      .leftJoin(workspaces, eq(notes.workspaceId, workspaces.id))
+      .where(where)
+      .orderBy(...orderBy)
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db.select({ value: count() }).from(notes).where(where),
+  ]);
+
+  const noteIds = rows.map((row) => row.id);
+  const tagRows = noteIds.length
+    ? await db
+        .select({
+          noteId: noteTags.noteId,
+          id: tags.id,
+          name: tags.name,
+          color: tags.color,
+        })
+        .from(noteTags)
+        .innerJoin(tags, eq(noteTags.tagId, tags.id))
+        .where(
+          and(
+            inArray(noteTags.noteId, noteIds),
+            // Defesa em profundidade: os ids já vieram de notas desta pessoa,
+            // mas a tag também confirma a posse na própria consulta.
+            eq(tags.userId, userId)
+          )
+        )
+    : [];
+
+  const tagsByNote = new Map<string, NoteListItem["tags"]>();
+  for (const tag of tagRows) {
+    const list = tagsByNote.get(tag.noteId) ?? [];
+    list.push({ id: tag.id, name: tag.name, color: tag.color });
+    tagsByNote.set(tag.noteId, list);
+  }
+
+  const total = totalRow?.value ?? 0;
+  return {
+    notes: rows.map(({ content, ...row }) => ({
+      ...row,
+      excerpt: noteExcerpt(content),
+      tags: tagsByNote.get(row.id) ?? [],
+    })),
+    total,
+    page,
+    pageSize,
+    hasMore: page * pageSize < total,
+  };
+}
+
+function noteExcerpt(content: string | null): string | null {
+  const normalized = content?.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length > 220 ? `${normalized.slice(0, 219)}…` : normalized;
 }
 
 /**
