@@ -9,6 +9,7 @@ import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
 import { notes, workspaceWindows } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { getOwnedNotePreview } from "@/lib/notes/queries";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { createClient } from "@/lib/supabase/server";
 import { updateNoteSchema } from "@/lib/validations/workspace";
 
@@ -172,6 +173,8 @@ export async function PATCH(
       });
     }
 
+    await invalidateNoteListCache(user.id);
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     const code = await logServerError("PATCH /api/notes/[id]", error, { userId }, request);
@@ -235,6 +238,8 @@ export async function DELETE(
       oldData: { title: removed.title },
       request,
     });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

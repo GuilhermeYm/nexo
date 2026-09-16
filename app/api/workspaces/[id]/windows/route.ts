@@ -11,6 +11,7 @@ import {
   workspaceWindows,
 } from "@/lib/db/schema";
 import { windowCapFor } from "@/lib/plans";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { checkCaptureQuota } from "@/lib/usage/queries";
@@ -437,6 +438,8 @@ async function resolveNoteId(
       source: "user",
     })
     .returning({ id: notes.id });
+
+  await invalidateNoteListCache(userId);
 
   return created.id;
 }

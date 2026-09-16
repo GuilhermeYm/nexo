@@ -17,6 +17,7 @@ import {
   workspaces,
 } from "@/lib/db/schema";
 import { notifySystem } from "@/lib/inbox/notify";
+import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 
@@ -205,6 +206,8 @@ export async function POST(request: Request) {
       body: "Workspaces, notas, arquivos e a lousa foram apagados a seu pedido. O login e o plano continuam como estavam. É só começar de novo.",
       metadata: { kind: "account_reset" },
     });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ ok: true, deleted });
   } catch (error) {

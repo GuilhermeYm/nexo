@@ -14,6 +14,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getNoteCaptureContext } from "@/lib/usage/queries";
 import { NOTE_TYPES } from "@/lib/notes/list";
 import { listOwnedNotes } from "@/lib/notes/queries";
+import {
+  invalidateNoteListCache,
+  readNoteListCache,
+  writeNoteListCache,
+} from "@/lib/notes/cache";
 
 /**
  * Cria uma nota fora de qualquer lousa.
@@ -72,15 +77,25 @@ export async function GET(request: Request) {
       return errorResponse(429, "Muitas consultas seguidas. Aguarde um instante.");
     }
 
-    return NextResponse.json(
-      await listOwnedNotes(user.id, {
-        query: parsed.data.q,
-        source: parsed.data.source,
-        type: parsed.data.type,
-        sort: parsed.data.sort,
-        page: parsed.data.page,
-      })
-    );
+    const options = {
+      query: parsed.data.q,
+      source: parsed.data.source,
+      type: parsed.data.type,
+      sort: parsed.data.sort,
+      page: parsed.data.page,
+    } as const;
+    const cached = await readNoteListCache(user.id, options);
+    if (cached.value) {
+      return NextResponse.json(cached.value, {
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
+
+    const result = await listOwnedNotes(user.id, options);
+    await writeNoteListCache(user.id, options, cached.version, result);
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error) {
     const code = await logServerError("GET /api/notes", error, { userId }, request);
     return errorResponse(500, "Erro ao carregar as notas.", code);
@@ -174,6 +189,8 @@ export async function POST(request: Request) {
         source: "user",
       })
       .returning({ id: notes.id, title: notes.title });
+
+    await invalidateNoteListCache(user.id);
 
     return NextResponse.json({ note: created }, { status: 201 });
   } catch (error) {
