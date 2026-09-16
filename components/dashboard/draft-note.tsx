@@ -202,19 +202,20 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
         }}
         type="button"
         onClick={() => setOpened(true)}
-        className="mt-3 flex w-full items-center gap-2.5 rounded-xl border border-dashed border-border px-4 py-3 text-left transition-colors duration-150 hover:border-subtle-foreground hover:bg-secondary"
+        className="group mt-3 flex w-full items-center gap-3 rounded-2xl border border-dashed border-border bg-background px-4 py-3.5 text-left transition-[background-color,border-color,transform] duration-150 hover:border-subtle-foreground hover:bg-secondary active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:active:scale-100"
       >
-        <PenLine
-          className="size-4 shrink-0 text-subtle-foreground"
-          aria-hidden="true"
-        />
-        <span className="min-w-0 flex-1 text-sm text-muted-foreground">
-          Escrever um rascunho{" "}
-          <span className="text-subtle-foreground">
-            — fica só neste navegador
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-[background-color,color,transform] duration-150 group-hover:translate-x-0.5 group-hover:bg-tertiary group-hover:text-foreground motion-reduce:group-hover:translate-x-0">
+          <PenLine className="size-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-foreground">
+            Escrever um rascunho
+          </span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+            Fica neste navegador até você decidir guardar.
           </span>
         </span>
-        <kbd className="hidden shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-subtle-foreground sm:block">
+        <kbd className="hidden shrink-0 rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] text-subtle-foreground sm:block">
           N
         </kbd>
       </button>
@@ -228,28 +229,28 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
       }}
       aria-label="Rascunho"
       className={cn(
-        "mt-3 rounded-xl border border-border bg-secondary p-3",
+        "mt-3 overflow-hidden rounded-2xl border border-border bg-background",
+        opened && !expanded && "animate-draft-open motion-reduce:animate-none",
         expanded &&
-          "fixed inset-0 z-50 m-0 flex flex-col rounded-none"
+          "fixed inset-0 z-50 m-0 flex flex-col rounded-none border-0"
       )}
     >
-      <div className="flex items-center gap-2 px-1 pb-2">
-        <PenLine
-          className="size-3.5 shrink-0 text-subtle-foreground"
-          aria-hidden="true"
-        />
-        <h2 className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
-          Rascunho
-        </h2>
-        <p className="min-w-0 flex-1 truncate text-xs text-subtle-foreground">
-          Fica só neste navegador — não entra na busca nem vai para o celular.
-        </p>
-        <div className="flex items-center gap-1">
+      <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-subtle-foreground">
+          <PenLine className="size-3.5" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-semibold text-foreground">Rascunho</h2>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            Só neste navegador — não entra na busca nem vai para o celular.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={() => setExpanded((current) => !current)}
             title={expanded ? "Sair da tela cheia" : "Maximizar o rascunho"}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-subtle-foreground transition-[background-color,color,transform] duration-150 hover:bg-secondary hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent motion-reduce:active:scale-100"
           >
             {expanded ? (
               <Minimize2 className="size-3.5" aria-hidden="true" />
@@ -269,7 +270,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
                 setOpened(false);
               }}
               title="Fechar o rascunho"
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-subtle-foreground transition-[background-color,color,transform] duration-150 hover:bg-secondary hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent motion-reduce:active:scale-100"
             >
               <X className="size-3.5" aria-hidden="true" />
               <span className="sr-only">Fechar o rascunho</span>
@@ -280,7 +281,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
 
       <div
         className={cn(
-          "overflow-hidden rounded-lg border border-border bg-background",
+          "min-h-0 bg-background",
           expanded && "flex flex-1 flex-col"
         )}
       >
@@ -295,7 +296,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
           placeholder="Título"
           maxLength={200}
           data-focus-ring="container"
-          className="w-full bg-transparent px-3 pt-2.5 pb-1.5 text-base font-bold tracking-[-0.01em] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-subtle-foreground"
+          className="w-full bg-transparent px-4 pt-4 pb-2 text-lg font-bold tracking-[-0.02em] text-foreground outline-none placeholder:text-subtle-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
         />
 
         {/* Edição de nota cheia — negrito, títulos, listas —, só que este
@@ -310,12 +311,12 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
         />
       </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-2 px-1">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-border bg-secondary px-4 py-3">
         <button
           type="button"
           onClick={save}
           disabled={!filled || saving}
-          className="flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-accent-foreground transition-colors duration-150 hover:bg-accent/90 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-11"
+          className="flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-accent-foreground transition-[background-color,transform] duration-150 hover:bg-accent/90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-secondary disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-11 motion-reduce:active:scale-100"
         >
           {saving && (
             <LoaderCircle
@@ -341,7 +342,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
               setOpened(false);
             }}
             className={cn(
-              "flex h-9 items-center gap-2 rounded-full px-3 text-sm font-medium transition-colors duration-150 pointer-coarse:h-11",
+              "flex h-9 items-center gap-2 rounded-full px-3 text-sm font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-secondary pointer-coarse:h-11 motion-reduce:active:scale-100",
               armed
                 ? "bg-error/10 text-error"
                 : "text-muted-foreground hover:bg-tertiary hover:text-foreground"
@@ -358,7 +359,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
         <p
           role="status"
           className={cn(
-            "ml-auto min-w-0 text-xs",
+            "basis-full text-xs leading-relaxed sm:ml-auto sm:basis-auto sm:text-right",
             error?.upgrade
               ? "text-muted-foreground"
               : error
