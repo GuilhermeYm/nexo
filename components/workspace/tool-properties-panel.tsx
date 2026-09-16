@@ -115,7 +115,8 @@ export function ToolPropertiesPanel({
   );
 }
 
-function ColorSection({
+/** Uma fileira de amostras. Compartilhada com o inspetor da ligação. */
+export function ColorSection({
   title,
   description,
   value,

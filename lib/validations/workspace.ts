@@ -5,6 +5,12 @@ import {
   ABSOLUTE_CONNECTIONS_PER_BOARD,
   ABSOLUTE_WINDOWS_PER_BOARD,
 } from "@/lib/plans";
+import {
+  CONNECTION_HEADS,
+  CONNECTION_STROKES,
+  CONNECTION_TONES,
+  CONNECTION_WEIGHTS,
+} from "@/lib/workspace/connection-style";
 
 /**
  * Validação das janelas da lousa.
@@ -216,16 +222,42 @@ export const createConnectionSchema = z
  * O teto de 80 é o mesmo do CHECK em 0012 — quem passar direto pelo
  * PostgREST esbarra no banco.
  */
-export const connectionLabelSchema = z.object({
-  label: z
-    .string()
-    .max(80, "No máximo 80 caracteres.")
-    // Quebra de linha viraria uma etiqueta de duas alturas em cima de um
-    // traço; o que precisa de parágrafo precisa de uma nota.
-    .transform((value) => value.replace(/\s+/g, " ").trim())
-    .transform((value) => (value.length === 0 ? null : value))
-    .nullable(),
-});
+const connectionLabel = z
+  .string()
+  .max(80, "No máximo 80 caracteres.")
+  // Quebra de linha viraria uma etiqueta de duas alturas em cima de um
+  // traço; o que precisa de parágrafo precisa de uma nota.
+  .transform((value) => value.replace(/\s+/g, " ").trim())
+  .transform((value) => (value.length === 0 ? null : value))
+  .nullable();
+
+/** A aparência da flecha — os mesmos enums do CHECK de 0019. */
+const connectionStyleShape = {
+  tone: z.enum(CONNECTION_TONES).nullable(),
+  stroke: z.enum(CONNECTION_STROKES),
+  weight: z.enum(CONNECTION_WEIGHTS),
+  heads: z.enum(CONNECTION_HEADS),
+};
+
+/**
+ * O que o inspetor da ligação muda: o rótulo e a aparência, cada campo
+ * opcional — um clique numa amostra manda só a cor. `strict` porque origem e
+ * destino não se editam por aqui, e um campo a mais é engano ou tentativa.
+ */
+export const connectionPatchSchema = z
+  .object({
+    label: connectionLabel.optional(),
+    tone: connectionStyleShape.tone.optional(),
+    stroke: connectionStyleShape.stroke.optional(),
+    weight: connectionStyleShape.weight.optional(),
+    heads: connectionStyleShape.heads.optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Nada para mudar.",
+  });
+
+export type ConnectionPatch = z.infer<typeof connectionPatchSchema>;
 
 /**
  * Uma ligação como o "Desfazer" da borracha a devolve.
@@ -239,6 +271,12 @@ const restorableConnectionSchema = z
     fromWindowId: z.uuid(),
     toWindowId: z.uuid(),
     label: z.string().max(80).nullish(),
+    // A aparência também volta: ausente (um "Desfazer" de antes de 0019) cai
+    // no padrão do banco.
+    tone: connectionStyleShape.tone.optional(),
+    stroke: connectionStyleShape.stroke.optional(),
+    weight: connectionStyleShape.weight.optional(),
+    heads: connectionStyleShape.heads.optional(),
   })
   .refine((value) => value.fromWindowId !== value.toWindowId);
 

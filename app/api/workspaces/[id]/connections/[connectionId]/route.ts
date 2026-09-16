@@ -7,18 +7,18 @@ import { workspaceConnections } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { listBoardConnections } from "@/lib/workspace/queries";
-import { connectionLabelSchema } from "@/lib/validations/workspace";
+import { connectionPatchSchema } from "@/lib/validations/workspace";
 
 /**
- * O que a flecha diz.
+ * O que a flecha diz e como ela aparece.
  *
  * A rota de coleção continua sem `PATCH` — origem e destino não se editam,
- * mudar a direção é apagar e ligar de novo. Esta rota existe para a **única**
- * coisa aqui dentro que é conteúdo: o rótulo. Ver 0012, que abriu a policy de
- * UPDATE com GRANT restrito a essa coluna.
+ * mudar a direção é apagar e ligar de novo. Esta rota existe para o rótulo
+ * (0012) e para a aparência (0019): cor, traço, espessura e pontas. O GRANT
+ * por coluna cobre exatamente esses cinco campos, e o schema é `strict`.
  *
- * Sem auditoria, e de propósito: o rótulo é uma etiqueta de lousa, corrigida
- * enquanto se pensa. Auditar cada tecla afogaria os eventos que a tabela
+ * Sem auditoria, e de propósito: o rótulo e a cor são etiqueta de lousa,
+ * corrigida enquanto se pensa. Auditar cada tecla afogaria os eventos que a tabela
  * existe para deixar visíveis — o mesmo critério do corpo da nota e do
  * fechamento de uma janela.
  */
@@ -56,7 +56,9 @@ export async function PATCH(
       return errorResponse(404, "Ligação não encontrada.");
     }
 
-    const parsed = connectionLabelSchema.safeParse(await request.json());
+    const parsed = connectionPatchSchema.safeParse(
+      await request.json().catch(() => null)
+    );
     if (!parsed.success) {
       return errorResponse(
         400,
@@ -69,7 +71,7 @@ export async function PATCH(
     // banco dizendo o que o `update` já recusa sozinho.
     const [updated] = await db
       .update(workspaceConnections)
-      .set({ label: parsed.data.label })
+      .set(parsed.data)
       .where(
         and(
           eq(workspaceConnections.id, connectionId),
@@ -91,6 +93,6 @@ export async function PATCH(
       {},
       request
     );
-    return errorResponse(500, "Erro ao salvar o rótulo.", code);
+    return errorResponse(500, "Erro ao salvar a ligação.", code);
   }
 }

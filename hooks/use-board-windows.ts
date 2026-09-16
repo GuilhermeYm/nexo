@@ -6,6 +6,7 @@ import { readApiFailure } from "@/lib/plan-limit";
 import { createClient } from "@/lib/supabase/client";
 import { authorizeRealtime } from "@/lib/supabase/realtime";
 import { paletteFromName } from "@/lib/tags/palette";
+import type { ConnectionStyle } from "@/lib/workspace/connection-style";
 import type {
   BoardConnection,
   BoardNoteTag,
@@ -80,7 +81,17 @@ export interface RestorableConnection {
   toWindowId: string;
   /** O rótulo volta com a flecha — é conteúdo, não geometria. */
   label?: string | null;
+  /** E a aparência, pelo mesmo motivo: foi a pessoa que escolheu. */
+  tone?: ConnectionStyle["tone"];
+  stroke?: ConnectionStyle["stroke"];
+  weight?: ConnectionStyle["weight"];
+  heads?: ConnectionStyle["heads"];
 }
+
+/** O que o inspetor da ligação muda. Origem e destino não estão aqui. */
+export type ConnectionPatch = Partial<
+  Pick<BoardConnection, "label" | keyof ConnectionStyle>
+>;
 
 /** O último lote apagado, enquanto o "Desfazer" ainda está de pé. */
 export interface ErasedBatch {
@@ -1029,57 +1040,92 @@ export function useBoardWindows(
   );
 
   /**
-   * Escreve — ou apaga — o texto de uma flecha.
+   * Muda o texto ou a aparência de uma flecha.
    *
    * Otimista, ao contrário da criação: aqui o id já existe e não há nada para
-   * reconciliar. O texto entra na hora e volta ao que era se a rota recusar,
+   * reconciliar. A mudança entra na hora e volta ao que era se a rota recusar,
    * mesmo padrão do renomear de workspace.
+   *
+   * O desfazer de uma falha devolve **só os campos daquele pedido, e só se
+   * ninguém os mudou de novo** nesse meio-tempo. Três cliques rápidos em cores
+   * diferentes são três PATCH; se o primeiro falhar depois de o terceiro já
+   * ter pintado a flecha, voltar à cor de antes do primeiro apagaria a escolha
+   * que a pessoa está vendo.
    */
-  const renameConnection = useCallback(
-    async (connectionId: string, rawLabel: string) => {
-      const label = rawLabel.replace(/\s+/g, " ").trim();
-      const previous =
-        latestConnections.current.find((item) => item.id === connectionId)
-          ?.label ?? null;
-      const next = label.length === 0 ? null : label;
-      if (previous === next) return;
+  const updateConnection = useCallback(
+    async (connectionId: string, rawPatch: ConnectionPatch) => {
+      const current = latestConnections.current.find(
+        (item) => item.id === connectionId
+      );
+      if (!current) return;
 
-      setConnections((current) =>
-        current.map((item) =>
-          item.id === connectionId ? { ...item, label: next } : item
+      const patch: ConnectionPatch = { ...rawPatch };
+      if (patch.label !== undefined) {
+        const label = (patch.label ?? "").replace(/\s+/g, " ").trim();
+        patch.label = label.length === 0 ? null : label;
+      }
+
+      const keys = (Object.keys(patch) as (keyof ConnectionPatch)[]).filter(
+        (key) => patch[key] !== current[key]
+      );
+      if (keys.length === 0) return;
+
+      const next: ConnectionPatch = {};
+      const previous: ConnectionPatch = {};
+      for (const key of keys) {
+        Object.assign(next, { [key]: patch[key] });
+        Object.assign(previous, { [key]: current[key] });
+      }
+
+      setConnections((list) =>
+        list.map((item) =>
+          item.id === connectionId ? { ...item, ...next } : item
         )
       );
+
+      function rollback() {
+        setConnections((list) =>
+          list.map((item) => {
+            if (item.id !== connectionId) return item;
+            const restored = { ...item };
+            for (const key of keys) {
+              if (item[key] === next[key]) {
+                Object.assign(restored, { [key]: previous[key] });
+              }
+            }
+            return restored;
+          })
+        );
+      }
 
       try {
         const response = await fetch(`${connectionsBase}/${connectionId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label: next }),
+          body: JSON.stringify(next),
         });
 
         if (!response.ok) {
           const body = await response.json().catch(() => null);
           setError(
-            plainNotice(body?.error ?? "Não foi possível salvar o texto.")
+            plainNotice(body?.error ?? "Não foi possível salvar a ligação.")
           );
-          setConnections((current) =>
-            current.map((item) =>
-              item.id === connectionId ? { ...item, label: previous } : item
-            )
-          );
+          rollback();
         }
       } catch {
-        setError(plainNotice("Sem conexão. O texto da ligação não foi salvo."));
-        setConnections((current) =>
-          current.map((item) =>
-            item.id === connectionId ? { ...item, label: previous } : item
-          )
-        );
+        setError(plainNotice("Sem conexão. A mudança na ligação não foi salva."));
+        rollback();
       }
     },
     [connectionsBase]
   );
 
+  /** Escreve — ou apaga, com texto vazio — o rótulo de uma flecha. */
+  const renameConnection = useCallback(
+    (connectionId: string, label: string) =>
+      updateConnection(connectionId, { label }),
+    [updateConnection]
+  );
 
   /**
    * Exclui a nota que uma janela mostra.
@@ -1136,6 +1182,7 @@ export function useBoardWindows(
     connections,
     connect,
     renameConnection,
+    updateConnection,
     erase,
     lastErased,
     undoErase,

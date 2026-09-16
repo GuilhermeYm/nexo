@@ -203,7 +203,7 @@ async function main() {
     await page.waitForTimeout(300);
     check(
       "a barra avisa por onde começar",
-      await page.isVisible("text=Toque no elemento de onde a flecha sai")
+      await page.isVisible("text=Escolha de onde a flecha deve sair.")
     );
 
     const boxes = await readBoxes(page);
@@ -218,7 +218,7 @@ async function main() {
     await page.waitForTimeout(300);
     check(
       "escolhida a origem, a barra pede o destino",
-      await page.isVisible("text=Agora toque no outro elemento")
+      await page.isVisible("text=De “Pesquisa de campo” para onde?")
     );
     // A ponta solta segue o ponteiro enquanto o destino não vem.
     await page.mouse.move((pesquisa.x + hipotese.x) / 2, pesquisa.y - 60);
@@ -399,6 +399,114 @@ async function main() {
       await page.isVisible("button:has-text('sustenta')")
     );
     await page.screenshot({ path: `${OUT}/05-com-rotulo-light.png` });
+
+    // ---- o inspetor da ligação ----
+    //
+    // Clicar no traço (ao lado do texto, não nele) abre o inspetor; o que se
+    // escolhe ali precisa chegar ao Postgres, ser desenhado e voltar no
+    // recarregamento e no "Desfazer".
+    const PANEL = "aside[data-connection-panel]";
+    const onTrace = { x: between.x - 48, y: between.y };
+    await page.mouse.click(onTrace.x, onTrace.y);
+    await page.waitForSelector(PANEL, { timeout: 5000 }).catch(() => null);
+    check("clicar no traço abre o inspetor da ligação", await page.isVisible(PANEL));
+
+    await page.fill(`${PANEL} #connection-label`, "sustenta a hipótese");
+    await page.click(`${PANEL} button[aria-label='Cor 3']`);
+    await page.click(`${PANEL} button:has-text('Tracejado')`);
+    await page.click(`${PANEL} button:has-text('Grossa')`);
+    await page.click(`${PANEL} button:has-text('Nos dois lados')`);
+
+    async function readStyled() {
+      const { rows } = await sql.query(
+        `select label, tone, stroke, weight, heads from workspace_connections
+          where user_id = $1 and tone is not null`,
+        [userId]
+      );
+      return rows;
+    }
+    let styled = await readStyled();
+    for (let tries = 0; tries < 40; tries++) {
+      const row = styled[0];
+      if (
+        row?.label === "sustenta a hipótese" &&
+        row.stroke === "dashed" &&
+        row.weight === "bold" &&
+        row.heads === "both"
+      ) {
+        break;
+      }
+      await page.waitForTimeout(250);
+      styled = await readStyled();
+    }
+    const expectedStyle = (rows) =>
+      rows.length === 1 &&
+      rows[0].label === "sustenta a hipótese" &&
+      rows[0].tone === "3" &&
+      rows[0].stroke === "dashed" &&
+      rows[0].weight === "bold" &&
+      rows[0].heads === "both";
+    check(
+      "texto, cor, traço, espessura e pontas vão para o banco",
+      expectedStyle(styled),
+      JSON.stringify(styled)
+    );
+
+    /** O desenho da flecha com cor: classe, tracejado e quantas pontas. */
+    async function readDrawnStyle() {
+      return page.evaluate(() => {
+        const group = [...document.querySelectorAll("[data-connection]")].find(
+          (node) => node.getAttribute("class")?.includes("tag-3")
+        );
+        if (!group) return null;
+        const paths = [...group.querySelectorAll(":scope > path:not([aria-hidden])")];
+        return {
+          dashed: paths.some((path) => path.getAttribute("stroke-dasharray")),
+          // Faixa de acerto + traço + duas pontas (o halo da seleção fica de fora).
+          paths: paths.length,
+        };
+      });
+    }
+    const drawnStyle = await readDrawnStyle();
+    check(
+      "e a flecha é desenhada com eles",
+      drawnStyle?.dashed === true && drawnStyle.paths === 4,
+      JSON.stringify(drawnStyle)
+    );
+    await page.screenshot({ path: `${OUT}/05b-inspetor-light.png` });
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    check("Esc fecha o inspetor", !(await page.isVisible(PANEL)));
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector(WINDOW, { timeout: 20000 });
+    await page.waitForTimeout(1000);
+    const afterReload = await readDrawnStyle();
+    check(
+      "a aparência continua depois de recarregar",
+      afterReload?.dashed === true && afterReload.paths === 4 &&
+        (await page.isVisible("button:has-text('sustenta a hipótese')")),
+      JSON.stringify(afterReload)
+    );
+
+    // Delete com a flecha selecionada apaga — e o Desfazer devolve tudo.
+    await page.mouse.click(onTrace.x, onTrace.y);
+    await page.waitForSelector(PANEL, { timeout: 5000 }).catch(() => null);
+    await page.keyboard.press("Delete");
+    check(
+      "Delete apaga a flecha selecionada",
+      (await waitForLinks(sql, userId, 1)) === 1
+    );
+    await page.click('button:has-text("Desfazer")');
+    check(
+      "e o Desfazer a traz com texto e aparência",
+      (await waitForLinks(sql, userId, 2)) === 2 &&
+        expectedStyle(await readStyled()),
+      JSON.stringify(await readStyled())
+    );
+    await page.waitForTimeout(800);
 
     // ---- botão direito na flecha ----
     await page.mouse.click(between.x, between.y, { button: "right" });

@@ -16,6 +16,15 @@ import {
   type Point,
   type Segment,
 } from "@/lib/workspace/connection-geometry";
+import {
+  CONNECTION_TONE_CLASS,
+  WEIGHT_PX,
+  dashArrayOf,
+  type ConnectionHeads,
+  type ConnectionStroke,
+  type ConnectionTone,
+  type ConnectionWeight,
+} from "@/lib/workspace/connection-style";
 import type { BoardConnection, BoardWindow } from "@/lib/workspace/queries";
 import { cn } from "@/lib/utils";
 
@@ -44,9 +53,9 @@ import { cn } from "@/lib/utils";
  * só as duas ou três flechas que encostam na janela arrastada re-renderizam.
  */
 
-/** Espessura aparente do traço, em pixels de tela. */
-const STROKE = 1.75;
-/** Tamanho aparente da ponta. */
+/** Espessura aparente do traço provisório, em pixels de tela. */
+const STROKE = WEIGHT_PX.regular;
+/** Tamanho aparente da ponta, no traço médio. Cresce com a espessura. */
 const HEAD = 11;
 /** Faixa clicável em volta do traço — o traço sozinho é fino demais para mirar. */
 const HIT = 14;
@@ -73,6 +82,9 @@ interface ConnectionLayerProps {
   zoom: number;
   /** A flecha que a borracha vai apagar se encostar agora. */
   markedId: string | null;
+  /** A flecha aberta no inspetor. */
+  selectedId: string | null;
+  onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   /** Abre o campo de rótulo desta flecha. */
   onLabel: (id: string) => void;
@@ -85,6 +97,8 @@ export function ConnectionLayer({
   windows,
   zoom,
   markedId,
+  selectedId,
+  onSelect,
   onRemove,
   onLabel,
   inert,
@@ -105,13 +119,19 @@ export function ConnectionLayer({
           key={connection.id}
           id={connection.id}
           hasLabel={Boolean(connection.label)}
+          tone={connection.tone}
+          stroke={connection.stroke}
+          weight={connection.weight}
+          heads={connection.heads}
           x1={segment.from.x}
           y1={segment.from.y}
           x2={segment.to.x}
           y2={segment.to.y}
           zoom={zoom}
           marked={markedId === connection.id}
+          selected={selectedId === connection.id}
           inert={inert}
+          onSelect={onSelect}
           onRemove={onRemove}
           onLabel={onLabel}
         />
@@ -125,13 +145,19 @@ export function ConnectionLayer({
 interface ArrowProps {
   id: string;
   hasLabel: boolean;
+  tone: ConnectionTone | null;
+  stroke: ConnectionStroke;
+  weight: ConnectionWeight;
+  heads: ConnectionHeads;
   x1: number;
   y1: number;
   x2: number;
   y2: number;
   zoom: number;
   marked: boolean;
+  selected: boolean;
   inert: boolean;
+  onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onLabel: (id: string) => void;
 }
@@ -144,18 +170,31 @@ interface ArrowProps {
 const ConnectionArrow = memo(function ConnectionArrow({
   id,
   hasLabel,
+  tone,
+  stroke,
+  weight,
+  heads,
   x1,
   y1,
   x2,
   y2,
   zoom,
   marked,
+  selected,
   inert,
+  onSelect,
   onRemove,
   onLabel,
 }: ArrowProps) {
   const segment: Segment = { from: { x: x1, y: y1 }, to: { x: x2, y: y2 } };
+  const reversed: Segment = { from: segment.to, to: segment.from };
   const path = `M ${x1} ${y1} L ${x2} ${y2}`;
+
+  const width = WEIGHT_PX[weight] / zoom;
+  // A ponta acompanha a espessura, mas devagar: proporcional, uma flecha
+  // grossa ganharia uma ponta do tamanho de um ícone.
+  const head = (HEAD + (WEIGHT_PX[weight] - WEIGHT_PX.regular) * 2) / zoom;
+  const dash = dashArrayOf(stroke, width);
 
   const arrow = (
     <g
@@ -164,37 +203,73 @@ const ConnectionArrow = memo(function ConnectionArrow({
       // verificação, que contava as alças de redimensionar junto com as
       // flechas.
       data-connection={id}
+      data-selected={selected || undefined}
       className={cn(
         "transition-colors duration-150 motion-reduce:transition-none",
-        marked ? "text-error" : "text-subtle-foreground hover:text-foreground"
+        marked
+          ? "text-error"
+          : tone
+            ? CONNECTION_TONE_CLASS[tone]
+            : "text-subtle-foreground hover:text-foreground"
       )}
     >
+      {/* Selecionada: um halo discreto por trás do traço. Por trás, e não
+          trocando a cor, porque a cor é escolha da pessoa — e é justamente o
+          que ela está ajustando no inspetor. Sem marcas nas pontas: elas
+          brigariam com as pontas de flecha. */}
+      {selected && !marked && (
+        <path
+          d={path}
+          stroke="currentColor"
+          strokeOpacity={0.16}
+          strokeWidth={width + 6 / zoom}
+          strokeLinecap="round"
+          fill="none"
+          className="text-accent"
+          aria-hidden="true"
+        />
+      )}
       {/* A faixa de acerto: invisível, larga, e a única que recebe ponteiro.
           Sem ela seria preciso mirar num traço de 1,75px. */}
       {!inert && (
         <path
           d={path}
           stroke="transparent"
-          strokeWidth={HIT / zoom}
+          strokeWidth={Math.max(HIT / zoom, width + 8 / zoom)}
           fill="none"
-          className="pointer-events-auto cursor-context-menu"
+          onClick={() => onSelect(id)}
+          onDoubleClick={() => onLabel(id)}
+          className="pointer-events-auto cursor-pointer"
         />
       )}
       <path
         d={path}
         stroke="currentColor"
-        strokeWidth={STROKE / zoom}
+        strokeWidth={width}
+        strokeDasharray={dash}
         strokeLinecap="round"
         fill="none"
       />
-      <path
-        d={arrowHead(segment, HEAD / zoom)}
-        stroke="currentColor"
-        strokeWidth={STROKE / zoom}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
+      {heads !== "none" && (
+        <path
+          d={arrowHead(segment, head)}
+          stroke="currentColor"
+          strokeWidth={width}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      )}
+      {heads === "both" && (
+        <path
+          d={arrowHead(reversed, head)}
+          stroke="currentColor"
+          strokeWidth={width}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      )}
     </g>
   );
 
@@ -207,6 +282,7 @@ const ConnectionArrow = memo(function ConnectionArrow({
     <ConnectionMenu
       id={id}
       hasLabel={hasLabel}
+      onSelect={onSelect}
       onLabel={onLabel}
       onRemove={onRemove}
     >
@@ -230,12 +306,14 @@ const ConnectionArrow = memo(function ConnectionArrow({
 export function ConnectionMenu({
   id,
   hasLabel,
+  onSelect,
   onLabel,
   onRemove,
   children,
 }: {
   id: string;
   hasLabel: boolean;
+  onSelect: (id: string) => void;
   onLabel: (id: string) => void;
   onRemove: (id: string) => void;
   children: React.ReactNode;
@@ -244,6 +322,13 @@ export function ConnectionMenu({
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onSelect(id)}>
+          <SlidersIcon />
+          <ContextMenuItemLabel
+            label="Editar a ligação"
+            hint="Cor, traço, espessura e pontas."
+          />
+        </ContextMenuItem>
         <ContextMenuItem onSelect={() => onLabel(id)}>
           <TagIcon />
           <ContextMenuItemLabel
@@ -394,6 +479,32 @@ export function connectionAt(
   }
 
   return best?.connection ?? null;
+}
+
+/** Controles deslizantes — o sinal de "ajustar". */
+function SlidersIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+    >
+      <path d="M10 5H3" />
+      <path d="M12 19H3" />
+      <path d="M14 3v4" />
+      <path d="M16 17v4" />
+      <path d="M21 12h-9" />
+      <path d="M21 19h-5" />
+      <path d="M21 5h-7" />
+      <path d="M8 10v4" />
+      <path d="M8 12H3" />
+    </svg>
+  );
 }
 
 /** Dois elos partidos — o sinal de "desligar". */

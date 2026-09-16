@@ -51,7 +51,11 @@ const EXPECTED_TABLES = [
 const COLUMN_GRANTS = [
   { table: "profiles", privilege: "UPDATE", columns: ["display_name", "avatar_url"] },
   { table: "notifications", privilege: "UPDATE", columns: ["read", "read_at"] },
-  { table: "workspace_connections", privilege: "UPDATE", columns: ["label"] },
+  {
+    table: "workspace_connections",
+    privilege: "UPDATE",
+    columns: ["heads", "label", "stroke", "tone", "weight"],
+  },
   // O único GRANT por coluna que é de **leitura**, e o mais fácil de perder:
   // `message`, `stack`, `context` e `fingerprint` de `error_reports` são texto
   // interno — mensagem crua do Postgres, corpo de erro do provedor de IA,

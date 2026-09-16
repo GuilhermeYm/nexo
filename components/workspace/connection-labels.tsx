@@ -7,10 +7,17 @@ import {
   drawableConnections,
 } from "@/components/workspace/connection-layer";
 import { midpointOf } from "@/lib/workspace/connection-geometry";
+import { CONNECTION_TONE_CLASS } from "@/lib/workspace/connection-style";
+import { cn } from "@/lib/utils";
 import type { BoardConnection, BoardWindow } from "@/lib/workspace/queries";
 
 /**
  * O que cada flecha diz, escrito em cima dela.
+ *
+ * **O texto fica dentro do traço.** O fundo do chip é o mesmo da lousa
+ * (`bg-tertiary`), sem borda: o traço parece interrompido para o texto passar,
+ * como numa legenda de diagrama, em vez de uma etiqueta pendurada por cima. A
+ * cor do texto é a cor da flecha.
  *
  * **Camada de HTML, e não `<text>` do SVG.** O rótulo é editado no lugar, e
  * um campo de texto dentro de SVG só existe por `foreignObject` — que é HTML
@@ -36,6 +43,9 @@ interface ConnectionLabelsProps {
   /** A ligação cujo campo está aberto. */
   editingId: string | null;
   onEdit: (id: string | null) => void;
+  /** A flecha aberta no inspetor — o texto dela ganha o anel de seleção. */
+  selectedId: string | null;
+  onSelect: (id: string) => void;
   /** Texto vazio apaga o rótulo — a coluna volta a ser nula. */
   onCommit: (id: string, label: string) => void;
   /** O menu do chip é o mesmo da flecha, e ele também remove a ligação. */
@@ -50,6 +60,8 @@ export function ConnectionLabels({
   zoom,
   editingId,
   onEdit,
+  selectedId,
+  onSelect,
   onCommit,
   onRemove,
   inert,
@@ -86,7 +98,9 @@ export function ConnectionLabels({
               ) : (
                 <LabelChip
                   connection={connection}
+                  selected={connection.id === selectedId}
                   inert={inert}
+                  onSelect={onSelect}
                   onEdit={onEdit}
                   onRemove={onRemove}
                 />
@@ -100,8 +114,9 @@ export function ConnectionLabels({
 }
 
 /**
- * A etiqueta em repouso.
+ * O texto em repouso.
  *
+ * Um clique seleciona a ligação e abre o inspetor, como clicar no traço.
  * Dois cliques abrem o campo — é o gesto de renomear que a lousa já usa no
  * nome do workspace. O botão direito abre **o menu da ligação**, o mesmo do
  * traço: o chip fica bem em cima da flecha e receber ponteiro, e sem menu
@@ -113,12 +128,16 @@ export function ConnectionLabels({
  */
 function LabelChip({
   connection,
+  selected,
   inert,
+  onSelect,
   onEdit,
   onRemove,
 }: {
   connection: BoardConnection;
+  selected: boolean;
   inert: boolean;
+  onSelect: (id: string) => void;
   onEdit: (id: string | null) => void;
   onRemove: (id: string) => void;
 }) {
@@ -128,13 +147,20 @@ function LabelChip({
       // A barra de título não é o único lugar que começa um gesto: o fundo da
       // lousa também. Sem isto, tocar no chip arrastaria o plano inteiro.
       onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => onSelect(connection.id)}
       onDoubleClick={() => onEdit(connection.id)}
       title="Dois cliques para mudar o texto"
-      className={
+      data-connection-label={connection.id}
+      className={cn(
+        "max-w-[14rem] truncate rounded-md bg-tertiary px-1.5 py-0.5 text-xs leading-tight font-medium",
+        connection.tone
+          ? CONNECTION_TONE_CLASS[connection.tone]
+          : "text-muted-foreground",
+        selected && "ring-1 ring-accent/50",
         inert
-          ? "pointer-events-none max-w-[14rem] truncate rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground shadow-sm"
-          : "pointer-events-auto max-w-[14rem] cursor-text truncate rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground shadow-sm transition-colors duration-150 hover:border-subtle-foreground hover:text-foreground motion-reduce:transition-none"
-      }
+          ? "pointer-events-none"
+          : "pointer-events-auto cursor-pointer transition-colors duration-150 hover:text-foreground motion-reduce:transition-none"
+      )}
     >
       {connection.label}
     </button>
@@ -146,6 +172,7 @@ function LabelChip({
     <ConnectionMenu
       id={connection.id}
       hasLabel
+      onSelect={onSelect}
       onLabel={onEdit}
       onRemove={onRemove}
     >
@@ -209,7 +236,7 @@ function LabelField({
       placeholder="o que liga as duas"
       maxLength={80}
       aria-label="Texto da ligação"
-      className="pointer-events-auto w-40 rounded-full border border-subtle-foreground bg-background px-2 py-0.5 text-[11px] font-medium text-foreground shadow-sm outline-none placeholder:text-subtle-foreground"
+      className="pointer-events-auto w-40 rounded-md border border-subtle-foreground bg-background px-1.5 py-0.5 text-xs leading-tight font-medium text-foreground shadow-sm outline-none placeholder:text-subtle-foreground"
     />
   );
 }

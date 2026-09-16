@@ -7,7 +7,11 @@ import { workspaceConnections, workspaceWindows } from "@/lib/db/schema";
 import { ABSOLUTE_CONNECTIONS_PER_BOARD } from "@/lib/plans";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
-import { getOwnedWorkspace, listBoardConnections } from "@/lib/workspace/queries";
+import {
+  connectionContentColumns,
+  getOwnedWorkspace,
+  listBoardConnections,
+} from "@/lib/workspace/queries";
 import { createConnectionSchema } from "@/lib/validations/workspace";
 
 /**
@@ -192,9 +196,9 @@ export async function DELETE(
       .returning({
         fromWindowId: workspaceConnections.fromWindowId,
         toWindowId: workspaceConnections.toWindowId,
-        // O rótulo volta junto no "Desfazer": ele é texto que a pessoa
-        // escreveu, e restaurar a flecha muda seria desfazer só metade.
-        label: workspaceConnections.label,
+        // O rótulo e a aparência voltam junto no "Desfazer": são escolhas da
+        // pessoa, e restaurar a flecha muda e cinza seria desfazer só metade.
+        ...connectionContentColumns,
       });
 
     return NextResponse.json({

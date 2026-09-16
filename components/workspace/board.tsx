@@ -31,6 +31,7 @@ import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { AttachmentWindowBody } from "@/components/workspace/attachment-window-body";
 import { NotePicker } from "@/components/workspace/note-picker";
 import { ToolPropertiesPanel } from "@/components/workspace/tool-properties-panel";
+import { ConnectionPropertiesPanel } from "@/components/workspace/connection-properties-panel";
 import {
   ElementWindowBody,
   NoteWindowBody,
@@ -159,6 +160,7 @@ export function Board({
     connections,
     connect,
     renameConnection,
+    updateConnection,
     erase,
     lastErased,
     undoErase,
@@ -208,6 +210,13 @@ export function Board({
   const linkSession = useRef(0);
   /** A flecha com o campo de rótulo aberto. */
   const [labelingId, setLabelingId] = useState<string | null>(null);
+  /**
+   * A flecha aberta no inspetor.
+   *
+   * Exclusiva com a janela focada: os dois inspetores ocupam o mesmo lugar, e
+   * quem seleciona uma coisa está desistindo da outra.
+   */
+  const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [pointerAt, setPointerAt] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -409,6 +418,7 @@ export function Board({
       if (event.target !== event.currentTarget) return;
 
       setFocusedId(null);
+      setSelectedLinkId(null);
       recordSpawnPoint(event.clientX, event.clientY);
       event.currentTarget.setPointerCapture(event.pointerId);
       pointers.current.set(event.pointerId, {
@@ -745,6 +755,52 @@ export function Board({
     window.addEventListener("keydown", closeProperties);
     return () => window.removeEventListener("keydown", closeProperties);
   }, [selectedTextWindow]);
+
+  /**
+   * A flecha do inspetor, **se ela ainda existir** — mesma conta do
+   * `editingLabelId` abaixo: apagada noutro dispositivo, o inspetor some em
+   * vez de editar uma linha que não está mais lá.
+   */
+  const selectedConnection =
+    !usingTool && !pickerOpen && !selectedTextWindow && selectedLinkId
+      ? (visibleConnections.find((item) => item.id === selectedLinkId) ?? null)
+      : null;
+
+  function endpointTitle(windowId: string): string {
+    const item = windows.find((candidate) => candidate.id === windowId);
+    return item ? titleOf(item) : "Elemento";
+  }
+
+  const selectConnection = useCallback((id: string) => {
+    setFocusedId(null);
+    setSelectedLinkId(id);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedConnection) return;
+    const id = selectedConnection.id;
+
+    function handleKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.closest("input, textarea, [contenteditable='true']") != null;
+
+      if (event.key === "Escape" && !typing) {
+        setSelectedLinkId(null);
+        return;
+      }
+      // Delete apaga a flecha selecionada, com o mesmo "Desfazer" da
+      // borracha. Nunca de dentro de um campo: ali a tecla é do texto.
+      if ((event.key === "Delete" || event.key === "Backspace") && !typing) {
+        event.preventDefault();
+        setSelectedLinkId(null);
+        void erase({ connections: [id] });
+      }
+    }
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [selectedConnection, erase]);
 
   /**
    * A flecha que está com o campo aberto, **se ela ainda existir**.
@@ -1131,6 +1187,8 @@ export function Board({
                   windows={visibleWindows}
                   zoom={viewport.zoom}
                   markedId={underEraserLink}
+                  selectedId={selectedConnection?.id ?? null}
+                  onSelect={selectConnection}
                   onRemove={removeConnection}
                   onLabel={setLabelingId}
                   inert={usingTool}
@@ -1144,6 +1202,8 @@ export function Board({
                   zoom={viewport.zoom}
                   editingId={editingLabelId}
                   onEdit={setLabelingId}
+                  selectedId={selectedConnection?.id ?? null}
+                  onSelect={selectConnection}
                   onCommit={commitConnectionLabel}
                   onRemove={removeConnection}
                   inert={usingTool}
@@ -1180,6 +1240,7 @@ export function Board({
                           focused={focusedId === item.id}
                           onFocus={() => {
                             setFocusedId(item.id);
+                            setSelectedLinkId(null);
                             bringToFront(item.id);
                           }}
                           onPreview={(patch) =>
@@ -1654,6 +1715,22 @@ export function Board({
               updateWindow(selectedTextWindow.id, patch)
             }
             onClose={() => setFocusedId(null)}
+          />
+        )}
+
+        {selectedConnection && (
+          <ConnectionPropertiesPanel
+            connection={selectedConnection}
+            fromTitle={endpointTitle(selectedConnection.fromWindowId)}
+            toTitle={endpointTitle(selectedConnection.toWindowId)}
+            onChange={(patch) =>
+              void updateConnection(selectedConnection.id, patch)
+            }
+            onRemove={() => {
+              setSelectedLinkId(null);
+              removeConnection(selectedConnection.id);
+            }}
+            onClose={() => setSelectedLinkId(null)}
           />
         )}
 

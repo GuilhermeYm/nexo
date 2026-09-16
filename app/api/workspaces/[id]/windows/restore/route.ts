@@ -12,6 +12,10 @@ import {
 import { windowCapFor } from "@/lib/plans";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
+import {
+  DEFAULT_CONNECTION_STYLE,
+  type ConnectionStyle,
+} from "@/lib/workspace/connection-style";
 import { getBoardWriteContext, readBoard } from "@/lib/workspace/queries";
 import {
   restoreWindowsSchema,
@@ -166,6 +170,10 @@ async function restoreConnections(
     fromWindowId: string;
     toWindowId: string;
     label?: string | null;
+    tone?: ConnectionStyle["tone"];
+    stroke?: ConnectionStyle["stroke"];
+    weight?: ConnectionStyle["weight"];
+    heads?: ConnectionStyle["heads"];
   }[]
 ): Promise<void> {
   if (connections.length === 0) return;
@@ -196,6 +204,11 @@ async function restoreConnections(
         toWindowId: row.toWindowId,
         // O texto escrito na flecha volta com ela.
         label: row.label ?? null,
+        // E a aparência. Ausente — um lote de antes de 0019 — cai no padrão.
+        tone: row.tone ?? null,
+        stroke: row.stroke ?? DEFAULT_CONNECTION_STYLE.stroke,
+        weight: row.weight ?? DEFAULT_CONNECTION_STYLE.weight,
+        heads: row.heads ?? DEFAULT_CONNECTION_STYLE.heads,
       }))
     )
     .onConflictDoNothing();

@@ -16,6 +16,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { checkCaptureQuota } from "@/lib/usage/queries";
 import {
+  connectionContentColumns,
   getBoardWriteContext,
   getOwnedWorkspace,
   readBoard,
@@ -283,6 +284,8 @@ export async function DELETE(
       .select({
         fromWindowId: workspaceConnections.fromWindowId,
         toWindowId: workspaceConnections.toWindowId,
+        // Sem isto a flecha que caiu por cascade voltava sem texto e sem cor.
+        ...connectionContentColumns,
       })
       .from(workspaceConnections)
       .where(

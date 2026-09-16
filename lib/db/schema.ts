@@ -19,6 +19,13 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
+import type {
+  ConnectionHeads,
+  ConnectionStroke,
+  ConnectionTone,
+  ConnectionWeight,
+} from "@/lib/workspace/connection-style";
+
 // drizzle-orm não tem tipo nativo tsvector nesta versão — definimos via customType.
 const tsvector = customType<{ data: string }>({
   dataType() {
@@ -627,6 +634,18 @@ export const workspaceConnections = pgTable(
      * do PostgREST.
      */
     label: text("label"),
+    /**
+     * A aparência (0019). Valores fechados por CHECK e listados em
+     * `lib/workspace/connection-style.ts`; os padrões são a flecha de antes.
+     * Escrevíveis pelo cliente junto com `label`, e só elas.
+     */
+    tone: text("tone").$type<ConnectionTone>(),
+    stroke: text("stroke").$type<ConnectionStroke>().notNull().default("solid"),
+    weight: text("weight")
+      .$type<ConnectionWeight>()
+      .notNull()
+      .default("regular"),
+    heads: text("heads").$type<ConnectionHeads>().notNull().default("end"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

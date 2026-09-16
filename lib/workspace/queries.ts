@@ -23,6 +23,7 @@ import {
   workspaceWindows,
   workspaces,
 } from "@/lib/db/schema";
+import type { ConnectionStyle } from "@/lib/workspace/connection-style";
 
 /**
  * Leituras da lousa.
@@ -302,13 +303,26 @@ async function loadNoteTags(
  * guardar pontos aqui seria uma segunda cópia da posição, que ficaria velha
  * no primeiro arraste.
  */
-export interface BoardConnection {
+export interface BoardConnection extends ConnectionStyle {
   id: string;
   fromWindowId: string;
   toWindowId: string;
   /** O que a flecha diz. Nulo quando ninguém escreveu nada nela. */
   label: string | null;
 }
+
+/**
+ * O que uma ligação carrega além das pontas, pronto para `select` e
+ * `returning`. Um objeto só para a leitura, a borracha e o cascade das
+ * janelas: um campo novo esquecido num deles voltaria sem ele no "Desfazer".
+ */
+export const connectionContentColumns = {
+  label: workspaceConnections.label,
+  tone: workspaceConnections.tone,
+  stroke: workspaceConnections.stroke,
+  weight: workspaceConnections.weight,
+  heads: workspaceConnections.heads,
+};
 
 /**
  * As ligações de uma lousa.
@@ -326,7 +340,7 @@ export async function listBoardConnections(
       id: workspaceConnections.id,
       fromWindowId: workspaceConnections.fromWindowId,
       toWindowId: workspaceConnections.toWindowId,
-      label: workspaceConnections.label,
+      ...connectionContentColumns,
     })
     .from(workspaceConnections)
     .where(
