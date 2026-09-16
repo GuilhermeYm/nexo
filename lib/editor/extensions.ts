@@ -1,4 +1,4 @@
-import { Extension, type Extensions } from "@tiptap/core";
+import { Extension, Node, type Extensions } from "@tiptap/core";
 import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
 import { Details, DetailsContent, DetailsSummary } from "@tiptap/extension-details";
 import { Highlight } from "@tiptap/extension-highlight";
@@ -31,7 +31,47 @@ interface BuildOptions {
   placeholder: string;
   /** O menu "/". Fora da lousa. */
   slash: boolean;
+  /** O documento da Agenda: só listas de tarefas, a caixa não sai. */
+  agenda?: boolean;
 }
+
+/**
+ * O `doc` da Agenda aceita só `taskList`.
+ *
+ * A trava mora no schema e não em atalhos: Backspace, Enter numa caixa vazia,
+ * colar, o bubble menu — todo caminho que tiraria a caixa vira uma transação
+ * inválida, e o ProseMirror a recusa sozinho. Interceptar tecla por tecla
+ * deixaria sempre um caminho esquecido.
+ */
+const AgendaDocument = Node.create({
+  name: "doc",
+  topNode: true,
+  content: "taskList+",
+});
+
+/**
+ * Enter numa caixa vazia de primeiro nível não faz nada.
+ *
+ * Sem isto o schema já impede a caixa de sumir, mas o Enter cai no
+ * `splitBlock` e abre um segundo parágrafo *dentro* do mesmo item — a linha
+ * nova aparece sem caixa. Nos itens aninhados o comportamento de sempre
+ * (recuar um nível) continua valendo, porque o pai ainda é uma lista.
+ */
+const AgendaEnter = Extension.create({
+  name: "agendaEnter",
+  priority: 1000,
+  addKeyboardShortcuts() {
+    return {
+      Enter: () => {
+        const { $from, empty } = this.editor.state.selection;
+        if (!empty || $from.parent.content.size > 0) return false;
+        const item = $from.node(-1);
+        const topLevel = $from.depth === 3;
+        return item?.type.name === "taskItem" && topLevel;
+      },
+    };
+  },
+});
 
 /**
  * `Mod+Alt+D` recolhe/expande um bloco de detalhes.
@@ -57,9 +97,12 @@ const DetailsShortcut = Extension.create({
 export function buildEditorExtensions({
   placeholder,
   slash,
+  agenda = false,
 }: BuildOptions): Extensions {
   return [
+    ...(agenda ? [AgendaDocument, AgendaEnter] : []),
     StarterKit.configure({
+      document: agenda ? false : undefined,
       // O `codeBlock` simples sai para o `CodeBlockLowlight` entrar no lugar
       // dele — os dois usam o mesmo nó `codeBlock`, então não podem coexistir.
       codeBlock: false,

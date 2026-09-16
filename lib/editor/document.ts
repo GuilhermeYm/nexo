@@ -169,6 +169,61 @@ export function countTaskItems(document: unknown): TaskTally {
   return { total, done };
 }
 
+export interface TaskLine {
+  text: string;
+  checked: boolean;
+  /** 0 no primeiro nível; aninhadas sobem de um em um. */
+  depth: number;
+}
+
+/**
+ * As caixas de um documento, na ordem em que aparecem, com o texto da linha.
+ *
+ * O texto é só o do primeiro parágrafo do item — o que fica ao lado da caixa.
+ * Caixas sem texto ficam de fora: é o andaime vazio, não uma tarefa.
+ */
+export function listTaskLines(document: unknown): TaskLine[] {
+  if (!isRichNode(document)) return [];
+
+  const lines: TaskLine[] = [];
+  const stack: { node: RichNode; depth: number }[] = [{ node: document, depth: -1 }];
+  let visited = 0;
+
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop()!;
+    if (++visited > MAX_NODES) break;
+
+    const children = (Array.isArray(node.content) ? node.content : []).filter(
+      isRichNode
+    );
+    let childDepth = depth;
+
+    if (node.type === "taskItem") {
+      childDepth = depth + 1;
+      const first = children[0];
+      const text = first?.type === "paragraph" ? inlineText(first).trim() : "";
+      if (text) {
+        lines.push({ text, checked: node.attrs?.checked === true, depth: childDepth });
+      }
+    }
+
+    for (let index = children.length - 1; index >= 0; index--) {
+      stack.push({ node: children[index], depth: childDepth });
+    }
+  }
+
+  return lines;
+}
+
+function inlineText(node: RichNode): string {
+  const children = Array.isArray(node.content) ? node.content : [];
+  return children
+    .map((child) =>
+      isRichNode(child) && typeof child.text === "string" ? child.text : ""
+    )
+    .join("");
+}
+
 /**
  * Monta um documento a partir de texto puro.
  *

@@ -26,7 +26,11 @@
  *   9. o fuso: dois contextos de navegador, UTC+14 e UTC−11, no mesmo
  *      instante de relógio de parede, caem em dias DIFERENTES;
  *  10. data forjada é recusada com 400, sem criar nada;
- *  11. os contadores são do servidor: um PATCH com `tasksDone: 99` não cola.
+ *  11. os contadores são do servidor: um PATCH com `tasksDone: 99` não cola;
+ *  12. a caixa não sai: Backspace, Enter e apagar tudo não deixam linha sem
+ *      caixa no documento;
+ *  13. o dashboard avisa quando não há tarefa hoje, e lista as do dia com o
+ *      mesmo "x de y" do banco.
  */
 import { createClient } from "@supabase/supabase-js";
 import { existsSync, mkdirSync } from "node:fs";
@@ -179,6 +183,15 @@ async function main() {
     /* ---------------------------------------------------------------- */
     /* 1. Dia em branco não gasta captura                                */
     /* ---------------------------------------------------------------- */
+    console.log("→ o dashboard, sem tarefa nenhuma");
+    await page.waitForSelector("#today-tasks-title", { timeout: 20_000 });
+    const emptyShown = await page
+      .getByText("Nenhuma tarefa para hoje")
+      .waitFor({ timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    check(problems, "o dashboard avisa que ainda não há tarefa hoje", emptyShown);
+
     console.log("→ a sala, sem escrever nada");
     const before = await countNotes(sql, userId);
 
@@ -273,6 +286,112 @@ async function main() {
       (await page.$$('.tiptap li[data-checked="true"]')).length === 1
     );
     await page.screenshot({ path: `${OUT}/hoje-light.png`, fullPage: true });
+
+    /* ---------------------------------------------------------------- */
+    /* 3b. O dashboard mostra as tarefas de hoje                         */
+    /* ---------------------------------------------------------------- */
+    console.log("→ as tarefas de hoje no dashboard");
+    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    const listed = await page
+      .getByText("Terminar a migration da Agenda")
+      .waitFor({ timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    check(problems, "o dashboard lista as tarefas do dia", listed);
+    const counter = await page
+      .locator('section[aria-labelledby="today-tasks-title"] header')
+      .innerText();
+    check(
+      problems,
+      "o contador do dashboard bate com o banco",
+      counter.includes(`${rows[0]?.tasks_done} de ${rows[0]?.tasks_total}`),
+      `${JSON.stringify(counter)} × banco ${rows[0]?.tasks_done}/${rows[0]?.tasks_total}`
+    );
+    await page.screenshot({ path: `${OUT}/dashboard-hoje-light.png`, fullPage: true });
+
+    /* ---------------------------------------------------------------- */
+    /* 3c. A caixa não sai: Backspace e Enter não a transformam em texto */
+    /* ---------------------------------------------------------------- */
+    console.log("→ tentando apagar a caixa");
+    await page.goto(`${BASE}/dashboard/agenda`, { waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector(".tiptap", { timeout: 20_000 });
+
+    const shape = () =>
+      page.evaluate(() => {
+        const root = document.querySelector(".tiptap");
+        const top = [...root.children].map((child) => child.tagName);
+        // O node view do TaskItem não põe `data-type` no `<li>`.
+        const items = root.querySelectorAll('ul[data-type="taskList"] > li');
+        const withBox = [...items].filter((li) =>
+          li.querySelector(':scope > label input[type="checkbox"]')
+        );
+        return { top, items: items.length, withBox: withBox.length };
+      });
+    const onlyBoxes = (value) =>
+      value.top.every((tag) => tag === "UL") && value.items === value.withBox;
+    const press = async (key, times = 1) => {
+      for (let i = 0; i < times; i++) {
+        await page.keyboard.press(key);
+        await page.waitForTimeout(40);
+      }
+    };
+
+    // Esvazia a última linha e continua apertando: sem a trava, a caixa vazia
+    // viraria parágrafo e depois se juntaria à linha de cima.
+    await page.locator(".tiptap p", { hasText: "Revisar o AGENTS.md" }).click();
+    await press("End");
+    await press("Shift+Home");
+    await press("Backspace", 6);
+    let now = await shape();
+    check(
+      problems,
+      "Backspace não deixa linha sem caixa",
+      onlyBoxes(now) && now.items >= 2,
+      JSON.stringify(now)
+    );
+
+    await press("End");
+    await press("Enter");
+    const withNewLine = await shape();
+    await press("Enter", 3);
+    now = await shape();
+    check(
+      problems,
+      "Enter numa caixa vazia não cria linha sem caixa",
+      onlyBoxes(now) && now.items === withNewLine.items,
+      `${JSON.stringify(withNewLine)} → ${JSON.stringify(now)}`
+    );
+
+    await press("Control+A");
+    await press("Backspace", 3);
+    now = await shape();
+    check(
+      problems,
+      "apagar tudo deixa uma caixa, e não um parágrafo",
+      now.top.join() === "UL" && now.items === 1 && now.withBox === 1,
+      JSON.stringify(now)
+    );
+
+    // Reescreve as três tarefas para o resto do roteiro.
+    await page.keyboard.type("Terminar a migration da Agenda");
+    await press("Enter");
+    await page.keyboard.type("Escrever o roteiro de ponta a ponta");
+    await press("Enter");
+    await page.keyboard.type("Revisar o AGENTS.md");
+    rows = await waitFor(
+      read,
+      (value) =>
+        value[0]?.tasks_total === 3 &&
+        (value[0]?.content ?? "").includes("Revisar o AGENTS.md")
+    );
+    check(
+      problems,
+      "a lista reescrita chegou ao banco com três caixas",
+      rows[0]?.tasks_total === 3,
+      `total=${rows[0]?.tasks_total}`
+    );
 
     /* ---------------------------------------------------------------- */
     /* 4 e 5. O índice único, e dois PUT ao mesmo tempo                  */

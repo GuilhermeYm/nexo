@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorBubbleMenu } from "@/components/editor/editor-bubble-menu";
 import { ErrorReport } from "@/components/errors/error-report";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
-import { EMPTY_AGENDA_DOCUMENT } from "@/lib/agenda/scaffold";
+import { toAgendaDocument } from "@/lib/agenda/scaffold";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
 import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
@@ -20,9 +20,9 @@ import { cn } from "@/lib/utils";
  * com duas diferenças que são a funcionalidade:
  *
  * 1. **O documento nasce com uma caixa**, não com um parágrafo
- *    (`EMPTY_AGENDA_DOCUMENT`). É o que faz o Enter continuar a lista
- *    sozinho. Escrever um parágrafo normal continua permitido: isto é uma
- *    nota como qualquer outra.
+ *    (`EMPTY_AGENDA_DOCUMENT`), e **só aceita caixas no primeiro nível**
+ *    (`agenda: true` em `buildEditorExtensions`): a caixa não pode ser
+ *    apagada nem virar parágrafo.
  *
  * 2. **A nota é criada preguiçosamente.** Enquanto a pessoa não escreve nada,
  *    não existe linha no banco e nenhuma captura foi gasta. Na primeira tecla
@@ -183,12 +183,13 @@ export function DayEditor({
     immediatelyRender: false,
     extensions: buildEditorExtensions({
       placeholder: "O que precisa acontecer?",
-      // O menu "/" fica ligado: o argumento que o desliga na lousa é a janela
-      // de 340px, e aqui a sala tem largura inteira. É também por ele que a
-      // pessoa descobre que cabe um título ou um bloco de código no dia.
-      slash: true,
+      // Sem "/": quase tudo no menu (título, citação, listas) é bloco de
+      // primeiro nível, e o documento da Agenda só aceita caixas ali. Um
+      // menu cheio de itens que não fazem nada é pior que menu nenhum.
+      slash: false,
+      agenda: true,
     }),
-    content: initialDoc ?? EMPTY_AGENDA_DOCUMENT,
+    content: toAgendaDocument(initialDoc),
     autofocus: autoFocus ? "end" : false,
     editorProps: {
       attributes: {
@@ -240,8 +241,7 @@ export function DayEditor({
         Com a folga do lado de fora, o clique no vazio é nosso, e a resposta é
         levar o cursor para o fim do documento: `focus("end")` resolve para a
         posição de texto mais profunda, ou seja, **dentro** do último item da
-        lista. Escrever um parágrafo continua possível — é só clicar no fim de
-        uma linha e apertar Enter duas vezes. Isto aqui é uma nota.
+        lista.
       */}
       <div
         className="min-h-[6rem] cursor-text"

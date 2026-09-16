@@ -10,6 +10,7 @@ import { DraftNote } from "@/components/dashboard/draft-note";
 import { RecentPanel } from "@/components/dashboard/recent-panel";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { TasksPanel } from "@/components/dashboard/tasks-panel";
+import { TodayTasks } from "@/components/dashboard/today-tasks";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { HOME_TAB, useOpenTabs } from "@/hooks/use-open-tabs";
 import { usePersistedFlag } from "@/hooks/use-persisted-flag";
@@ -504,7 +505,9 @@ export function DashboardShell({
               />
             </div>
 
-            <div className="mt-12 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <TodayTasks />
+
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
               <TasksPanel
                 initial={jobs}
                 renderedAt={renderedAt}
