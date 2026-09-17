@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 
 import { UpgradeLink } from "@/components/ui/upgrade-link";
+import { useHideDraft } from "@/hooks/use-hide-draft";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { richTextToPlain } from "@/lib/editor/document";
 import { readApiFailure } from "@/lib/plan-limit";
@@ -57,6 +58,7 @@ interface DraftNoteProps {
 
 export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
   const { draft, update, discard } = useLocalDraft();
+  const hideDraft = useHideDraft();
   const [opened, setOpened] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -195,6 +197,10 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
   }
 
   if (!open) {
+    // A preferência só esconde o convite vazio. Havendo rascunho com texto,
+    // `open` já é `true` acima e este ramo nem é alcançado.
+    if (hideDraft) return null;
+
     return (
       <button
         ref={(el) => {

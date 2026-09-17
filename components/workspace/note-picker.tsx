@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText, Paperclip, Search, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import {
   NOTE_TYPE_LABEL,
@@ -47,7 +47,17 @@ interface NotePickerProps {
   onPickAttachment: (attachment: OpenableAttachment) => void;
 }
 
-export function NotePicker({
+/**
+ * Memoizado porque ele fica **montado com a lousa inteira**, aberto ou
+ * fechado: fechado, ele é a mesma lista encostada 384px para fora da moldura,
+ * pronta para entrar sem piscar. Sem o `memo`, cada quadro de um arraste de
+ * janela re-renderizava essa lista junto — dezenas de linhas, sessenta vezes
+ * por segundo, por causa de um gesto que não tem nada a ver com ela.
+ *
+ * Para valer, `openNoteIds` e os três repasses precisam de identidade estável
+ * do lado do `Board`; é o que os `useMemo`/`useCallback` de lá garantem.
+ */
+export const NotePicker = memo(function NotePicker({
   workspaceId,
   open,
   openNoteIds,
@@ -333,7 +343,7 @@ export function NotePicker({
       </aside>
     </>
   );
-}
+});
 
 /* ---------------------------------------------------------------------- */
 

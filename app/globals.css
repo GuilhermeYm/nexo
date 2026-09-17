@@ -220,6 +220,15 @@ a {
      piscar antes do primeiro quadro. */
   --animate-row-in: row-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-row-flash: row-flash 1.2s ease-out both;
+  /* O dashboard abre como uma mesa que se organiza: cada bloco se revela em
+     sequência curta, e os itens da lista acompanham o painel ao qual pertencem. */
+  --animate-dashboard-enter: dashboard-enter 0.46s cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  /* Uma etiqueta que muda de posição ganhou mais associações — a revelação
+     curta identifica a alteração sem coreografar o retrato inicial. */
+  --animate-ranking-change: ranking-change 0.42s cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  --animate-ranking-flash: ranking-flash 1.1s ease-out both;
   /* O rascunho se revela como uma folha que se abre a partir da captura.
      Só toca quando a pessoa pede para escrever; não é animação de chegada da
      página. */
@@ -248,6 +257,17 @@ a {
   to {
     opacity: 0;
     transform: scale(0.96);
+  }
+}
+
+/* O traço do cartão da borracha acompanha a única chance de recuperação.
+   O estado final é vazio para não parecer que existe tempo depois do aviso. */
+@keyframes erase-undo-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
   }
 }
 
@@ -320,11 +340,50 @@ a {
   }
 }
 
+/* Recorte e pequena translação preservam a sensação de conteúdo que se
+   acomoda no lugar, sem deslocar o layout nem esconder nada se o JS falhar. */
+@keyframes dashboard-enter {
+  from {
+    clip-path: inset(0 0 12% 0 round 0.75rem);
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 0.75rem);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* A lavagem de cor que recua atrás de uma linha recém-chegada. Vive num
    elemento próprio sobre a linha, para não brigar com o fundo do hover. */
 @keyframes row-flash {
   from {
     opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* A abertura pelo recorte faz a mudança de posição parecer atualização de
+   conteúdo, e não uma entrada decorativa de cartão. */
+@keyframes ranking-change {
+  from {
+    clip-path: inset(0 0 18% 0);
+    opacity: 0.5;
+    transform: translateY(5px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ranking-flash {
+  from {
+    opacity: 0.55;
   }
   to {
     opacity: 0;
@@ -359,6 +418,9 @@ a {
   [data-slot="context-menu-sub-content"],
   [data-row-enter],
   [data-row-flash],
+  [data-dashboard-enter],
+  [data-ranking-change],
+  [data-ranking-flash],
   [data-live-dot] {
     animation: none !important;
   }

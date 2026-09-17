@@ -129,7 +129,12 @@ export interface CreateWindowInput {
   y?: number;
 }
 
-type NotePatch = { title?: string; content?: string; contentRich?: unknown };
+/** O que a janela de nota edita. Exportado para a lousa tipar os repasses. */
+export type NotePatch = {
+  title?: string;
+  content?: string;
+  contentRich?: unknown;
+};
 
 /**
  * O aviso que a lousa mostra.

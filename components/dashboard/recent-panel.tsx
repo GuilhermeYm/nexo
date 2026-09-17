@@ -172,12 +172,13 @@ export function RecentPanel({
       ) : (
         <div className="flex min-h-full flex-col">
           <ul className="divide-y divide-border">
-            {items.map((note) => (
+            {items.map((note, index) => (
               <RecentRow
                 key={note.id}
                 note={note}
                 now={clock}
                 isNew={fresh.has(note.id)}
+                entranceIndex={index}
                 workspaces={workspaces}
                 onOpen={() => onOpenNote(note.id)}
                 onOpenInWorkspace={(workspaceId) =>
@@ -221,6 +222,7 @@ function RecentRow({
   note,
   now,
   isNew,
+  entranceIndex,
   workspaces,
   onOpen,
   onOpenInWorkspace,
@@ -229,6 +231,7 @@ function RecentRow({
   note: RecentNote;
   now: number;
   isNew: boolean;
+  entranceIndex: number;
   workspaces: WorkspaceSummary[];
   onOpen: () => void;
   onOpenInWorkspace: (workspaceId: string) => void;
@@ -239,10 +242,18 @@ function RecentRow({
       <ContextMenuTrigger asChild>
         <li
           data-row-enter={isNew ? "" : undefined}
+          data-dashboard-enter={isNew ? undefined : ""}
           className={cn(
             "relative",
-            isNew && "animate-row-in motion-reduce:animate-none"
+            isNew
+              ? "animate-row-in motion-reduce:animate-none"
+              : "animate-dashboard-enter motion-reduce:animate-none"
           )}
+          style={
+            isNew
+              ? undefined
+              : { animationDelay: `${Math.min(entranceIndex, 6) * 40 + 355}ms` }
+          }
         >
           {isNew && (
             <span

@@ -19,6 +19,8 @@ import { aiJobs, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
 
 export const RECENT_LIMIT = 8;
 export const JOBS_LIMIT = 8;
+/** Quantas etiquetas bastam para revelar os agrupamentos mais presentes. */
+export const TOP_TAGS_LIMIT = 6;
 
 export interface WorkspaceSummary {
   id: string;
@@ -71,6 +73,51 @@ export interface RecentNote {
   updatedAt: Date;
   createdAt: Date;
   tags: { id: string; name: string; color: string | null }[];
+}
+
+/** Uma etiqueta que já organiza ao menos uma nota ainda existente. */
+export interface TopTag {
+  id: string;
+  name: string;
+  color: string | null;
+  noteCount: number;
+}
+
+/**
+ * As etiquetas mais presentes no acervo da pessoa.
+ *
+ * A conta considera todas as notas que ainda existem, inclusive as
+ * arquivadas: arquivar é tirar do caminho, não apagar uma associação que
+ * continua sendo útil para reencontrar. Notas excluídas ficam de fora, no
+ * mesmo contrato da página de Tags. O recorte pequeno é só de apresentação;
+ * a contagem sempre percorre o acervo inteiro do usuário.
+ */
+export async function listTopTags(
+  userId: string,
+  limit = TOP_TAGS_LIMIT
+): Promise<TopTag[]> {
+  return db
+    .select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      noteCount: sql<number>`count(${notes.id})::int`,
+    })
+    .from(tags)
+    .innerJoin(noteTags, eq(noteTags.tagId, tags.id))
+    .innerJoin(
+      notes,
+      and(
+        eq(notes.id, noteTags.noteId),
+        eq(notes.userId, userId),
+        ne(notes.status, "deleted")
+      )
+    )
+    .where(eq(tags.userId, userId))
+    .groupBy(tags.id)
+    // Nome como desempate deixa o painel estável quando duas tags empatam.
+    .orderBy(desc(sql`count(${notes.id})`), tags.name)
+    .limit(limit);
 }
 
 /**

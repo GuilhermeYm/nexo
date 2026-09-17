@@ -24,7 +24,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { ErrorReport } from "@/components/errors/error-report";
@@ -63,7 +70,14 @@ import {
   type BoardNotice,
   type CreateWindowInput,
   type ErasedBatch,
+  type NotePatch,
+  type WindowPatch,
 } from "@/hooks/use-board-windows";
+import {
+  boardBackgroundStyle,
+  boardSurfaceClass,
+  type BoardBackground,
+} from "@/lib/workspace/board-background";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -97,8 +111,6 @@ import { cn } from "@/lib/utils";
  * pesar, o caminho é virtualizar por viewport, não trocar de tecnologia.
  */
 
-/** Espaçamento do grid de pontos do fundo, em pixels de lousa. */
-const DOT_SPACING = 24;
 /**
  * Quanto os botões e os atalhos mexem no zoom, por acionamento.
  *
@@ -108,6 +120,8 @@ const DOT_SPACING = 24;
  * da escala — 100 → 125 → 156 subindo, 100 → 80 → 64 descendo.
  */
 const ZOOM_STEP = 1.25;
+/** Janela curta para recuperar uma passada da borracha antes de o aviso sair. */
+const ERASE_UNDO_TIMEOUT = 3_000;
 /** Conjunto vazio compartilhado. Nunca é mutado — a passada cria um novo. */
 const EMPTY_SET: ReadonlySet<string> = new Set();
 
@@ -256,8 +270,60 @@ export function Board({
    */
   const [name, setName] = useState(workspace.name);
   const [renaming, setRenaming] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
+  /** Uma falha ao gravar algo do workspace: o nome ou o fundo. */
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * O fundo da lousa.
+   *
+   * Otimista como o nome, e pelo mesmo motivo: quem clica numa amostra está
+   * olhando para a lousa, e esperar a ida ao servidor para a cor mudar faria
+   * o clique parecer perdido. Recusado, o fundo volta ao que era.
+   *
+   * O espelho em `ref` existe para `changeBackground` não depender do estado
+   * — é o que mantém a identidade dela estável e, com ela, o `memo` de cada
+   * janela valendo alguma coisa durante um arraste.
+   */
+  const [background, setBackground] = useState<BoardBackground>(
+    workspace.background
+  );
+  const backgroundRef = useRef(background);
+
+  const changeBackground = useCallback(
+    async (patch: Partial<BoardBackground>) => {
+      const previous = backgroundRef.current;
+      const next = { ...previous, ...patch };
+      backgroundRef.current = next;
+      setBackground(next);
+      setWorkspaceError(null);
+
+      function rollback(message: string) {
+        backgroundRef.current = previous;
+        setBackground(previous);
+        setWorkspaceError(message);
+      }
+
+      try {
+        const response = await fetch(`/api/workspaces/${workspace.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            boardPattern: next.pattern,
+            boardTone: next.tone,
+          }),
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          rollback(body?.error ?? "Não foi possível mudar o fundo.");
+        }
+      } catch {
+        rollback("Sem conexão. O fundo não mudou.");
+      }
+    },
+    [workspace.id]
+  );
 
   useEffect(() => {
     if (!renaming) return;
@@ -273,7 +339,7 @@ export function Board({
 
       const previous = name;
       setName(next);
-      setRenameError(null);
+      setWorkspaceError(null);
 
       try {
         const response = await fetch(`/api/workspaces/${workspace.id}`, {
@@ -285,11 +351,11 @@ export function Board({
         if (!response.ok) {
           const body = await response.json().catch(() => null);
           setName(previous);
-          setRenameError(body?.error ?? "Não foi possível renomear.");
+          setWorkspaceError(body?.error ?? "Não foi possível renomear.");
         }
       } catch {
         setName(previous);
-        setRenameError("Sem conexão. O nome não mudou.");
+        setWorkspaceError("Sem conexão. O nome não mudou.");
       }
     },
     [name, workspace.id]
@@ -769,15 +835,21 @@ export function Board({
       : (visibleWindows.find((item) => item.id === underEraser) ?? null);
 
   const usingTool = tool !== "none";
-  const selectedTextWindow =
+  /**
+   * O elemento aberto no inspetor.
+   *
+   * **Qualquer tipo**, e não só a caixa de texto como antes. O fundo da lousa
+   * mora neste painel, e ele precisa ser alcançável a partir de qualquer
+   * coisa que a pessoa tenha na tela — exigir uma caixa de texto para poder
+   * trocar o fundo seria pedir que ela criasse um elemento para mexer noutro.
+   */
+  const selectedWindow =
     !usingTool && !pickerOpen && !zenMode
-      ? (visibleWindows.find(
-          (item) => item.id === focusedId && item.kind === "text"
-        ) ?? null)
+      ? (visibleWindows.find((item) => item.id === focusedId) ?? null)
       : null;
 
   useEffect(() => {
-    if (!selectedTextWindow) return;
+    if (!selectedWindow) return;
 
     function closeProperties(event: KeyboardEvent) {
       if (event.key === "Escape") setFocusedId(null);
@@ -785,7 +857,7 @@ export function Board({
 
     window.addEventListener("keydown", closeProperties);
     return () => window.removeEventListener("keydown", closeProperties);
-  }, [selectedTextWindow]);
+  }, [selectedWindow]);
 
   /**
    * A flecha do inspetor, **se ela ainda existir** — mesma conta do
@@ -793,11 +865,7 @@ export function Board({
    * vez de editar uma linha que não está mais lá.
    */
   const selectedConnection =
-    !usingTool &&
-    !pickerOpen &&
-    !selectedTextWindow &&
-    !zenMode &&
-    selectedLinkId
+    !usingTool && !pickerOpen && !selectedWindow && !zenMode && selectedLinkId
       ? (visibleConnections.find((item) => item.id === selectedLinkId) ?? null)
       : null;
 
@@ -983,6 +1051,71 @@ export function Board({
     [toContainer, toBoard, spawn, zenMode]
   );
 
+  /* ---------------------------------------------------------------- */
+  /* Os repasses de cada janela                                        */
+  /*                                                                   */
+  /* Identidade estável, e é o que faz o `memo` do `BoardWindowItem`    */
+  /* valer: durante um arraste só a janela arrastada muda de objeto, e  */
+  /* com estes retornos fixos as outras vinte não re-renderizam sessenta */
+  /* vezes por segundo. Uma função anônima criada no `map` desmancharia */
+  /* a memoização inteira — cada quadro traria props novas para todas.  */
+  /* ---------------------------------------------------------------- */
+
+  const focusWindow = useCallback(
+    (id: string) => {
+      setFocusedId(id);
+      setSelectedLinkId(null);
+      bringToFront(id);
+    },
+    [bringToFront]
+  );
+
+  const previewWindow = useCallback(
+    (id: string, patch: WindowPatch) =>
+      updateWindow(id, patch, { persist: false }),
+    [updateWindow]
+  );
+
+  const commitWindow = useCallback(
+    (id: string, patch: WindowPatch) => updateWindow(id, patch),
+    [updateWindow]
+  );
+
+  const startLinkFrom = useCallback(
+    (id: string) => {
+      pickTool("link");
+      setLinkingFrom(id);
+    },
+    [pickTool]
+  );
+
+  const openNoteEditor = useCallback(
+    (noteId: string) => router.push(`/nota/${noteId}`),
+    [router]
+  );
+
+  const openAttachmentWindow = useCallback(
+    (attachmentId: string) => void spawn({ kind: "attachment", attachmentId }),
+    [spawn]
+  );
+
+  /**
+   * As notas já abertas, para o painel não oferecer o que já está na lousa.
+   *
+   * A chave é a lista de ids em texto, e não o array de janelas: arrastar uma
+   * janela troca o array a cada quadro sem mexer em id nenhum, e um conjunto
+   * novo por quadro faria o `memo` do painel não valer nada justamente
+   * durante o gesto em que ele mais atrapalha.
+   */
+  const openNoteKey = windows.map((item) => item.noteId ?? "").join(",");
+  const openNoteIds = useMemo(
+    () =>
+      new Set(openNoteKey.split(",").filter((id): id is string => id !== "")),
+    [openNoteKey]
+  );
+
+  const closePicker = useCallback(() => setPickerOpen(false), []);
+
   const handlePick = useCallback(
     (note: OpenableNote) => {
       setPickerOpen(false);
@@ -1011,11 +1144,24 @@ export function Board({
   // atrás do constante.
   const notice: BoardNotice | null =
     error ??
-    (renameError
-      ? { message: renameError, upgrade: false, code: null }
+    (workspaceError
+      ? { message: workspaceError, upgrade: false, code: null }
       : null);
   // Só quem tem para onde subir recebe o convite; no Pro o teto é o absoluto.
   const capIsPlanLimit = atCap && canUpgrade;
+
+  /**
+   * A recuperação é deliberadamente curta: o cartão não vira uma peça fixa
+   * da lousa, mas ainda deixa claro por quanto tempo o Desfazer está vivo.
+   * O cleanup também impede que o timer de uma passada anterior dispense o
+   * cartão mais novo.
+   */
+  useEffect(() => {
+    if (!lastErased) return;
+
+    const timeout = window.setTimeout(dismissErased, ERASE_UNDO_TIMEOUT);
+    return () => window.clearTimeout(timeout);
+  }, [lastErased, dismissErased]);
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-clip bg-background">
@@ -1204,9 +1350,10 @@ export function Board({
 
           `clip` não cria contêiner rolável nenhum. Não há o que rolar. */}
       <div ref={frameRef} className="relative min-h-0 flex-1 overflow-clip">
-        {/* O fundo. O grid de pontos acompanha pan e zoom, e é ele que dá à
-            lousa a sensação de superfície — sem referência visual, arrastar
-            no vazio não parece movimento. */}
+        {/* O fundo. A trama acompanha pan e zoom, e é ela que dá à lousa a
+            sensação de superfície — sem referência visual, arrastar no vazio
+            não parece movimento. Qual trama e qual cor é escolha da pessoa,
+            guardada no workspace: ver `lib/workspace/board-background.ts`. */}
         <ContextMenu>
           <ContextMenuTrigger asChild disabled={zenMode}>
             <div
@@ -1220,12 +1367,12 @@ export function Board({
               }
               style={{
                 touchAction: "none",
-                backgroundImage:
-                  "radial-gradient(circle, var(--nx-border) 1px, transparent 1px)",
-                backgroundSize: `${DOT_SPACING * viewport.zoom}px ${DOT_SPACING * viewport.zoom}px`,
-                backgroundPosition: `${viewport.x}px ${viewport.y}px`,
+                ...boardBackgroundStyle(background, viewport),
               }}
-              className="absolute inset-0 cursor-grab bg-tertiary active:cursor-grabbing"
+              className={cn(
+                "absolute inset-0 cursor-grab active:cursor-grabbing",
+                boardSurfaceClass(background.tone)
+              )}
             >
               {/* O plano. Uma transformação só carrega todas as janelas — mexer
               em `left`/`top` de cada uma a cada quadro de pan custaria um
@@ -1275,108 +1422,27 @@ export function Board({
                 )}
 
                 {visibleWindows.map((item) => (
-                  <div key={item.id} className="pointer-events-auto contents">
-                    <ContextMenu>
-                      <ContextMenuTrigger asChild disabled={zenMode}>
-                        <WindowFrame
-                          window={item}
-                          zoom={viewport.zoom}
-                          title={titleOf(item)}
-                          label={labelOf(item)}
-                          icon={
-                            item.note ? (
-                              <NoteTypeIcon
-                                type={item.note.type}
-                                className="size-3.5 shrink-0 text-subtle-foreground"
-                              />
-                            ) : item.kind === "attachment" ? (
-                              <Paperclip className="size-3.5 shrink-0 text-subtle-foreground" />
-                            ) : null
-                          }
-                          toneClass={surfaceClassOf(item)}
-                          focused={focusedId === item.id}
-                          readOnly={zenMode}
-                          onFocus={() => {
-                            setFocusedId(item.id);
-                            setSelectedLinkId(null);
-                            bringToFront(item.id);
-                          }}
-                          onPreview={(patch) =>
-                            updateWindow(item.id, patch, { persist: false })
-                          }
-                          onCommit={(patch) => updateWindow(item.id, patch)}
-                          onClose={() => closeWindow(item.id)}
-                        >
-                          {item.kind === "attachment" && item.attachment ? (
-                            <AttachmentWindowBody
-                              attachment={item.attachment}
-                              width={item.width}
-                            />
-                          ) : item.kind === "note" ? (
-                            <NoteWindowBody
-                              window={item}
-                              autoFocus={justCreatedId === item.id}
-                              readOnly={zenMode}
-                              onChange={(patch) =>
-                                item.note && updateNote(item.note.id, patch)
-                              }
-                              onAddTag={(name) =>
-                                item.note && addNoteTag(item.note.id, name)
-                              }
-                              onRemoveTag={(tagId) =>
-                                item.note && removeNoteTag(item.note.id, tagId)
-                              }
-                              onUpdateTag={updateTag}
-                            />
-                          ) : (
-                            <ElementWindowBody
-                              window={item}
-                              autoFocus={justCreatedId === item.id}
-                              readOnly={zenMode}
-                              onChange={(patch) => updateWindow(item.id, patch)}
-                              onCommit={(patch) => updateWindow(item.id, patch)}
-                            />
-                          )}
-                        </WindowFrame>
-                      </ContextMenuTrigger>
-                      <WindowMenu
-                        window={item}
-                        onOpenAttachment={
-                          item.note?.attachmentId
-                            ? () =>
-                                spawn({
-                                  kind: "attachment",
-                                  attachmentId: item.note!.attachmentId!,
-                                })
-                            : undefined
-                        }
-                        onOpenEditor={
-                          item.note
-                            ? () => router.push(`/nota/${item.note!.id}`)
-                            : undefined
-                        }
-                        onLink={() => {
-                          pickTool("link");
-                          setLinkingFrom(item.id);
-                        }}
-                        onRaise={() => bringToFront(item.id)}
-                        onToggleState={() =>
-                          updateWindow(item.id, {
-                            state:
-                              item.state === "minimized"
-                                ? "normal"
-                                : "minimized",
-                          })
-                        }
-                        onClose={() => closeWindow(item.id)}
-                        onDeleteNote={
-                          item.note
-                            ? () => deleteNote(item.note!.id)
-                            : undefined
-                        }
-                      />
-                    </ContextMenu>
-                  </div>
+                  <BoardWindowItem
+                    key={item.id}
+                    item={item}
+                    zoom={viewport.zoom}
+                    focused={focusedId === item.id}
+                    autoFocus={justCreatedId === item.id}
+                    readOnly={zenMode}
+                    onFocus={focusWindow}
+                    onPreview={previewWindow}
+                    onCommit={commitWindow}
+                    onClose={closeWindow}
+                    onNoteChange={updateNote}
+                    onAddTag={addNoteTag}
+                    onRemoveTag={removeNoteTag}
+                    onUpdateTag={updateTag}
+                    onLinkFrom={startLinkFrom}
+                    onRaise={bringToFront}
+                    onOpenAttachment={openAttachmentWindow}
+                    onOpenEditor={openNoteEditor}
+                    onDeleteNote={deleteNote}
+                  />
                 ))}
               </div>
             </div>
@@ -1711,84 +1777,104 @@ export function Board({
         {(notice || lastErased || atCap) && (
           <div
             role="status"
-            className="absolute bottom-4 left-1/2 z-30 flex max-w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 items-start gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-[0_12px_40px_-12px] shadow-black/25"
+            className="absolute bottom-4 left-1/2 z-30 w-[min(30rem,calc(100%-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl bg-background shadow-[0_16px_40px_-18px_rgba(0,0,0,0.48)] ring-1 ring-border"
           >
-            <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
-              {notice ? (
-                <>
-                  {notice.message}
-                  {notice.upgrade && (
-                    <>
-                      {" "}
-                      <UpgradeLink />
-                    </>
-                  )}
-                  {/* O relato precisa de campo e botões — por isso o
-                      contêiner virou `div`: `<div>` dentro de `<p>` faz o
-                      navegador fechar o parágrafo sozinho, e o cartão iria
-                      junto. */}
-                  {notice.code && (
-                    <ErrorReport
-                      className="mt-2"
-                      code={notice.code}
-                      route="workspace/[id]"
-                      compact
-                    />
-                  )}
-                </>
-              ) : lastErased ? (
-                eraseSummary(lastErased)
-              ) : capIsPlanLimit ? (
-                <>
-                  Esta lousa chegou aos {windowCap} elementos do plano
-                  Gratuito. Feche algo, ou <UpgradeLink label="conheça o Pro" />
-                  , onde a lousa não tem esse teto.
-                </>
-              ) : (
-                // Teto absoluto: não é oferta, é proteção — e não há o que
-                // vender para quem já está no plano mais alto.
-                `Esta lousa chegou ao limite de ${windowCap} elementos. Feche algo para abrir espaço.`
-              )}
-            </div>
+            <div className="flex items-start gap-3 px-4 py-3.5">
+              <div className="min-w-0 flex-1 text-sm leading-relaxed text-foreground">
+                {notice ? (
+                  <>
+                    {notice.message}
+                    {notice.upgrade && (
+                      <>
+                        {" "}
+                        <UpgradeLink />
+                      </>
+                    )}
+                    {/* O relato precisa de campo e botões — por isso o
+                        contêiner virou `div`: `<div>` dentro de `<p>` faz o
+                        navegador fechar o parágrafo sozinho, e o cartão iria
+                        junto. */}
+                    {notice.code && (
+                      <ErrorReport
+                        className="mt-2"
+                        code={notice.code}
+                        route="workspace/[id]"
+                        compact
+                      />
+                    )}
+                  </>
+                ) : lastErased ? (
+                  <>
+                    <p className="mb-0.5 text-xs font-medium text-subtle-foreground">
+                      Desfazer disponível por 3 segundos
+                    </p>
+                    <p>{eraseSummary(lastErased)}</p>
+                  </>
+                ) : capIsPlanLimit ? (
+                  <>
+                    Esta lousa chegou aos {windowCap} elementos do plano
+                    Gratuito. Feche algo, ou <UpgradeLink label="conheça o Pro" />
+                    , onde a lousa não tem esse teto.
+                  </>
+                ) : (
+                  // Teto absoluto: não é oferta, é proteção — e não há o que
+                  // vender para quem já está no plano mais alto.
+                  `Esta lousa chegou ao limite de ${windowCap} elementos. Feche algo para abrir espaço.`
+                )}
+              </div>
 
-            {/* O desfazer só existe enquanto o cartão está de pé, e é a
+              {/* O desfazer só existe enquanto o cartão está de pé, e é a
                 única rede de proteção do post-it: fechar uma nota é
                 reversível pela conta, um post-it apagado não existe em
                 lugar nenhum. */}
-            {!notice && lastErased && (
-              <button
-                type="button"
-                onClick={() => void undoErase()}
-                className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-xs font-semibold text-accent-foreground transition-colors duration-150 hover:bg-accent/90 pointer-coarse:h-9"
-              >
-                <Undo2 className="size-3.5" aria-hidden="true" />
-                Desfazer
-              </button>
-            )}
+              {!notice && lastErased && (
+                <button
+                  type="button"
+                  onClick={() => void undoErase()}
+                  className="flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-xs font-semibold text-accent-foreground transition-colors duration-150 hover:bg-accent/90 pointer-coarse:h-9"
+                >
+                  <Undo2 className="size-3.5" aria-hidden="true" />
+                  Desfazer
+                </button>
+              )}
 
-            {(notice || lastErased) && (
-              <button
-                type="button"
-                onClick={() => {
-                  dismissError();
-                  setRenameError(null);
-                  dismissErased();
+              {(notice || lastErased) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissError();
+                    setWorkspaceError(null);
+                    dismissErased();
+                  }}
+                  className="-mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+                >
+                  <X className="size-3.5" aria-hidden="true" />
+                  <span className="sr-only">Dispensar aviso</span>
+                </button>
+              )}
+            </div>
+            {lastErased && !notice && (
+              <div
+                key={`${lastErased.windows.map((item) => item.id).join(",")}:${lastErased.links.map((item) => `${item.fromWindowId}>${item.toWindowId}`).join(",")}`}
+                className="h-1 origin-left bg-accent motion-reduce:hidden"
+                style={{
+                  animation: `erase-undo-countdown ${ERASE_UNDO_TIMEOUT}ms linear forwards`,
                 }}
-                className="-mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
               >
-                <X className="size-3.5" aria-hidden="true" />
-                <span className="sr-only">Dispensar aviso</span>
-              </button>
+                <span className="sr-only">
+                  O aviso fecha automaticamente em 3 segundos.
+                </span>
+              </div>
             )}
           </div>
         )}
 
-        {selectedTextWindow && (
+        {selectedWindow && (
           <ToolPropertiesPanel
-            window={selectedTextWindow}
-            onChange={(patch) =>
-              updateWindow(selectedTextWindow.id, patch)
-            }
+            window={selectedWindow}
+            background={background}
+            onChange={(patch) => updateWindow(selectedWindow.id, patch)}
+            onBackgroundChange={(patch) => void changeBackground(patch)}
             onClose={() => setFocusedId(null)}
           />
         )}
@@ -1812,14 +1898,8 @@ export function Board({
         <NotePicker
           workspaceId={workspace.id}
           open={pickerOpen}
-          openNoteIds={
-            new Set(
-              windows
-                .map((item) => item.noteId)
-                .filter((id): id is string => id !== null)
-            )
-          }
-          onClose={() => setPickerOpen(false)}
+          openNoteIds={openNoteIds}
+          onClose={closePicker}
           onPick={handlePick}
           onPickAttachment={handlePickAttachment}
         />
@@ -1836,6 +1916,156 @@ export function Board({
 }
 
 /* ---------------------------------------------------------------------- */
+
+interface BoardWindowItemProps {
+  item: BoardWindow;
+  zoom: number;
+  focused: boolean;
+  autoFocus: boolean;
+  readOnly: boolean;
+  onFocus: (id: string) => void;
+  onPreview: (id: string, patch: WindowPatch) => void;
+  onCommit: (id: string, patch: WindowPatch) => void;
+  onClose: (id: string) => void;
+  onNoteChange: (noteId: string, patch: NotePatch) => void;
+  onAddTag: (noteId: string, name: string) => void;
+  onRemoveTag: (noteId: string, tagId: string) => void;
+  onUpdateTag: (
+    tagId: string,
+    patch: { name?: string; color?: string | null }
+  ) => void;
+  onLinkFrom: (id: string) => void;
+  onRaise: (id: string) => void;
+  onOpenAttachment: (attachmentId: string) => void;
+  onOpenEditor: (noteId: string) => void;
+  onDeleteNote: (noteId: string) => void;
+}
+
+/**
+ * Uma janela na lousa: a moldura, o miolo e o menu do botão direito.
+ *
+ * **Memoizado, e isto é a diferença entre arrastar liso e arrastar
+ * engasgado.** Cada quadro de arraste troca o objeto de **uma** janela e
+ * re-renderiza o `Board` inteiro; sem o `memo`, as outras vinte janelas
+ * renderizavam junto — e uma delas pode ser um TipTap ou um PDF. Mesmo
+ * argumento que já valia para `ConnectionArrow`.
+ *
+ * Para o `memo` valer, todo repasse é uma função **estável** que recebe o
+ * `id`: quem monta o fechamento sobre `item` é este componente, uma vez por
+ * mudança de verdade, e não o `map` a sessenta quadros por segundo.
+ */
+const BoardWindowItem = memo(function BoardWindowItem({
+  item,
+  zoom,
+  focused,
+  autoFocus,
+  readOnly,
+  onFocus,
+  onPreview,
+  onCommit,
+  onClose,
+  onNoteChange,
+  onAddTag,
+  onRemoveTag,
+  onUpdateTag,
+  onLinkFrom,
+  onRaise,
+  onOpenAttachment,
+  onOpenEditor,
+  onDeleteNote,
+}: BoardWindowItemProps) {
+  const id = item.id;
+  const note = item.note;
+  const noteId = note?.id ?? null;
+  const attachmentId = note?.attachmentId ?? null;
+
+  const focus = useCallback(() => onFocus(id), [onFocus, id]);
+  const preview = useCallback(
+    (patch: WindowPatch) => onPreview(id, patch),
+    [onPreview, id]
+  );
+  const commit = useCallback(
+    (patch: WindowPatch) => onCommit(id, patch),
+    [onCommit, id]
+  );
+  const close = useCallback(() => onClose(id), [onClose, id]);
+
+  return (
+    // `display: contents` apaga a caixa deste envelope — as janelas continuam
+    // posicionadas em relação ao plano. `pointer-events` é herdada, e é assim
+    // que ela chega até a janela sem o envelope virar um alvo.
+    <div className="pointer-events-auto contents">
+      <ContextMenu>
+        <ContextMenuTrigger asChild disabled={readOnly}>
+          <WindowFrame
+            window={item}
+            zoom={zoom}
+            title={titleOf(item)}
+            label={labelOf(item)}
+            icon={
+              note ? (
+                <NoteTypeIcon
+                  type={note.type}
+                  className="size-3.5 shrink-0 text-subtle-foreground"
+                />
+              ) : item.kind === "attachment" ? (
+                <Paperclip className="size-3.5 shrink-0 text-subtle-foreground" />
+              ) : null
+            }
+            toneClass={surfaceClassOf(item)}
+            focused={focused}
+            readOnly={readOnly}
+            onFocus={focus}
+            onPreview={preview}
+            onCommit={commit}
+            onClose={close}
+          >
+            {item.kind === "attachment" && item.attachment ? (
+              <AttachmentWindowBody
+                attachment={item.attachment}
+                width={item.width}
+              />
+            ) : item.kind === "note" ? (
+              <NoteWindowBody
+                window={item}
+                autoFocus={autoFocus}
+                readOnly={readOnly}
+                onChange={(patch) => noteId && onNoteChange(noteId, patch)}
+                onAddTag={(name) => noteId && onAddTag(noteId, name)}
+                onRemoveTag={(tagId) => noteId && onRemoveTag(noteId, tagId)}
+                onUpdateTag={onUpdateTag}
+              />
+            ) : (
+              <ElementWindowBody
+                window={item}
+                autoFocus={autoFocus}
+                readOnly={readOnly}
+                onChange={commit}
+                onCommit={commit}
+              />
+            )}
+          </WindowFrame>
+        </ContextMenuTrigger>
+        <WindowMenu
+          window={item}
+          onOpenAttachment={
+            attachmentId ? () => onOpenAttachment(attachmentId) : undefined
+          }
+          onOpenEditor={noteId ? () => onOpenEditor(noteId) : undefined}
+          onLink={() => onLinkFrom(id)}
+          onRaise={() => onRaise(id)}
+          onToggleState={() =>
+            onCommit(id, {
+              state: item.state === "minimized" ? "normal" : "minimized",
+            })
+          }
+          onClose={close}
+          onDeleteNote={noteId ? () => onDeleteNote(noteId) : undefined}
+        />
+      </ContextMenu>
+    </div>
+  );
+});
 
 /**
  * Menu de uma janela.

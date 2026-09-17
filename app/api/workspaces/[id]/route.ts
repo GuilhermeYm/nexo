@@ -9,6 +9,10 @@ import { notes, workspaces } from "@/lib/db/schema";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
+import {
+  BOARD_PATTERNS,
+  BOARD_TONES,
+} from "@/lib/workspace/board-background";
 import { getOwnedWorkspace } from "@/lib/workspace/queries";
 
 /**
@@ -49,21 +53,39 @@ export async function GET(
   }
 }
 
-const renameWorkspaceSchema = z.object({
-  name: z.string().trim().min(1).max(60),
-});
+/**
+ * O que o cliente pode mudar num workspace: o nome e o fundo da lousa.
+ *
+ * Os três campos são opcionais e pelo menos um precisa vir — um PATCH vazio
+ * é pedido malformado, não uma escrita sem efeito. `boardTone` aceita `null`
+ * de propósito: é assim que se volta à superfície neutra, e sem isso a única
+ * saída seria não existir um jeito de desfazer a escolha de cor.
+ */
+const updateWorkspaceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60).optional(),
+    boardPattern: z.enum(BOARD_PATTERNS).optional(),
+    boardTone: z.enum(BOARD_TONES).nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.name !== undefined ||
+      value.boardPattern !== undefined ||
+      value.boardTone !== undefined,
+    { message: "Nada para alterar." }
+  );
 
 /**
- * Renomear um workspace.
+ * Renomear um workspace, ou mudar o fundo da lousa.
  *
- * Só o nome. Trocar o dono, o plano ou a marca de padrão por aqui seria
+ * Só esses campos. Trocar o dono, o plano ou a marca de padrão por aqui seria
  * aceitar do cliente coisas que ele não tem por que decidir — o campo entra
  * um a um, nunca o corpo inteiro.
  *
- * A troca de nome **é auditada**: o nome é como a pessoa reencontra o que
- * guardou, e um renomeio que ninguém lembra de ter feito é indistinguível de
- * um sumiço. É o mesmo critério do título da nota em `PATCH /api/notes/[id]`
- * — audita-se o que muda a identidade da coisa, não cada tecla digitada.
+ * A troca de nome **é auditada**; a do fundo, não. O nome é como a pessoa
+ * reencontra o que guardou, e um renomeio que ninguém lembra de ter feito é
+ * indistinguível de um sumiço. O fundo é aparência, e trocá-lo não esconde
+ * nada de ninguém — mesmo critério da cor da tag e da cor da flecha.
  */
 export async function PATCH(
   request: Request,
@@ -79,9 +101,13 @@ export async function PATCH(
     if (!user) return errorResponse(401, "Não autenticado.");
     userId = user.id;
 
+    // O teto cobre as duas coisas que esta rota faz, e é o gesto mais
+    // frequente que manda nele: mudar o fundo é clicar numa amostra e ver o
+    // resultado na hora, como a cor da tag — várias vezes seguidas até achar
+    // a que serve. Renomear, ninguém faz sessenta vezes por hora.
     const limit = await rateLimit({
-      key: `workspaces:rename:${user.id}`,
-      limit: 60,
+      key: `workspaces:update:${user.id}`,
+      limit: 240,
       windowMs: 60 * 60 * 1000,
     });
     if (!limit.success) {
@@ -89,47 +115,74 @@ export async function PATCH(
     }
 
     const { id } = await ctx.params;
-    const parsed = renameWorkspaceSchema.safeParse(await request.json());
+    const parsed = updateWorkspaceSchema.safeParse(await request.json());
     if (!parsed.success) {
-      return errorResponse(400, "O nome precisa ter de 1 a 60 caracteres.");
+      return errorResponse(400, "Dados inválidos para este workspace.");
     }
+    const input = parsed.data;
 
     // O `id` vem da URL e por isso é entrada do cliente como qualquer outra.
     const current = await getOwnedWorkspace(user.id, id);
     if (!current) return errorResponse(404, "Workspace não encontrado.");
 
-    const name = parsed.data.name;
-    if (name === current.name) {
+    const renamed = input.name !== undefined && input.name !== current.name;
+    const repainted =
+      (input.boardPattern !== undefined &&
+        input.boardPattern !== current.background.pattern) ||
+      (input.boardTone !== undefined &&
+        input.boardTone !== current.background.tone);
+
+    if (!renamed && !repainted) {
       return NextResponse.json({ workspace: current });
     }
 
     const [updated] = await db
       .update(workspaces)
-      .set({ name, updatedAt: new Date() })
+      // Campo a campo: o corpo validado nunca entra inteiro num `set()`.
+      .set({
+        ...(renamed && { name: input.name }),
+        ...(input.boardPattern !== undefined && {
+          boardPattern: input.boardPattern,
+        }),
+        ...(input.boardTone !== undefined && { boardTone: input.boardTone }),
+        updatedAt: new Date(),
+      })
       // O filtro por `user_id` é redundante com a RLS e fica assim de
       // propósito: a rota não depende de a política estar certa para não
       // escrever na linha de outra pessoa.
       .where(and(eq(workspaces.id, id), eq(workspaces.userId, user.id)))
-      .returning({ id: workspaces.id, name: workspaces.name });
+      .returning({
+        id: workspaces.id,
+        name: workspaces.name,
+        boardPattern: workspaces.boardPattern,
+        boardTone: workspaces.boardTone,
+      });
 
     if (!updated) return errorResponse(404, "Workspace não encontrado.");
 
-    await writeAuditLog({
-      action: "UPDATE",
-      tableName: "workspaces",
-      recordId: id,
-      userId: user.id,
-      oldData: { name: current.name },
-      newData: { name: updated.name },
-      request,
-    });
+    // Só o nome. Uma amostra de cor por clique encheria a trilha dos eventos
+    // que ela existe para deixar visíveis.
+    if (renamed) {
+      await writeAuditLog({
+        action: "UPDATE",
+        tableName: "workspaces",
+        recordId: id,
+        userId: user.id,
+        oldData: { name: current.name },
+        newData: { name: updated.name },
+        request,
+      });
 
-    await invalidateNoteListCache(user.id);
+      // O nome do workspace viaja junto da lista de notas; o fundo da lousa,
+      // não. Invalidar o cache por uma troca de cor seria jogar fora uma
+      // leitura boa por uma mudança que ela nem carrega.
+      await invalidateNoteListCache(user.id);
+    }
 
     return NextResponse.json({ workspace: updated });
   } catch (error) {
     const code = await logServerError("PATCH /api/workspaces/[id]", error, { userId }, request);
-    return errorResponse(500, "Erro ao renomear o workspace.", code);
+    return errorResponse(500, "Erro ao salvar o workspace.", code);
   }
 }
 

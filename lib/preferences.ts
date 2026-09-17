@@ -37,3 +37,30 @@ export function writeBoardRichEditor(on: boolean): void {
   // `storage` só chega nos outros separadores; este evento avisa o atual.
   window.dispatchEvent(new Event(PREFERENCES_EVENT));
 }
+
+export const HIDE_DRAFT_KEY = "nexo-hide-draft";
+
+/**
+ * Oculta o convite "Escrever um rascunho" do dashboard.
+ *
+ * Desligado por padrão: o convite fica visível, como sempre foi. Ligado, ele
+ * some — mas só o convite vazio. Havendo rascunho com texto já guardado no
+ * `localStorage`, ele continua abrindo sozinho: texto não salvo não pode
+ * ficar escondido atrás de uma preferência (mesma regra do `DraftNote`).
+ */
+export function readHideDraft(): boolean {
+  try {
+    return window.localStorage.getItem(HIDE_DRAFT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeHideDraft(on: boolean): void {
+  try {
+    window.localStorage.setItem(HIDE_DRAFT_KEY, on ? "1" : "0");
+  } catch {
+    // localStorage indisponível: a escolha vale só para esta sessão.
+  }
+  window.dispatchEvent(new Event(PREFERENCES_EVENT));
+}

@@ -175,12 +175,13 @@ export function TasksPanel({
                 Fixado até você retomar
               </p>
               <ul className="divide-y divide-tag-1-foreground/10">
-                {pinned.map((job) => (
+                {pinned.map((job, index) => (
                   <JobRow
                     key={job.id}
                     job={job}
                     now={clock}
                     isNew={fresh.has(job.id)}
+                    entranceIndex={index}
                     pinned
                   />
                 ))}
@@ -190,12 +191,13 @@ export function TasksPanel({
 
           {history.length > 0 && (
             <ul className="divide-y divide-border">
-              {history.map((job) => (
+              {history.map((job, index) => (
                 <JobRow
                   key={job.id}
                   job={job}
                   now={clock}
                   isNew={fresh.has(job.id)}
+                  entranceIndex={pinned.length + index}
                   onDeleted={handleDeleted}
                 />
               ))}
@@ -227,12 +229,14 @@ function JobRow({
   job,
   now,
   isNew,
+  entranceIndex,
   pinned,
   onDeleted,
 }: {
   job: AiJobItem;
   now: number;
   isNew: boolean;
+  entranceIndex: number;
   pinned?: boolean;
   onDeleted?: (id: string) => void | Promise<void>;
 }) {
@@ -279,11 +283,18 @@ function JobRow({
   return (
     <li
       data-row-enter={isNew ? "" : undefined}
+      data-dashboard-enter={isNew ? undefined : ""}
       className={cn(
         "relative flex items-start gap-3 px-4 py-3.5 transition-colors duration-150",
         isNew && "animate-row-in motion-reduce:animate-none",
+        !isNew && "animate-dashboard-enter motion-reduce:animate-none",
         pinned ? "hover:bg-tag-1-foreground/5" : "hover:bg-secondary/40"
       )}
+      style={
+        isNew
+          ? undefined
+          : { animationDelay: `${Math.min(entranceIndex, 6) * 40 + 310}ms` }
+      }
     >
       {isNew && (
         <span

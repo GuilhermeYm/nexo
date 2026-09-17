@@ -38,6 +38,7 @@ export default async function ConfiguracoesPage() {
 
   return (
     <SettingsView
+      userId={user.id}
       userName={profile?.displayName ?? null}
       userEmail={user.email ?? ""}
       // Date não atravessa a fronteira Server → Client; ISO atravessa.

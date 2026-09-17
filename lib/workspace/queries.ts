@@ -23,6 +23,10 @@ import {
   workspaceWindows,
   workspaces,
 } from "@/lib/db/schema";
+import {
+  toBoardBackground,
+  type BoardBackground,
+} from "@/lib/workspace/board-background";
 import type { ConnectionStyle } from "@/lib/workspace/connection-style";
 
 /**
@@ -42,6 +46,8 @@ export interface BoardWorkspace {
   icon: string | null;
   color: string | null;
   isDefault: boolean;
+  /** O fundo da lousa, já normalizado — ver `lib/workspace/board-background.ts`. */
+  background: BoardBackground;
 }
 
 /**
@@ -62,12 +68,22 @@ export async function getOwnedWorkspace(
       icon: workspaces.icon,
       color: workspaces.color,
       isDefault: workspaces.isDefault,
+      boardPattern: workspaces.boardPattern,
+      boardTone: workspaces.boardTone,
     })
     .from(workspaces)
     .where(and(eq(workspaces.id, workspaceId), eq(workspaces.userId, userId)))
     .limit(1);
 
-  return row ?? null;
+  if (!row) return null;
+
+  const { boardPattern, boardTone, ...workspace } = row;
+  return {
+    ...workspace,
+    // Normalizado aqui, uma vez: quem desenha a lousa nunca recebe um valor
+    // que o `style` não saberia usar. Ver `toBoardBackground`.
+    background: toBoardBackground(boardPattern, boardTone),
+  };
 }
 
 export type WindowKind = "note" | "sticky" | "text" | "attachment";

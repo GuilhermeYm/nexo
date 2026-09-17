@@ -5,6 +5,7 @@ import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import {
   listAiJobs,
   listRecentNotes,
+  listTopTags,
   listWorkspaces,
   type WorkspaceSummary,
 } from "@/lib/dashboard/queries";
@@ -45,9 +46,10 @@ export default async function DashboardPage() {
     workspaceList = await createDefaultWorkspace(user.id);
   }
 
-  const [jobs, notes, unreadCount] = await Promise.all([
+  const [jobs, notes, topTags, unreadCount] = await Promise.all([
     listAiJobs(user.id),
     listRecentNotes(user.id),
+    listTopTags(user.id),
     countUnreadNotifications(user.id),
   ]);
 
@@ -65,6 +67,7 @@ export default async function DashboardPage() {
       workspaces={workspaceList}
       jobs={jobs}
       notes={notes}
+      topTags={topTags}
       renderedAt={renderedAt}
       serverHour={new Date(renderedAt).getHours()}
       unreadCount={unreadCount}

@@ -11,6 +11,7 @@ import { RecentPanel } from "@/components/dashboard/recent-panel";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { TasksPanel } from "@/components/dashboard/tasks-panel";
 import { TodayTasks } from "@/components/dashboard/today-tasks";
+import { TopTags } from "@/components/dashboard/top-tags";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { HOME_TAB, useOpenTabs } from "@/hooks/use-open-tabs";
 import { usePersistedFlag } from "@/hooks/use-persisted-flag";
@@ -21,6 +22,7 @@ import { readApiFailure } from "@/lib/plan-limit";
 import type {
   AiJobItem,
   RecentNote,
+  TopTag,
   WorkspaceSummary,
 } from "@/lib/dashboard/queries";
 import { cn } from "@/lib/utils";
@@ -31,6 +33,7 @@ interface DashboardShellProps {
   workspaces: WorkspaceSummary[];
   jobs: AiJobItem[];
   notes: RecentNote[];
+  topTags: TopTag[];
   /** Instante em que o servidor pintou a página. O primeiro render do cliente
    *  usa este mesmo valor, para o HTML bater; depois o relógio assume. */
   renderedAt: number;
@@ -48,6 +51,7 @@ export function DashboardShell({
   workspaces: initialWorkspaces,
   jobs,
   notes,
+  topTags,
   renderedAt,
   serverHour,
   unreadCount,
@@ -314,7 +318,12 @@ export function DashboardShell({
   const registerRefresh = useCallback((refresh: () => void) => {
     refreshTasks.current = refresh;
   }, []);
-  const handleUploaded = useCallback(() => refreshTasks.current?.(), []);
+  const handleUploaded = useCallback(() => {
+    refreshTasks.current?.();
+    // A classificação pode ter adicionado tags à nota. Revalida o retrato do
+    // servidor para a seção de ranking atualizar junto com os painéis.
+    router.refresh();
+  }, [router]);
 
   // Os painéis lá embaixo conseguem disparar as duas ações da barra de cima:
   // "Escrever uma nota" abre o rascunho, "Enviar um arquivo" abre o seletor.
@@ -471,7 +480,10 @@ export function DashboardShell({
         {/* A janela */}
         <main className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-background">
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-14 sm:py-20">
-            <div className="flex items-center gap-3">
+            <div
+              data-dashboard-enter=""
+              className="flex animate-dashboard-enter items-center gap-3 motion-reduce:animate-none"
+            >
               <span
                 aria-hidden="true"
                 className="flex size-9 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground font-[family-name:var(--font-display)]"
@@ -484,12 +496,20 @@ export function DashboardShell({
               </h1>
             </div>
 
-            <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+            <p
+              data-dashboard-enter=""
+              className="mt-2.5 animate-dashboard-enter text-sm leading-relaxed text-muted-foreground motion-reduce:animate-none"
+              style={{ animationDelay: "45ms" }}
+            >
               Jogue o que chegou aqui dentro. A Nexo lê, classifica e guarda —
               você só volta quando precisar reencontrar.
             </p>
 
-            <div className="mt-7">
+            <div
+              data-dashboard-enter=""
+              className="mt-7 animate-dashboard-enter motion-reduce:animate-none"
+              style={{ animationDelay: "90ms" }}
+            >
               <CommandBar
                 onOpenNote={handleOpenNote}
                 onUploaded={handleUploaded}
@@ -505,24 +525,44 @@ export function DashboardShell({
               />
             </div>
 
-            <TodayTasks />
+            <div
+              data-dashboard-enter=""
+              className="animate-dashboard-enter motion-reduce:animate-none"
+              style={{ animationDelay: "145ms" }}
+            >
+              <TodayTasks />
+            </div>
+
+            <TopTags tags={topTags} entranceDelay="200ms" />
 
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <TasksPanel
-                initial={jobs}
-                renderedAt={renderedAt}
-                now={now}
-                registerRefresh={registerRefresh}
-                onUpload={handlePickFile}
-              />
-              <RecentPanel
-                initial={notes}
-                renderedAt={renderedAt}
-                now={now}
-                workspaces={workspaces}
-                onOpenNote={handleOpenNote}
-                onCreateNote={handleCreateNote}
-              />
+              <div
+                data-dashboard-enter=""
+                className="animate-dashboard-enter motion-reduce:animate-none"
+                style={{ animationDelay: "255ms" }}
+              >
+                <TasksPanel
+                  initial={jobs}
+                  renderedAt={renderedAt}
+                  now={now}
+                  registerRefresh={registerRefresh}
+                  onUpload={handlePickFile}
+                />
+              </div>
+              <div
+                data-dashboard-enter=""
+                className="animate-dashboard-enter motion-reduce:animate-none"
+                style={{ animationDelay: "300ms" }}
+              >
+                <RecentPanel
+                  initial={notes}
+                  renderedAt={renderedAt}
+                  now={now}
+                  workspaces={workspaces}
+                  onOpenNote={handleOpenNote}
+                  onCreateNote={handleCreateNote}
+                />
+              </div>
             </div>
           </div>
         </main>

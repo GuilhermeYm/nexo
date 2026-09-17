@@ -1,10 +1,17 @@
 "use client";
 
-import { ArrowLeft, CalendarDays, ChevronDown, ListTodo } from "lucide-react";
+import { ArrowLeft, CalendarDays, ChevronDown, ListTodo, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuItemLabel,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { useLiveResource } from "@/hooks/use-live-resource";
 import { useLocalDay } from "@/hooks/use-local-day";
 import { dayLabel } from "@/lib/agenda/day";
@@ -90,6 +97,37 @@ export function AgendaView({ initial, initialToday, from, to }: AgendaViewProps)
     (id: string) => {
       setCreatedId(id);
       void refresh();
+    },
+    [refresh]
+  );
+
+  /** O aviso de uma exclusão que falhou. Some na próxima tentativa. */
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  /**
+   * Apaga a lista de um dia anterior — nunca a de hoje, porque só `PastDay`
+   * chama isto, e `past` já exclui `today` por construção.
+   *
+   * É `DELETE /api/notes/[id]`, a mesma rota de qualquer nota: exclusão
+   * lógica (`status = 'deleted'`), que **libera o dia** — o índice único de
+   * `notes_user_task_date_key` ignora notas nesse estado. Ver docs/AGENDA.md.
+   */
+  const deleteDay = useCallback(
+    async (noteId: string) => {
+      setDeleteError(null);
+      try {
+        const response = await fetch(`/api/notes/${noteId}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) {
+          setDeleteError("Não foi possível excluir a lista do dia.");
+          return;
+        }
+      } catch {
+        setDeleteError("Sem conexão. A lista não foi excluída.");
+      } finally {
+        void refresh();
+      }
     },
     [refresh]
   );
@@ -222,9 +260,23 @@ export function AgendaView({ initial, initialToday, from, to }: AgendaViewProps)
             ) : (
               <ul className="divide-y divide-border">
                 {past.map((day) => (
-                  <PastDay key={day.id} day={day} today={today} />
+                  <PastDay
+                    key={day.id}
+                    day={day}
+                    today={today}
+                    onDelete={() => deleteDay(day.id)}
+                  />
                 ))}
               </ul>
+            )}
+
+            {deleteError && (
+              <p
+                role="status"
+                className="border-t border-border px-4 py-2.5 text-xs leading-relaxed text-error"
+              >
+                {deleteError}
+              </p>
             )}
           </section>
         </div>
@@ -240,8 +292,20 @@ export function AgendaView({ initial, initialToday, from, to }: AgendaViewProps)
  * é o gesto que a sala existe para permitir, e mandar a pessoa para outra
  * rota para marcar uma caixa seria caro demais para o que é. Só o expandido
  * monta editor.
+ *
+ * Excluir a lista é botão direito (ou toque longo), o mesmo gesto de
+ * Recentes e do editor de nota — nunca aparece para o dia de hoje porque
+ * `today` já foi filtrado de `past` antes de chegar aqui.
  */
-function PastDay({ day, today }: { day: AgendaDay; today: string | null }) {
+function PastDay({
+  day,
+  today,
+  onDelete,
+}: {
+  day: AgendaDay;
+  today: string | null;
+  onDelete: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [doc, setDoc] = useState<unknown | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -282,59 +346,78 @@ function PastDay({ day, today }: { day: AgendaDay; today: string | null }) {
   }, [open, loaded, day.date]);
 
   return (
-    <li>
-      <button
-        type="button"
-        onClick={() =>
-          setOpen((value) => {
-            // Fechar solta a sobreposição: da próxima vez a linha volta a
-            // mostrar o número do servidor, que a essa altura já foi gravado.
-            if (value) setOverride(null);
-            return !value;
-          })
-        }
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-secondary/50"
-      >
-        <ChevronDown
-          aria-hidden="true"
-          className={cn(
-            "size-4 shrink-0 text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
-            open && "rotate-180"
-          )}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground">
-            {today ? dayLabel(day.date, today) : day.date}
-          </span>
-          <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
-            {longDate(day.date)}
-          </span>
-        </span>
-        <TallyChip total={tally.total} done={tally.done} />
-      </button>
-
-      {open && (
-        <div className="px-4 pb-3 pl-11">
-          {loading ? (
-            <div className="h-20 animate-pulse rounded-lg bg-secondary/60" />
-          ) : (
-            <DayEditor
-              date={day.date}
-              noteId={day.id}
-              initialDoc={doc}
-              onTally={setOverride}
-            />
-          )}
-          <Link
-            href={`/nota/${day.id}`}
-            className="mt-1 inline-block text-xs text-subtle-foreground underline decoration-border underline-offset-4 transition-colors duration-150 hover:text-foreground"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li>
+          <button
+            type="button"
+            onClick={() =>
+              setOpen((value) => {
+                // Fechar solta a sobreposição: da próxima vez a linha volta a
+                // mostrar o número do servidor, que a essa altura já foi
+                // gravado.
+                if (value) setOverride(null);
+                return !value;
+              })
+            }
+            aria-expanded={open}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-secondary/50"
           >
-            Abrir como nota
-          </Link>
-        </div>
-      )}
-    </li>
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-4 shrink-0 text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
+                open && "rotate-180"
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {today ? dayLabel(day.date, today) : day.date}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
+                {longDate(day.date)}
+              </span>
+            </span>
+            <TallyChip total={tally.total} done={tally.done} />
+          </button>
+
+          {open && (
+            <div className="px-4 pb-3 pl-11">
+              {loading ? (
+                <div className="h-20 animate-pulse rounded-lg bg-secondary/60" />
+              ) : (
+                <DayEditor
+                  date={day.date}
+                  noteId={day.id}
+                  initialDoc={doc}
+                  onTally={setOverride}
+                />
+              )}
+              <Link
+                href={`/nota/${day.id}`}
+                className="mt-1 inline-block text-xs text-subtle-foreground underline decoration-border underline-offset-4 transition-colors duration-150 hover:text-foreground"
+              >
+                Abrir como nota
+              </Link>
+            </div>
+          )}
+        </li>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent>
+        <ContextMenuItem
+          destructive
+          confirmLabel="Excluir para valer"
+          onSelect={onDelete}
+        >
+          <Trash2 className="mt-0.5 size-4 shrink-0" />
+          <ContextMenuItemLabel
+            label="Excluir lista do dia"
+            hint="Libera o dia para uma nova lista. Sai da Agenda e de Recentes."
+          />
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

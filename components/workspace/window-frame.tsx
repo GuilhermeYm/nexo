@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -115,6 +116,14 @@ export function WindowFrame({
   // mantém o último movimento — justamente o que o olho precisa acompanhar.
   const previewFrame = useRef<number | null>(null);
   const pendingPreview = useRef<WindowPatch | null>(null);
+  /**
+   * Um gesto em andamento.
+   *
+   * É estado, e não só o `ref` acima, porque a moldura **muda de aparência**
+   * enquanto ela está sendo mexida: as transições saem do caminho e a camada
+   * é promovida. Dois renders por gesto inteiro, não dois por quadro.
+   */
+  const [gesturing, setGesturing] = useState(false);
 
   const flushPreview = useCallback(() => {
     if (previewFrame.current !== null) {
@@ -154,6 +163,7 @@ export function WindowFrame({
       onFocus();
 
       event.currentTarget.setPointerCapture(event.pointerId);
+      setGesturing(true);
       gesture.current = {
         mode,
         pointerId: event.pointerId,
@@ -210,6 +220,7 @@ export function WindowFrame({
       if (!current || current.pointerId !== event.pointerId) return;
 
       gesture.current = null;
+      setGesturing(false);
       event.currentTarget.releasePointerCapture?.(event.pointerId);
       // Garante que a posição visual final e a posição persistida sejam a
       // mesma mesmo quando a pessoa solta entre dois quadros de animação.
@@ -259,17 +270,46 @@ export function WindowFrame({
         trigger.onContextMenu?.(event);
       }}
       style={{
-        left: item.x,
-        top: item.y,
+        /**
+         * A posição sai por `transform`, e não por `left`/`top`.
+         *
+         * São dois caminhos diferentes no navegador: `left`/`top` mudam a
+         * caixa e obrigam a um recálculo de layout **do plano inteiro** a
+         * cada quadro do arraste; `transform` é composição, e roda fora da
+         * linha principal. Numa lousa com uma dúzia de janelas é a diferença
+         * entre a janela acompanhar o ponteiro e ela chegar atrasada.
+         *
+         * Ninguém aqui mede a janela pelo DOM — a borracha, as flechas e o
+         * realce da ferramenta leem `item.x`/`item.y` do estado —, então
+         * trocar a caixa pela transformação não muda resposta nenhuma.
+         */
+        transform: `translate3d(${item.x}px, ${item.y}px, 0)`,
         // Recolhida, a janela vira uma etiqueta com o ícone e o nome. A
         // largura guardada é a de quando ela reabrir — ver `frameWidthOf`,
         // que mantém a borracha e as flechas mirando o que se vê.
         width: minimized ? COLLAPSED_WINDOW_WIDTH : item.width,
         height: minimized ? undefined : item.height,
         zIndex: item.zIndex,
+        // Só durante o gesto: promover as janelas todas, o tempo todo, custa
+        // memória de vídeo e não acelera nada em repouso.
+        willChange: gesturing ? "transform" : undefined,
       }}
       className={cn(
-        "group/window absolute flex flex-col overflow-hidden rounded-lg border-[0.5px] transition-all duration-200 motion-reduce:transition-none",
+        "group/window absolute top-0 left-0 flex flex-col overflow-hidden rounded-lg border-[0.5px] motion-reduce:transition-none",
+        /**
+         * A transição **nunca** alcança a posição, e sai inteira do caminho
+         * durante o gesto.
+         *
+         * Era `transition-all duration-200`, e isso fazia o navegador
+         * interpolar cada quadro do arraste por 200ms: a janela saía atrás do
+         * ponteiro, o movimento parecia emborrachado e soltar deixava ela
+         * ainda andando. O que continua animado é a moldura — borda, fundo e
+         * a sombra do foco — e o tamanho ao recolher/expandir, que mudam por
+         * clique e não por quadro.
+         */
+        gesturing
+          ? "transition-none"
+          : "transition-[border-color,background-color,box-shadow,padding,width,height] duration-200",
         borderless
           ? focused
             ? "border-border/60 bg-background/80 p-1.5 shadow-[0_12px_40px_-12px] shadow-black/25 backdrop-blur-sm"

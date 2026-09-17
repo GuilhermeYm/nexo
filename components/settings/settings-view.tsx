@@ -1,14 +1,25 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Settings } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRightLeft,
+  LogIn,
+  Settings,
+  X,
+} from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { ErrorCodeChip, ErrorReport } from "@/components/errors/error-report";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBoardRichEditor } from "@/hooks/use-board-rich-editor";
+import { useHideDraft } from "@/hooks/use-hide-draft";
+import { useKnownAccounts } from "@/hooks/use-known-accounts";
+import { forgetAccount, rememberAccount } from "@/lib/accounts";
 import type { OwnErrorReport } from "@/lib/errors/queries";
-import { writeBoardRichEditor } from "@/lib/preferences";
+import { writeBoardRichEditor, writeHideDraft } from "@/lib/preferences";
 import type { UsageSnapshot } from "@/lib/usage/queries";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -23,6 +34,7 @@ import { cn, formatBytes } from "@/lib/utils";
  */
 
 interface SettingsViewProps {
+  userId: string;
   userName: string | null;
   userEmail: string;
   /** ISO de `profiles.created_at`, ou `null` se o perfil ainda não existe. */
@@ -35,6 +47,7 @@ interface SettingsViewProps {
 type TabId = "uso" | "conta" | "erros" | "preferencias";
 
 export function SettingsView({
+  userId,
   userName,
   userEmail,
   memberSince,
@@ -92,6 +105,7 @@ export function SettingsView({
 
             <TabsContent value="conta" className="mt-8">
               <AccountPanel
+                userId={userId}
                 userName={userName}
                 userEmail={userEmail}
                 memberSince={memberSince}
@@ -332,11 +346,13 @@ function Meter({
 /* ---------------------------------------------------------------------- */
 
 function AccountPanel({
+  userId,
   userName,
   userEmail,
   memberSince,
   plan,
 }: {
+  userId: string;
   userName: string | null;
   userEmail: string;
   memberSince: string | null;
@@ -370,8 +386,136 @@ function AccountPanel({
         ))}
       </dl>
 
+      <AccountSwitcher userId={userId} userEmail={userEmail} userName={userName} />
+
       <DangerZone />
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Troca entre duas contas neste navegador.
+ *
+ * **Não é sessão dupla.** A Nexo mantém uma sessão por vez — o cookie do
+ * Supabase é um só. Trocar de conta sai da atual (`POST /api/auth/logout`) e
+ * leva ao login já com o e-mail da outra pronto (`lib/accounts.ts`); só a
+ * senha continua sendo pedida de novo, porque ela nunca fica guardada aqui.
+ */
+function AccountSwitcher({
+  userId,
+  userEmail,
+  userName,
+}: {
+  userId: string;
+  userEmail: string;
+  userName: string | null;
+}) {
+  const router = useRouter();
+  const accounts = useKnownAccounts();
+  const [switching, setSwitching] = useState(false);
+
+  // Mantém esta conta na lista, com o nome mais recente — é aqui que ele
+  // chega pela primeira vez (o login só tinha o e-mail).
+  useEffect(() => {
+    if (!userEmail) return;
+    rememberAccount({ id: userId, email: userEmail, displayName: userName });
+  }, [userId, userEmail, userName]);
+
+  const other = accounts.find((account) => account.id !== userId) ?? null;
+
+  async function switchAccount(email?: string) {
+    setSwitching(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push(email ? `/login?email=${encodeURIComponent(email)}` : "/login");
+    } catch {
+      setSwitching(false);
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-border bg-secondary/50 p-5">
+      <h2 className="text-sm font-medium text-foreground">Trocar de conta</h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+        Este navegador lembra até duas contas. Trocar sai da sessão atual e
+        volta ao login com o e-mail já preenchido.
+      </p>
+
+      <ul className="mt-4 space-y-2">
+        <li className="flex items-center gap-3 rounded-xl border border-border bg-background px-3.5 py-3">
+          <AccountAvatar label={userName?.trim() || userEmail} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-foreground">
+              {userName?.trim() || userEmail}
+            </p>
+            <p className="truncate text-xs text-subtle-foreground">
+              {userEmail}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-tertiary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+            Esta sessão
+          </span>
+        </li>
+
+        {other && (
+          <li className="flex items-center gap-3 rounded-xl border border-border bg-background px-3.5 py-3">
+            <AccountAvatar label={other.displayName?.trim() || other.email} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-foreground">
+                {other.displayName?.trim() || other.email}
+              </p>
+              <p className="truncate text-xs text-subtle-foreground">
+                {other.email}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => switchAccount(other.email)}
+              disabled={switching}
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 text-xs font-semibold text-accent-foreground transition-[background-color,transform] duration-150 hover:bg-accent/90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-40 motion-reduce:active:scale-100"
+            >
+              <ArrowRightLeft className="size-3" aria-hidden="true" />
+              Trocar
+            </button>
+            <button
+              type="button"
+              onClick={() => forgetAccount(other.id)}
+              title="Esquecer esta conta neste navegador"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <X className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Esquecer esta conta</span>
+            </button>
+          </li>
+        )}
+      </ul>
+
+      {!other && (
+        <button
+          type="button"
+          onClick={() => switchAccount()}
+          disabled={switching}
+          className="mt-3 flex h-9 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-tertiary disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-11"
+        >
+          <LogIn className="size-3.5" aria-hidden="true" />
+          Entrar com outra conta
+        </button>
+      )}
+    </section>
+  );
+}
+
+function AccountAvatar({ label }: { label: string }) {
+  const initial = label.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-tertiary text-sm font-semibold text-foreground"
+    >
+      {initial}
+    </span>
   );
 }
 
@@ -503,6 +647,7 @@ function PreferencesPanel() {
   // A fonte é o `localStorage`; o hook mantém esta tela em sincronia com
   // outras abas e com a própria lousa.
   const boardRich = useBoardRichEditor();
+  const hideDraft = useHideDraft();
 
   return (
     <div className="space-y-6">
@@ -543,6 +688,44 @@ function PreferencesPanel() {
           Pode pesar em lousas com muitas janelas ou em aparelhos mais fracos:
           o editor carrega o ProseMirror. Fora da lousa, a edição de nota já é
           sempre a completa.
+        </p>
+      </section>
+
+      <section className="rounded-2xl border border-border bg-secondary/50 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium text-foreground">
+              Remover o rascunho do dashboard
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              Some o convite &ldquo;Escrever um rascunho&rdquo; da tela
+              inicial, para quem não usa esse atalho.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={hideDraft}
+            aria-label="Remover o rascunho do dashboard"
+            onClick={() => writeHideDraft(!hideDraft)}
+            className={cn(
+              "relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-150 motion-reduce:transition-none",
+              hideDraft ? "bg-accent" : "bg-tertiary"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block size-5 rounded-full bg-background shadow-sm transition-transform duration-150 motion-reduce:transition-none",
+                hideDraft ? "translate-x-[22px]" : "translate-x-0.5"
+              )}
+            />
+          </button>
+        </div>
+
+        <p className="mt-3 border-t border-border pt-3 text-xs leading-relaxed text-subtle-foreground">
+          Um rascunho com texto ainda não guardado continua aparecendo — ele
+          não pode ficar escondido atrás de uma preferência.
         </p>
       </section>
     </div>

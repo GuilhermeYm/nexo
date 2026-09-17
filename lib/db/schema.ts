@@ -20,6 +20,10 @@ import {
 import { relations, sql } from "drizzle-orm";
 
 import type {
+  BoardPattern,
+  BoardTone,
+} from "@/lib/workspace/board-background";
+import type {
   ConnectionHeads,
   ConnectionStroke,
   ConnectionTone,
@@ -110,6 +114,17 @@ export const workspaces = pgTable(
     description: text("description"),
     icon: text("icon"),
     color: text("color"),
+    /**
+     * A trama do fundo da lousa: `dots`, `grid`, `lines` ou `plain`. Ver
+     * `lib/workspace/board-background.ts` e a migration 0021, onde mora o
+     * CHECK que vale mesmo quando a escrita não passa pela rota.
+     */
+    boardPattern: text("board_pattern")
+      .$type<BoardPattern>()
+      .default("dots")
+      .notNull(),
+    /** A cor da superfície: `1`..`6` da paleta, ou nulo para a neutra. */
+    boardTone: text("board_tone").$type<BoardTone>(),
     isDefault: boolean("is_default").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

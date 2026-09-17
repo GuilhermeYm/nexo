@@ -4,6 +4,7 @@ import {
   CircleAlert,
   FileText,
   LoaderCircle,
+  Maximize2,
   Paperclip,
   Search,
   Sparkles,
@@ -74,11 +75,14 @@ export function CommandBar({
 }: CommandBarProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
+  const expandedInputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   // O resultado carrega a busca que o originou. Guardar as duas coisas
   // juntas é o que permite derivar “está buscando” sem um segundo estado —
   // e sem precisar zerar nada dentro do efeito, o que dispara render em
@@ -212,8 +216,16 @@ export function CommandBar({
 
   /* --- Teclado -------------------------------------------------------- */
 
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleKeyDown(
+    event: KeyboardEvent<HTMLInputElement>,
+    fromExpandedSearch = false
+  ) {
     if (event.key === "Escape") {
+      if (fromExpandedSearch) {
+        event.preventDefault();
+        setExpanded(false);
+        return;
+      }
       if (query) {
         setQuery("");
       } else {
@@ -233,9 +245,56 @@ export function CommandBar({
       setHighlight((index) => (index <= 0 ? items.length - 1 : index - 1));
     } else if (event.key === "Enter" && highlight >= 0) {
       event.preventDefault();
-      onOpenNote(items[highlight].id);
+      openNote(items[highlight].id);
     }
   }
+
+  /** Abertura de uma nota também encerra a superfície temporária da busca. */
+  function openNote(noteId: string) {
+    setExpanded(false);
+    setFocused(false);
+    onOpenNote(noteId);
+  }
+
+  // Ctrl+K (Windows/Linux) e ⌘K (macOS) são a porta rápida para reencontrar.
+  // O atalho vale mesmo quando há um rascunho aberto, mas não atravessa outro
+  // diálogo modal que já esteja cuidando do próprio foco.
+  useEffect(() => {
+    function handleShortcut(event: globalThis.KeyboardEvent) {
+      const openDialog = document.querySelector("dialog[open]");
+      if (
+        event.key.toLowerCase() !== "k" ||
+        (!event.ctrlKey && !event.metaKey) ||
+        event.altKey ||
+        (openDialog !== null && openDialog !== dialogRef.current)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setFocused(true);
+      window.requestAnimationFrame(() => {
+        (expanded ? expandedInputRef : inputRef).current?.focus();
+      });
+    }
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [expanded]);
+
+  // O diálogo nativo sobe para a top layer, aplica o backdrop e mantém o foco
+  // dentro da busca ampliada. Não é uma cópia da busca: compartilha a mesma
+  // consulta, resultados e seleção por teclado da barra compacta.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (expanded && !dialog.open) {
+      dialog.showModal();
+      window.requestAnimationFrame(() => expandedInputRef.current?.focus());
+    }
+    if (!expanded && dialog.open) dialog.close();
+  }, [expanded]);
 
   // Fechar ao clicar fora — a lista é um overlay e não pode ficar presa
   // aberta quando o usuário já foi cuidar de outra coisa.
@@ -301,7 +360,7 @@ export function CommandBar({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onFocus={() => setFocused(true)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(event) => handleKeyDown(event)}
               role="combobox"
               aria-expanded={showResults}
               aria-controls={listboxId}
@@ -354,6 +413,20 @@ export function CommandBar({
               <span className="sr-only">Limpar busca</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            title="Abrir a busca ampliada"
+            className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
+          >
+            <Maximize2 className="size-[18px]" aria-hidden="true" />
+            <span className="sr-only">Abrir a busca ampliada</span>
+          </button>
+
+          <kbd className="hidden shrink-0 rounded-md border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-subtle-foreground sm:inline">
+            Ctrl K
+          </kbd>
 
           <div className="flex shrink-0 items-center gap-1 border-l border-border pl-2">
             <input
@@ -409,53 +482,13 @@ export function CommandBar({
             aria-label="Resultados da busca"
             className="absolute inset-x-0 top-[calc(100%+8px)] z-40 overflow-hidden rounded-2xl border border-border bg-background shadow-[0_16px_48px_-16px] shadow-black/30"
           >
-            {current === null ? (
-              <ResultsSkeleton />
-            ) : current.length === 0 ? (
-              <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-                Nada encontrado para{" "}
-                <span className="text-foreground">“{query.trim()}”</span>. Tente
-                outras palavras — a busca também lê o conteúdo, não só o título.
-              </p>
-            ) : (
-              <ul className="max-h-[340px] overflow-y-auto py-1.5">
-                {current.map((note, index) => (
-                  <li key={note.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={index === highlight}
-                      onMouseEnter={() => setHighlight(index)}
-                      onClick={() => onOpenNote(note.id)}
-                      className={cn(
-                        "flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors duration-150",
-                        index === highlight ? "bg-secondary" : "bg-transparent"
-                      )}
-                    >
-                      <NoteTypeIcon
-                        type={note.type}
-                        className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-foreground">
-                          {note.title}
-                        </span>
-                        {note.excerpt && (
-                          <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
-                            {note.excerpt}
-                          </span>
-                        )}
-                      </span>
-                      {note.workspaceName && (
-                        <span className="mt-0.5 shrink-0 text-xs text-subtle-foreground">
-                          {note.workspaceName}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <SearchResults
+              current={current}
+              query={query}
+              highlight={highlight}
+              onHighlight={setHighlight}
+              onOpenNote={openNote}
+            />
           </div>
         )}
       </div>
@@ -526,7 +559,182 @@ export function CommandBar({
           compact
         />
       ) : null}
+
+      <dialog
+        ref={dialogRef}
+        aria-labelledby={`${listboxId}-expanded-title`}
+        onClose={() => setExpanded(false)}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setExpanded(false);
+        }}
+        className="m-auto w-[min(54rem,calc(100%-1.5rem))] border-0 bg-transparent p-0 text-foreground backdrop:bg-black/35 backdrop:backdrop-blur-[3px]"
+      >
+        <div className="overflow-hidden rounded-2xl border border-border bg-background shadow-[0_24px_80px_-28px] shadow-black/50">
+          <header className="flex items-center justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
+            <div>
+              <h2
+                id={`${listboxId}-expanded-title`}
+                className="text-base font-semibold text-foreground"
+              >
+                Buscar na Nexo
+              </h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Encontre notas pelo título, conteúdo ou contexto.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="flex size-9 shrink-0 items-center justify-center rounded-xl text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
+            >
+              <X className="size-[18px]" aria-hidden="true" />
+              <span className="sr-only">Fechar a busca ampliada</span>
+            </button>
+          </header>
+
+          <div className="p-4 sm:p-6">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-secondary/60 px-4 shadow-[0_8px_28px_-18px] shadow-black/35 transition-[background-color,border-color,box-shadow] duration-150 focus-within:border-accent focus-within:bg-background motion-reduce:transition-none">
+              <span className="shrink-0 text-subtle-foreground">
+                {searching ? (
+                  <LoaderCircle
+                    className="size-5 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Search className="size-5" aria-hidden="true" />
+                )}
+              </span>
+              <input
+                ref={expandedInputRef}
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => handleKeyDown(event, true)}
+                role="combobox"
+                aria-expanded={trimmedQuery.length > 0}
+                aria-controls={`${listboxId}-expanded`}
+                aria-autocomplete="list"
+                aria-label="Buscar nas suas notas"
+                autoComplete="off"
+                data-focus-ring="container"
+                placeholder="Busque uma nota, uma decisão, um arquivo…"
+                className="h-15 min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-subtle-foreground [&::-webkit-search-cancel-button]:hidden sm:text-lg"
+              />
+              {query.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    expandedInputRef.current?.focus();
+                  }}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+                >
+                  <X className="size-4" aria-hidden="true" />
+                  <span className="sr-only">Limpar busca</span>
+                </button>
+              )}
+            </div>
+
+            {trimmedQuery ? (
+              <div
+                id={`${listboxId}-expanded`}
+                role="listbox"
+                aria-label="Resultados da busca ampliada"
+                className="mt-3 overflow-hidden rounded-xl border border-border bg-background"
+              >
+                <SearchResults
+                  current={current}
+                  query={query}
+                  highlight={highlight}
+                  onHighlight={setHighlight}
+                  onOpenNote={openNote}
+                  expanded
+                />
+              </div>
+            ) : (
+              <p className="px-1 py-7 text-center text-sm leading-relaxed text-muted-foreground">
+                Escreva o que você lembra. A Nexo também procura dentro das suas
+                notas, não só nos títulos.
+              </p>
+            )}
+          </div>
+
+          <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-5 py-3 text-xs text-subtle-foreground sm:px-6">
+            <span>↑↓ para navegar</span>
+            <span>Enter para abrir</span>
+            <span>Esc para fechar</span>
+          </footer>
+        </div>
+      </dialog>
     </div>
+  );
+}
+
+function SearchResults({
+  current,
+  query,
+  highlight,
+  onHighlight,
+  onOpenNote,
+  expanded = false,
+}: {
+  current: RecentNote[] | null;
+  query: string;
+  highlight: number;
+  onHighlight: (index: number) => void;
+  onOpenNote: (noteId: string) => void;
+  expanded?: boolean;
+}) {
+  if (current === null) return <ResultsSkeleton />;
+
+  if (current.length === 0) {
+    return (
+      <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+        Nada encontrado para <span className="text-foreground">“{query.trim()}”</span>.
+        Tente outras palavras — a busca também lê o conteúdo, não só o título.
+      </p>
+    );
+  }
+
+  return (
+    <ul className={cn("overflow-y-auto py-1.5", expanded ? "max-h-[50vh]" : "max-h-[340px]")}>
+      {current.map((note, index) => (
+        <li key={note.id}>
+          <button
+            type="button"
+            role="option"
+            aria-selected={index === highlight}
+            onMouseEnter={() => onHighlight(index)}
+            onClick={() => onOpenNote(note.id)}
+            className={cn(
+              "flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors duration-150",
+              index === highlight ? "bg-secondary" : "bg-transparent",
+              expanded && "py-3"
+            )}
+          >
+            <NoteTypeIcon
+              type={note.type}
+              className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-foreground">
+                {note.title}
+              </span>
+              {note.excerpt && (
+                <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
+                  {note.excerpt}
+                </span>
+              )}
+            </span>
+            {note.workspaceName && (
+              <span className="mt-0.5 shrink-0 text-xs text-subtle-foreground">
+                {note.workspaceName}
+              </span>
+            )}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

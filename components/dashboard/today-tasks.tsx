@@ -119,8 +119,12 @@ export function TodayTasks() {
           {lines.map((line, index) => (
             <li
               key={index}
-              className="flex items-start gap-3 py-2.5 pr-4"
-              style={{ paddingLeft: `${1 + line.depth * 1.5}rem` }}
+              data-dashboard-enter=""
+              className="flex animate-dashboard-enter items-start gap-3 py-2.5 pr-4 motion-reduce:animate-none"
+              style={{
+                paddingLeft: `${1 + line.depth * 1.5}rem`,
+                animationDelay: `${Math.min(index, 5) * 40}ms`,
+              }}
             >
               {line.checked ? (
                 <span
