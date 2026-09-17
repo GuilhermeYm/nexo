@@ -7,6 +7,11 @@ com janelas que se arrastam e flechas entre elas.
 
 > Aplicação em desenvolvimento. Este README descreve o que já está de pé.
 
+> **Auto-hospedado.** Não existe uma Nexo hospedada por terceiros: cada
+> pessoa sobe a própria instância, com o próprio projeto Supabase e as
+> próprias chaves de IA. Ninguém além de você (e dos serviços que você mesmo
+> escolheu configurar) vê os seus dados.
+
 ## O que existe hoje
 
 | Rota | O que faz |
@@ -33,32 +38,53 @@ de recentes.
 
 ## Como rodar
 
-Requer [Bun](https://bun.sh) e um projeto no [Supabase](https://supabase.com).
+Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
+(o plano gratuito serve).
 
-```bash
-bun install
-cp .env.example .env      # preencha as chaves
-bun dev
-```
+1. **Crie um projeto no Supabase** — anote a URL, a `anon key` e a
+   `service_role key` (Project Settings → API), e a connection string do
+   Postgres (Project Settings → Database → Connection string → modo
+   "Session").
+2. **Preencha o `.env`**:
+   ```bash
+   cp .env.example .env      # e edite com os valores do passo anterior
+   ```
+3. **Aplique as migrations**, na ordem, contra o seu próprio banco:
+   ```bash
+   for f in drizzle/*.sql; do
+     node --env-file=.env scripts/apply-migration.mjs "$f"
+   done
+   ```
+   Elas são idempotentes — rodar de novo não duplica nada.
+4. **(Opcional) gere uma chave da [Groq](https://console.groq.com/keys)** para
+   a classificação automática de documentos. Sem ela, e sem `OPENAI_API_KEY`,
+   o upload continua funcionando: entra um classificador determinístico, sem
+   custo, no lugar da IA.
+5. **Instale e rode:**
+   ```bash
+   bun install
+   bun dev
+   ```
 
-As migrations ficam em `drizzle/`, numeradas, e são idempotentes:
-
-```bash
-node --env-file=.env scripts/apply-migration.mjs drizzle/0001_initial_schema.sql
-# ... e assim por diante, na ordem
-```
+Faltar uma variável obrigatória (as do Supabase e a `DATABASE_URL`) não
+quebra em algum lugar fundo e sem explicação — a aplicação recusa lançando
+uma mensagem que diz exatamente qual variável falta e onde preenchê-la.
 
 ### Variáveis de ambiente
 
-| Variável | Para quê |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Endereço do projeto Supabase. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Chave pública. O que protege os dados é a RLS, não ela. |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Só no servidor.** Ignora RLS. |
-| `DATABASE_URL` | Conexão Postgres do Drizzle. |
-| `GROQ_API_KEY` | Classificação por IA. Sem ela, entra um stub determinístico e o upload não quebra. |
-| `GROQ_MODEL` | Opcional (`openai/gpt-oss-120b` por padrão). |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Rate limiting distribuído. Sem elas, cai num limitador em memória. |
+| Variável | Obrigatória? | Para quê |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Sim | Endereço do seu projeto Supabase. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sim | Chave pública. O que protege os dados é a RLS, não ela. |
+| `DATABASE_URL` | Sim | Conexão Postgres do Drizzle — o mesmo projeto Supabase. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Só para os roteiros `bun run shots:*` | Ignora RLS; a aplicação em si nunca lê esta chave. |
+| `GROQ_API_KEY` / `GROQ_MODEL` | Não | Classificação por IA. Tem precedência sobre a OpenAI. |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | Não | Classificação por IA, se não houver chave da Groq. |
+| `NEXT_PUBLIC_STRIPE_CHECKOUT_MONTHLY` / `_YEARLY` | Não | Payment Links do Stripe. Sem eles, o CTA leva ao registro. |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Não | Rate limiting distribuído. Sem elas, cai num limitador em memória (ok para uma instância só). |
+
+Sem nenhuma das duas chaves de IA (Groq/OpenAI), a aplicação inteira continua
+de pé — só a classificação automática vira um stub.
 
 ## Verificação
 
@@ -102,11 +128,18 @@ escolha documentada.
 
 ## Privacidade
 
-O conteúdo é seu. A Nexo não treina modelos com ele, não vende dados e não
-faz publicidade direcionada. A classificação automática envia o nome e o
-texto extraído do arquivo — sem nada que identifique a sua conta — para a
-Groq, que o processa sob os termos dela. A página `/privacidade` descreve
-exatamente o que sai daqui e o que não sai.
+O conteúdo é seu, e fica na sua própria instância — no seu projeto Supabase,
+com as suas chaves. Ninguém além de você opera um servidor central que veja
+os seus dados. A única coisa que sai da sua instância é a classificação
+automática, quando configurada: o nome e o texto extraído do arquivo — sem
+nada que identifique a sua conta — vão para o provedor de IA que **você**
+escolheu (Groq ou OpenAI), sob os termos dele.
+
+> A página `/privacidade` do produto ainda descreve um serviço hospedado
+> centralmente ("a Nexo" como controladora dos dados). Ela existe da época em
+> que este projeto era pensado como um serviço hospedado por terceiros, e
+> ainda não foi revista para o modelo auto-hospedado — trate-a como
+> desatualizada até lá.
 
 ## Licença
 
