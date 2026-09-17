@@ -101,6 +101,8 @@ interface NoteBodyProps {
   window: BoardWindow;
   /** Foi criada agora: o título entra em edição sozinho. */
   autoFocus: boolean;
+  /** Modo de leitura: título, corpo e tags viram só vitrine. */
+  readOnly?: boolean;
   onChange: (patch: {
     title?: string;
     content?: string;
@@ -120,6 +122,7 @@ interface NoteBodyProps {
 export function NoteWindowBody({
   window: item,
   autoFocus,
+  readOnly = false,
   onChange,
   onAddTag,
   onRemoveTag,
@@ -170,6 +173,7 @@ export function NoteWindowBody({
           ref={titleRef}
           value={note.title}
           onChange={(event) => onChange({ title: event.target.value })}
+          readOnly={readOnly}
           placeholder="Sem título"
           maxLength={200}
           data-focus-ring="container"
@@ -182,6 +186,7 @@ export function NoteWindowBody({
 
       <TagRow
         tags={note.tags}
+        readOnly={readOnly}
         onAdd={onAddTag}
         onRemove={onRemoveTag}
         onUpdate={onUpdateTag}
@@ -200,6 +205,7 @@ export function NoteWindowBody({
             content={note.content}
             contentRich={note.contentRich}
             autoFocus={false}
+            readOnly={readOnly}
             onChange={(patch) => onChange(patch)}
           />
         </div>
@@ -213,6 +219,7 @@ export function NoteWindowBody({
               id={`content-${item.id}`}
               value={note.content ?? ""}
               onChange={(event) => onChange({ content: event.target.value })}
+              readOnly={readOnly}
               placeholder="Escreva aqui. A Nexo guarda sozinha."
               data-focus-ring="container"
               className={cn(
@@ -246,11 +253,13 @@ export function NoteWindowBody({
  */
 function TagRow({
   tags,
+  readOnly = false,
   onAdd,
   onRemove,
   onUpdate,
 }: {
   tags: BoardNoteTag[];
+  readOnly?: boolean;
   onAdd: (name: string) => void;
   onRemove: (tagId: string) => void;
   onUpdate: (tagId: string, patch: { name?: string; color?: string | null }) => void;
@@ -288,27 +297,33 @@ function TagRow({
               storedChipClass(tag)
             )}
           >
-            <button
-              type="button"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={() =>
-                setEditingId((current) => (current === tag.id ? null : tag.id))
-              }
-              aria-label={`Editar a tag ${tag.name}`}
-              aria-expanded={editingId === tag.id}
-              className="truncate"
-            >
-              #{tag.name}
-            </button>
-            <button
-              type="button"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => onRemove(tag.id)}
-              aria-label={`Tirar a tag ${tag.name}`}
-              className="grid size-3 shrink-0 place-items-center rounded-full opacity-0 transition-opacity duration-100 group-hover/tag:opacity-100 hover:bg-black/10 focus-visible:opacity-100 motion-reduce:transition-none pointer-coarse:opacity-100"
-            >
-              <X className="size-2.5" aria-hidden="true" />
-            </button>
+            {readOnly ? (
+              <span className="truncate">#{tag.name}</span>
+            ) : (
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() =>
+                  setEditingId((current) => (current === tag.id ? null : tag.id))
+                }
+                aria-label={`Editar a tag ${tag.name}`}
+                aria-expanded={editingId === tag.id}
+                className="truncate"
+              >
+                #{tag.name}
+              </button>
+            )}
+            {!readOnly && (
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => onRemove(tag.id)}
+                aria-label={`Tirar a tag ${tag.name}`}
+                className="grid size-3 shrink-0 place-items-center rounded-full opacity-0 transition-opacity duration-100 group-hover/tag:opacity-100 hover:bg-black/10 focus-visible:opacity-100 motion-reduce:transition-none pointer-coarse:opacity-100"
+              >
+                <X className="size-2.5" aria-hidden="true" />
+              </button>
+            )}
           </span>
         </span>
       ))}
@@ -317,7 +332,7 @@ function TagRow({
           janela estreita abriria o painel para fora da moldura, que é
           `overflow-hidden` — e metade dele sumiria. Preso à linha, ele nunca
           é mais largo que a janela. */}
-      {editing && (
+      {!readOnly && editing && (
         <TagEditor
           key={editing.id}
           tag={editing}
@@ -326,38 +341,39 @@ function TagRow({
         />
       )}
 
-      {adding ? (
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commit();
-            }
-            if (event.key === "Escape") {
-              setValue("");
-              setAdding(false);
-            }
-          }}
-          onBlur={commit}
-          placeholder="nova tag"
-          maxLength={40}
-          className="h-5 w-24 rounded-full border border-border bg-background px-2 text-[10px] text-foreground outline-none placeholder:text-subtle-foreground focus:border-subtle-foreground"
-        />
-      ) : (
-        <button
-          type="button"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-border py-0.5 pr-1.5 pl-1 text-[10px] font-medium text-subtle-foreground transition-colors duration-100 hover:border-subtle-foreground hover:text-foreground motion-reduce:transition-none"
-        >
-          <Plus className="size-2.5" aria-hidden="true" />
-          tag
-        </button>
-      )}
+      {!readOnly &&
+        (adding ? (
+          <input
+            ref={inputRef}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commit();
+              }
+              if (event.key === "Escape") {
+                setValue("");
+                setAdding(false);
+              }
+            }}
+            onBlur={commit}
+            placeholder="nova tag"
+            maxLength={40}
+            className="h-5 w-24 rounded-full border border-border bg-background px-2 text-[10px] text-foreground outline-none placeholder:text-subtle-foreground focus:border-subtle-foreground"
+          />
+        ) : (
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-border py-0.5 pr-1.5 pl-1 text-[10px] font-medium text-subtle-foreground transition-colors duration-100 hover:border-subtle-foreground hover:text-foreground motion-reduce:transition-none"
+          >
+            <Plus className="size-2.5" aria-hidden="true" />
+            tag
+          </button>
+        ))}
     </div>
   );
 }
@@ -516,6 +532,8 @@ function TagEditor({
 interface ElementBodyProps {
   window: BoardWindow;
   autoFocus: boolean;
+  /** Modo de leitura: o texto vira só vitrine, e a cor some junto. */
+  readOnly?: boolean;
   onChange: (patch: { text?: string; tone?: string }) => void;
   onCommit: (patch: { text?: string; tone?: string }) => void;
 }
@@ -532,6 +550,7 @@ interface ElementBodyProps {
 export function ElementWindowBody({
   window: item,
   autoFocus,
+  readOnly = false,
   onChange,
   onCommit,
 }: ElementBodyProps) {
@@ -555,6 +574,7 @@ export function ElementWindowBody({
           ref={textRef}
           value={item.content?.text ?? ""}
           onChange={(event) => onChange({ text: event.target.value })}
+          readOnly={readOnly}
           placeholder={isSticky ? "Anote aqui…" : "Escreva…"}
           data-focus-ring="container"
           className={cn(
@@ -570,7 +590,7 @@ export function ElementWindowBody({
         />
       </div>
 
-      {isSticky && (
+      {isSticky && !readOnly && (
         <div
           role="group"
           aria-label="Cor do post-it"

@@ -82,6 +82,11 @@ export interface WindowContent {
   backgroundTone?: "none" | "1" | "2" | "3" | "4" | "5" | "6";
   /** Cor do texto: padrão da interface ou posição da paleta. */
   textTone?: "default" | "1" | "2" | "3" | "4" | "5" | "6";
+  /**
+   * Só a caixa de texto: sem borda nem fundo, fica só o texto sobre a lousa.
+   * Ao editar, a moldura reaparece — ver `WindowFrame`.
+   */
+  borderless?: boolean;
 }
 
 /** Uma tag da nota, para a janela da lousa exibir com a cor da paleta. */

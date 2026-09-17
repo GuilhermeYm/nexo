@@ -122,17 +122,23 @@ export function TodayTasks() {
               className="flex items-start gap-3 py-2.5 pr-4"
               style={{ paddingLeft: `${1 + line.depth * 1.5}rem` }}
             >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
-                  line.checked
-                    ? "border-accent bg-accent text-accent-foreground"
-                    : "border-border"
-                )}
-              >
-                {line.checked && <Check className="size-3" strokeWidth={3} />}
-              </span>
+              {line.checked ? (
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-accent bg-accent text-accent-foreground"
+                >
+                  <Check className="size-3" strokeWidth={3} />
+                </span>
+              ) : (
+                <Link
+                  href="/dashboard/agenda"
+                  aria-label={`Abrir a Agenda para concluir: ${line.text}`}
+                  title="Concluir na Agenda"
+                  className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-border text-transparent transition-[background-color,border-color,transform] duration-150 hover:border-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-95 motion-reduce:active:scale-100"
+                >
+                  <Check className="size-3" strokeWidth={3} aria-hidden="true" />
+                </Link>
+              )}
               <span
                 className={cn(
                   "min-w-0 flex-1 text-sm leading-snug break-words",

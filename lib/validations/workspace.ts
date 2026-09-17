@@ -157,6 +157,7 @@ export const updateWindowSchema = z
     tone: toneSchema.optional(),
     backgroundTone: backgroundToneSchema.optional(),
     textTone: textToneSchema.optional(),
+    borderless: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Nada para atualizar.",
@@ -335,6 +336,7 @@ const restorableWindowSchema = z
         tone: toneSchema.optional(),
         backgroundTone: backgroundToneSchema.optional(),
         textTone: textToneSchema.optional(),
+        borderless: z.boolean().optional(),
       })
       .nullish(),
     x: coordinate,

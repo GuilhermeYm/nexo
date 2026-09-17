@@ -74,7 +74,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
       input.text === undefined &&
       input.tone === undefined &&
       input.backgroundTone === undefined &&
-      input.textTone === undefined
+      input.textTone === undefined &&
+      input.borderless === undefined
         ? undefined
         : mergeContent(current.content as WindowContent | null, input);
 
@@ -87,11 +88,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
     if (
       current.kind !== "text" &&
-      (input.backgroundTone !== undefined || input.textTone !== undefined)
+      (input.backgroundTone !== undefined ||
+        input.textTone !== undefined ||
+        input.borderless !== undefined)
     ) {
       return errorResponse(
         400,
-        "Só a caixa de texto tem fundo e cor de texto próprios."
+        "Só a caixa de texto tem fundo, cor de texto e moldura próprios."
       );
     }
 
@@ -188,6 +191,7 @@ function mergeContent(
     tone?: string;
     backgroundTone?: WindowContent["backgroundTone"];
     textTone?: WindowContent["textTone"];
+    borderless?: boolean;
   }
 ): WindowContent {
   return {
@@ -196,5 +200,6 @@ function mergeContent(
     backgroundTone:
       input.backgroundTone ?? current?.backgroundTone ?? "none",
     textTone: input.textTone ?? current?.textTone ?? "default",
+    borderless: input.borderless ?? current?.borderless ?? false,
   };
 }

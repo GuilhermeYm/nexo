@@ -29,16 +29,20 @@ export function NoteWindowEditor({
   content,
   contentRich,
   autoFocus,
+  readOnly = false,
   onChange,
 }: {
   content: string | null;
   contentRich: unknown;
   /** Foi criada agora: o corpo entra em edição depois do título. */
   autoFocus: boolean;
+  /** Modo de leitura: o mesmo documento, só que o ProseMirror não aceita tecla. */
+  readOnly?: boolean;
   onChange: (patch: { content: string; contentRich: unknown }) => void;
 }) {
   const editor = useEditor({
     immediatelyRender: false,
+    editable: !readOnly,
     extensions: buildEditorExtensions({
       placeholder: "Escreva aqui. A Nexo guarda sozinha.",
       slash: false,
@@ -67,6 +71,13 @@ export function NoteWindowEditor({
   useEffect(() => {
     if (autoFocus && editor) editor.commands.focus("end");
   }, [autoFocus, editor]);
+
+  // `editable` na criação vale só para a primeira montagem do TipTap; o modo
+  // de leitura liga e desliga na mesma instância, então precisa deste efeito
+  // para valer depois da montagem também.
+  useEffect(() => {
+    editor?.setEditable(!readOnly);
+  }, [editor, readOnly]);
 
   return (
     <div className="flex h-full min-h-0 flex-col px-2.5 pb-2.5">

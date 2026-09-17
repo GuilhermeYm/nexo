@@ -311,7 +311,7 @@ async function main() {
     await page.screenshot({ path: `${OUT}/dashboard-hoje-light.png`, fullPage: true });
 
     /* ---------------------------------------------------------------- */
-    /* 3c. A caixa não sai: Backspace e Enter não a transformam em texto */
+    /* 3c. A caixa pede segunda intenção e não vira texto */
     /* ---------------------------------------------------------------- */
     console.log("→ tentando apagar a caixa");
     await page.goto(`${BASE}/dashboard/agenda`, { waitUntil: "networkidle" });
@@ -338,18 +338,33 @@ async function main() {
       }
     };
 
-    // Esvazia a última linha e continua apertando: sem a trava, a caixa vazia
-    // viraria parágrafo e depois se juntaria à linha de cima.
+    // Esvazia a última linha. Um Backspace protege o marcador; o segundo
+    // remove a tarefa e devolve o cursor para a anterior.
     await page.locator(".tiptap p", { hasText: "Revisar o AGENTS.md" }).click();
     await press("End");
     await press("Shift+Home");
-    await press("Backspace", 6);
+    await press("Backspace");
+    // Apagar o intervalo atualiza o React. Uma pessoa não consegue repetir
+    // Backspace em 40 ms; espera o editor estabilizar antes do gesto seguinte.
+    await page.waitForTimeout(150);
     let now = await shape();
     check(
       problems,
-      "Backspace não deixa linha sem caixa",
-      onlyBoxes(now) && now.items >= 2,
+      "o primeiro Backspace protege a caixa vazia",
+      onlyBoxes(now) && now.items === 3,
       JSON.stringify(now)
+    );
+
+    await press("Backspace");
+    now = await shape();
+    const selectedTask = await page.evaluate(() =>
+      window.getSelection()?.anchorNode?.parentElement?.closest("li")?.textContent?.trim()
+    );
+    check(
+      problems,
+      "o segundo Backspace remove a tarefa e volta para a anterior",
+      onlyBoxes(now) && now.items === 2 && selectedTask?.includes("Escrever o roteiro"),
+      `${JSON.stringify(now)} / seleção: ${selectedTask ?? "nenhuma"}`
     );
 
     await press("End");

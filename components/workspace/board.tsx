@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   ArrowUpToLine,
+  BookOpen,
   Download,
   Eraser,
   ExternalLink,
@@ -175,6 +176,13 @@ export function Board({
   const [focusedId, setFocusedId] = useState<string | null>(focusWindowId);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /**
+   * Modo de leitura: some com tudo que edita, cria ou apaga, e deixa só o
+   * zoom. Não é um `tool` — as ferramentas guardam um gesto em curso e saem
+   * sozinhas; o modo de leitura é um estado de tela inteira, que a pessoa
+   * escolhe e só ela desfaz.
+   */
+  const [zenMode, setZenMode] = useState(false);
   // Criar uma janela é uma ida ao servidor. Enquanto ela não volta, os
   // botões saem do ar — sem isso o botão continua com o foco do teclado, e
   // a barra de espaço de quem já começou a digitar o aciona de novo.
@@ -616,11 +624,34 @@ export function Board({
    * portas de entrada das ferramentas (os dois botões da barra e os dois
    * itens do menu do fundo), para nenhuma delas esquecer disso.
    */
-  const pickTool = useCallback((next: "eraser" | "link") => {
-    linkSession.current += 1;
-    setLabelingId(null);
-    setTool(next);
-  }, []);
+  const pickTool = useCallback(
+    (next: "eraser" | "link") => {
+      if (zenMode) return;
+      linkSession.current += 1;
+      setLabelingId(null);
+      setTool(next);
+    },
+    [zenMode]
+  );
+
+  /**
+   * Liga ou desliga o modo de leitura.
+   *
+   * Entrar guarda a ferramenta na mão, fecha "Trazer da conta" e cancela um
+   * renomeio em curso — as três coisas que o resto do modo passa a impedir
+   * de começar, mas que já podiam estar abertas de antes do clique.
+   */
+  const toggleZenMode = useCallback(() => {
+    setZenMode((current) => {
+      const next = !current;
+      if (next) {
+        stopTool();
+        setPickerOpen(false);
+        setRenaming(false);
+      }
+      return next;
+    });
+  }, [stopTool]);
 
   const clearBoard = useCallback(() => {
     setArmedClear(false);
@@ -739,7 +770,7 @@ export function Board({
 
   const usingTool = tool !== "none";
   const selectedTextWindow =
-    !usingTool && !pickerOpen
+    !usingTool && !pickerOpen && !zenMode
       ? (visibleWindows.find(
           (item) => item.id === focusedId && item.kind === "text"
         ) ?? null)
@@ -762,7 +793,11 @@ export function Board({
    * vez de editar uma linha que não está mais lá.
    */
   const selectedConnection =
-    !usingTool && !pickerOpen && !selectedTextWindow && selectedLinkId
+    !usingTool &&
+    !pickerOpen &&
+    !selectedTextWindow &&
+    !zenMode &&
+    selectedLinkId
       ? (visibleConnections.find((item) => item.id === selectedLinkId) ?? null)
       : null;
 
@@ -771,10 +806,14 @@ export function Board({
     return item ? titleOf(item) : "Elemento";
   }
 
-  const selectConnection = useCallback((id: string) => {
-    setFocusedId(null);
-    setSelectedLinkId(id);
-  }, []);
+  const selectConnection = useCallback(
+    (id: string) => {
+      if (zenMode) return;
+      setFocusedId(null);
+      setSelectedLinkId(id);
+    },
+    [zenMode]
+  );
 
   useEffect(() => {
     if (!selectedConnection) return;
@@ -911,6 +950,10 @@ export function Board({
       input: Omit<CreateWindowInput, "x" | "y">,
       at?: { x: number; y: number }
     ) => {
+      // Cinturão e suspensório: a barra some e o menu de contexto fica
+      // desligado no modo de leitura, mas um gesto só chega até aqui de
+      // verdade se ninguém conseguir mais acioná-lo.
+      if (zenMode) return;
       const point = at ?? spawnPoint(input.kind);
       setCreating(true);
       try {
@@ -923,12 +966,12 @@ export function Board({
         setCreating(false);
       }
     },
-    [createWindow, spawnPoint]
+    [createWindow, spawnPoint, zenMode]
   );
 
   const handleBackgroundDoubleClick = useCallback(
     (event: React.MouseEvent) => {
-      if (event.target !== event.currentTarget) return;
+      if (zenMode || event.target !== event.currentTarget) return;
 
       const point = toContainer(event.clientX, event.clientY);
       const board = toBoard(point.x, point.y);
@@ -937,7 +980,7 @@ export function Board({
         { x: snapToGrid(board.x), y: snapToGrid(board.y) }
       );
     },
-    [toContainer, toBoard, spawn]
+    [toContainer, toBoard, spawn, zenMode]
   );
 
   const handlePick = useCallback(
@@ -990,7 +1033,7 @@ export function Board({
             nada, e um número sem unidade numa barra de ferramentas é ruído
             que a pessoa aprende a ignorar. */}
         <ContextMenu>
-          <ContextMenuTrigger asChild>
+          <ContextMenuTrigger asChild disabled={zenMode}>
             <div className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-150 hover:bg-tertiary">
               <span
                 aria-hidden="true"
@@ -1011,8 +1054,12 @@ export function Board({
                 />
               ) : (
                 <h1
-                  onDoubleClick={() => setRenaming(true)}
-                  title="Botão direito (ou dois cliques) para renomear"
+                  onDoubleClick={() => !zenMode && setRenaming(true)}
+                  title={
+                    zenMode
+                      ? name
+                      : "Botão direito (ou dois cliques) para renomear"
+                  }
                   className="min-w-0 truncate text-sm font-bold text-foreground"
                 >
                   {name}
@@ -1041,91 +1088,101 @@ export function Board({
           </ContextMenuContent>
         </ContextMenu>
 
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          <ToolButton
-            label="Nova nota"
-            hint="Vira uma nota de verdade: entra na busca e nas tags."
-            disabled={atCap || creating}
-            onClick={() => spawn({ kind: "note", title: "Nova nota" })}
-          >
-            <FilePlus2 className="size-4" aria-hidden="true" />
-          </ToolButton>
+        {zenMode && (
+          <p className="ml-auto flex h-9 shrink-0 items-center text-xs text-subtle-foreground">
+            Modo de leitura — só o zoom mexe.
+          </p>
+        )}
 
-          <ToolButton
-            label="Post-it"
-            hint="Fica só nesta lousa — a busca não alcança."
-            disabled={atCap || creating}
-            onClick={() => spawn({ kind: "sticky", tone: "1" })}
-          >
-            <StickyNote className="size-4" aria-hidden="true" />
-          </ToolButton>
+        {!zenMode && (
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <ToolButton
+              label="Nova nota"
+              hint="Vira uma nota de verdade: entra na busca e nas tags."
+              disabled={atCap || creating}
+              onClick={() => spawn({ kind: "note", title: "Nova nota" })}
+            >
+              <FilePlus2 className="size-4" aria-hidden="true" />
+            </ToolButton>
 
-          <ToolButton
-            label="Caixa de texto"
-            hint="Fica só nesta lousa — a busca não alcança."
-            disabled={atCap || creating}
-            onClick={() => spawn({ kind: "text" })}
-          >
-            <Type className="size-4" aria-hidden="true" />
-          </ToolButton>
+            <ToolButton
+              label="Post-it"
+              hint="Fica só nesta lousa — a busca não alcança."
+              disabled={atCap || creating}
+              onClick={() => spawn({ kind: "sticky", tone: "1" })}
+            >
+              <StickyNote className="size-4" aria-hidden="true" />
+            </ToolButton>
 
-          <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
+            <ToolButton
+              label="Caixa de texto"
+              hint="Fica só nesta lousa — a busca não alcança."
+              disabled={atCap || creating}
+              onClick={() => spawn({ kind: "text" })}
+            >
+              <Type className="size-4" aria-hidden="true" />
+            </ToolButton>
 
-          {/* As duas ferramentas do ponteiro. Modo, e não clique: ficam
-              acesas enquanto estão na mão, e o mesmo botão as guarda. */}
-          <ToolButton
-            label="Ligar"
-            hint={
-              tool === "link"
-                ? "Clique de novo para guardar."
-                : "Toque num elemento e depois no outro."
-            }
-            disabled={tool !== "link" && windows.length < 2}
-            expanded={tool === "link"}
-            onClick={() => (tool === "link" ? stopTool() : pickTool("link"))}
-          >
-            <Spline className="size-4" aria-hidden="true" />
-          </ToolButton>
+            <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
 
-          <ToolButton
-            label="Borracha"
-            hint={
-              tool === "eraser"
-                ? "Clique de novo para guardar."
-                : "Tira da lousa sem tirar da conta."
-            }
-            disabled={
-              tool !== "eraser" &&
-              windows.length === 0 &&
-              connections.length === 0
-            }
-            expanded={tool === "eraser"}
-            onClick={() => (tool === "eraser" ? stopTool() : pickTool("eraser"))}
-          >
-            <Eraser className="size-4" aria-hidden="true" />
-          </ToolButton>
+            {/* As duas ferramentas do ponteiro. Modo, e não clique: ficam
+                acesas enquanto estão na mão, e o mesmo botão as guarda. */}
+            <ToolButton
+              label="Ligar"
+              hint={
+                tool === "link"
+                  ? "Clique de novo para guardar."
+                  : "Toque num elemento e depois no outro."
+              }
+              disabled={tool !== "link" && windows.length < 2}
+              expanded={tool === "link"}
+              onClick={() => (tool === "link" ? stopTool() : pickTool("link"))}
+            >
+              <Spline className="size-4" aria-hidden="true" />
+            </ToolButton>
 
-          {/* Alterna, não só abre.
-              O mesmo botão que abriu é o primeiro lugar em que a pessoa
-              clica para fechar — e ele não fazia nada, o que se parece
-              exatamente com um painel travado. E ele nunca fica desabilitado
-              com o painel aberto: com a lousa no teto de elementos, "trazer"
-              está fora de questão, mas "fechar" não. */}
-          <ToolButton
-            label="Trazer da conta"
-            hint={
-              pickerOpen
-                ? "Clique de novo para fechar."
-                : "Abrir aqui algo que você já guardou."
-            }
-            disabled={!pickerOpen && (atCap || creating)}
-            expanded={pickerOpen}
-            wide
-            onClick={() => setPickerOpen((current) => !current)}
-          >
-            <FolderInput className="size-4" aria-hidden="true" />
-          </ToolButton>
-        </div>
+            <ToolButton
+              label="Borracha"
+              hint={
+                tool === "eraser"
+                  ? "Clique de novo para guardar."
+                  : "Tira da lousa sem tirar da conta."
+              }
+              disabled={
+                tool !== "eraser" &&
+                windows.length === 0 &&
+                connections.length === 0
+              }
+              expanded={tool === "eraser"}
+              onClick={() =>
+                tool === "eraser" ? stopTool() : pickTool("eraser")
+              }
+            >
+              <Eraser className="size-4" aria-hidden="true" />
+            </ToolButton>
+
+            {/* Alterna, não só abre.
+                O mesmo botão que abriu é o primeiro lugar em que a pessoa
+                clica para fechar — e ele não fazia nada, o que se parece
+                exatamente com um painel travado. E ele nunca fica
+                desabilitado com o painel aberto: com a lousa no teto de
+                elementos, "trazer" está fora de questão, mas "fechar" não. */}
+            <ToolButton
+              label="Trazer da conta"
+              hint={
+                pickerOpen
+                  ? "Clique de novo para fechar."
+                  : "Abrir aqui algo que você já guardou."
+              }
+              disabled={!pickerOpen && (atCap || creating)}
+              expanded={pickerOpen}
+              wide
+              onClick={() => setPickerOpen((current) => !current)}
+            >
+              <FolderInput className="size-4" aria-hidden="true" />
+            </ToolButton>
+          </div>
+        )}
       </header>
 
       {/* `overflow-clip`, e não `overflow-hidden`.
@@ -1151,7 +1208,7 @@ export function Board({
             lousa a sensação de superfície — sem referência visual, arrastar
             no vazio não parece movimento. */}
         <ContextMenu>
-          <ContextMenuTrigger asChild>
+          <ContextMenuTrigger asChild disabled={zenMode}>
             <div
               onPointerDown={handleBackgroundPointerDown}
               onPointerMove={handleBackgroundPointerMove}
@@ -1191,7 +1248,7 @@ export function Board({
                   onSelect={selectConnection}
                   onRemove={removeConnection}
                   onLabel={setLabelingId}
-                  inert={usingTool}
+                  inert={usingTool || zenMode}
                 />
 
                 {/* Os rótulos depois do traço e antes das janelas: pintam por
@@ -1206,7 +1263,7 @@ export function Board({
                   onSelect={selectConnection}
                   onCommit={commitConnectionLabel}
                   onRemove={removeConnection}
-                  inert={usingTool}
+                  inert={usingTool || zenMode}
                 />
 
                 {linkOrigin && pointerAt && (
@@ -1220,7 +1277,7 @@ export function Board({
                 {visibleWindows.map((item) => (
                   <div key={item.id} className="pointer-events-auto contents">
                     <ContextMenu>
-                      <ContextMenuTrigger asChild>
+                      <ContextMenuTrigger asChild disabled={zenMode}>
                         <WindowFrame
                           window={item}
                           zoom={viewport.zoom}
@@ -1238,6 +1295,7 @@ export function Board({
                           }
                           toneClass={surfaceClassOf(item)}
                           focused={focusedId === item.id}
+                          readOnly={zenMode}
                           onFocus={() => {
                             setFocusedId(item.id);
                             setSelectedLinkId(null);
@@ -1258,6 +1316,7 @@ export function Board({
                             <NoteWindowBody
                               window={item}
                               autoFocus={justCreatedId === item.id}
+                              readOnly={zenMode}
                               onChange={(patch) =>
                                 item.note && updateNote(item.note.id, patch)
                               }
@@ -1273,6 +1332,7 @@ export function Board({
                             <ElementWindowBody
                               window={item}
                               autoFocus={justCreatedId === item.id}
+                              readOnly={zenMode}
                               onChange={(patch) => updateWindow(item.id, patch)}
                               onCommit={(patch) => updateWindow(item.id, patch)}
                             />
@@ -1631,6 +1691,21 @@ export function Board({
           <ZoomButton label="Enquadrar tudo" onClick={fitAll}>
             <Maximize className="size-3.5" aria-hidden="true" />
           </ZoomButton>
+
+          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />
+
+          <ZoomButton
+            label={zenMode ? "Sair do modo de leitura" : "Modo de leitura"}
+            hint={
+              zenMode
+                ? "Vai mostrar as ferramentas de novo."
+                : "Vai esconder tudo, menos o zoom — só para olhar."
+            }
+            active={zenMode}
+            onClick={toggleZenMode}
+          >
+            <BookOpen className="size-3.5" aria-hidden="true" />
+          </ZoomButton>
         </div>
 
         {(notice || lastErased || atCap) && (
@@ -1988,6 +2063,8 @@ function ZoomButton({
   label,
   hint,
   disabled,
+  /** Aceso — o modo de leitura é o único botão daqui que fica ligado. */
+  active,
   onClick,
   children,
 }: {
@@ -1995,6 +2072,7 @@ function ZoomButton({
   /** O atalho equivalente, quando existe um. */
   hint?: string;
   disabled?: boolean;
+  active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -2003,8 +2081,12 @@ function ZoomButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={active}
       title={hint ? `${label} — ${hint}` : label}
-      className="flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:size-10"
+      className={cn(
+        "flex size-8 items-center justify-center rounded-lg transition-colors duration-150 hover:bg-tertiary hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:size-10",
+        active ? "bg-tertiary text-foreground" : "text-subtle-foreground"
+      )}
     >
       {children}
       <span className="sr-only">{label}</span>

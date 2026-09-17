@@ -31,7 +31,11 @@ export const PROSE_EDITOR_CLASS = [
   // que alcança os atributos `data-*` que o TipTap põe.
   "[&_ul[data-type=taskList]]:my-3 [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-1",
   "[&_ul[data-type=taskList]_li]:my-1 [&_ul[data-type=taskList]_li]:flex [&_ul[data-type=taskList]_li]:items-start [&_ul[data-type=taskList]_li]:gap-2",
-  "[&_ul[data-type=taskList]_li>label]:mt-1 [&_ul[data-type=taskList]_li>label]:shrink-0 [&_ul[data-type=taskList]_li>label]:select-none",
+  // Altura de `label` igual à altura de uma linha (`1.75em`, o mesmo
+  // `leading-[1.75]` do parágrafo) e `items-center` por dentro: a caixa fica
+  // no meio da primeira linha, não no topo do item. `mt-*` fixo (a versão
+  // anterior) era um chute que só acertava num tamanho de fonte.
+  "[&_ul[data-type=taskList]_li>label]:flex [&_ul[data-type=taskList]_li>label]:h-[1.75em] [&_ul[data-type=taskList]_li>label]:items-center [&_ul[data-type=taskList]_li>label]:shrink-0 [&_ul[data-type=taskList]_li>label]:select-none",
   // `flex-1` não é enfeite: sem ele o `div` de conteúdo encolhe até a largura
   // do texto, e num item **vazio** isso é zero. A linha inteira fica clicável
   // por fora da área editável, e o ProseMirror resolve o clique ora dentro do

@@ -8,7 +8,10 @@ import { ErrorReport } from "@/components/errors/error-report";
 import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { toAgendaDocument } from "@/lib/agenda/scaffold";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
-import { buildEditorExtensions } from "@/lib/editor/extensions";
+import {
+  buildEditorExtensions,
+  handleAgendaTaskBackspace,
+} from "@/lib/editor/extensions";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
 import { readApiFailure, type ApiFailure } from "@/lib/plan-limit";
 import { cn } from "@/lib/utils";
@@ -210,6 +213,27 @@ export function DayEditor({
       queue({ contentRich: doc });
     },
   });
+
+  // O keymap do TipTap também escuta Backspace no próprio contenteditable.
+  // Capturar no EditorView garante que a segunda intenção seja decidida antes
+  // de ele transformar a seleção da caixa vazia.
+  useEffect(() => {
+    if (!editor) return;
+    const view = editor.view;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Backspace") return;
+      if (!handleAgendaTaskBackspace(view)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    const dom = view.dom;
+    dom.addEventListener("keydown", onKeyDown, true);
+    return () => dom.removeEventListener("keydown", onKeyDown, true);
+  }, [editor]);
 
   // Descarregar a fila ao sair da página ou trocar de aba.
   useEffect(() => {

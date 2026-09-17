@@ -25,6 +25,7 @@ export function ToolPropertiesPanel({
 }: ToolPropertiesPanelProps) {
   const backgroundTone = window.content?.backgroundTone ?? "none";
   const textTone = window.content?.textTone ?? "default";
+  const borderless = window.content?.borderless === true;
 
   return (
     <aside
@@ -55,30 +56,68 @@ export function ToolPropertiesPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
-        <ColorSection
-          title="Fundo"
-          description="Use uma superfície da paleta ou deixe a caixa leve sobre a lousa."
-          value={backgroundTone}
-          options={["none", ...TONES]}
-          labelOf={(value) =>
-            value === "none" ? "Sem cor de fundo" : `Cor de fundo ${value}`
-          }
-          renderSwatch={(value) =>
-            value === "none" ? (
-              <X className="size-3.5" aria-hidden="true" />
-            ) : (
-              <span
-                aria-hidden="true"
-                className={cn("size-full rounded-lg border", TONE_SURFACE[value])}
-              />
-            )
-          }
-          onChange={(value) =>
-            onChange({
-              backgroundTone: value as WindowContent["backgroundTone"],
-            })
-          }
-        />
+        <section>
+          <h3 className="text-xs font-semibold text-foreground">Moldura</h3>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Sem moldura fica só o texto sobre a lousa. Ao editar, a borda
+            volta por um instante, para deixar claro qual caixa está sendo
+            mexida.
+          </p>
+          <div
+            role="group"
+            aria-label="Moldura"
+            className="mt-3 grid grid-cols-2 gap-1.5"
+          >
+            {(
+              [
+                { value: false, label: "Com moldura" },
+                { value: true, label: "Sem moldura" },
+              ] as const
+            ).map((option) => (
+              <button
+                key={String(option.value)}
+                type="button"
+                aria-pressed={borderless === option.value}
+                onClick={() => onChange({ borderless: option.value })}
+                className={cn(
+                  "rounded-lg px-2 py-2.5 text-[11px] font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent motion-reduce:transition-none pointer-coarse:py-3",
+                  borderless === option.value
+                    ? "bg-foreground text-background"
+                    : "bg-secondary text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {!borderless && (
+          <ColorSection
+            title="Fundo"
+            description="Use uma superfície da paleta ou deixe a caixa leve sobre a lousa."
+            value={backgroundTone}
+            options={["none", ...TONES]}
+            labelOf={(value) =>
+              value === "none" ? "Sem cor de fundo" : `Cor de fundo ${value}`
+            }
+            renderSwatch={(value) =>
+              value === "none" ? (
+                <X className="size-3.5" aria-hidden="true" />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className={cn("size-full rounded-lg border", TONE_SURFACE[value])}
+                />
+              )
+            }
+            onChange={(value) =>
+              onChange({
+                backgroundTone: value as WindowContent["backgroundTone"],
+              })
+            }
+          />
+        )}
 
         <ColorSection
           title="Texto"

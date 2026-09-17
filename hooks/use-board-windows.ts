@@ -47,6 +47,7 @@ export interface WindowPatch {
   tone?: string;
   backgroundTone?: WindowContent["backgroundTone"];
   textTone?: WindowContent["textTone"];
+  borderless?: WindowContent["borderless"];
 }
 
 /**
@@ -1242,7 +1243,8 @@ function maxZ(items: BoardWindow[]): number {
 }
 
 function applyPatch(window: BoardWindow, patch: WindowPatch): BoardWindow {
-  const { text, tone, backgroundTone, textTone, ...geometry } = patch;
+  const { text, tone, backgroundTone, textTone, borderless, ...geometry } =
+    patch;
 
   const next: BoardWindow = { ...window, ...geometry };
 
@@ -1250,7 +1252,8 @@ function applyPatch(window: BoardWindow, patch: WindowPatch): BoardWindow {
     text !== undefined ||
     tone !== undefined ||
     backgroundTone !== undefined ||
-    textTone !== undefined
+    textTone !== undefined ||
+    borderless !== undefined
   ) {
     next.content = {
       text: text ?? window.content?.text ?? "",
@@ -1258,6 +1261,7 @@ function applyPatch(window: BoardWindow, patch: WindowPatch): BoardWindow {
       backgroundTone:
         backgroundTone ?? window.content?.backgroundTone ?? "none",
       textTone: textTone ?? window.content?.textTone ?? "default",
+      borderless: borderless ?? window.content?.borderless ?? false,
     };
   }
 

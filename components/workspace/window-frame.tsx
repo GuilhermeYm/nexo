@@ -66,6 +66,12 @@ interface WindowFrameProps extends Omit<
   focused: boolean;
   /** Classes de cor do quadro, para os post-its. */
   toneClass?: string;
+  /**
+   * Modo de leitura: nada aqui move, redimensiona, recolhe ou fecha. Só o
+   * foco (que muda a ordem, não o conteúdo) continua de pé — é o que deixa
+   * ler uma janela coberta por outra.
+   */
+  readOnly?: boolean;
   children: ReactNode;
   onFocus: () => void;
   /** Durante o gesto: só estado local. */
@@ -83,6 +89,7 @@ export function WindowFrame({
   icon,
   focused,
   toneClass,
+  readOnly = false,
   children,
   onFocus,
   onPreview,
@@ -129,9 +136,15 @@ export function WindowFrame({
   );
 
   const minimized = item.state === "minimized";
+  // Só a caixa de texto oferece isto — ver o inspetor de propriedades.
+  const borderless = item.kind === "text" && item.content?.borderless === true;
+  const chromeHidden = borderless && !focused && !minimized;
 
   const beginGesture = useCallback(
     (mode: "move" | "resize", event: React.PointerEvent<HTMLElement>) => {
+      // No modo de leitura, o gesto nem começa — e o evento segue borbulhando
+      // até o `article`, que ainda traz a janela para frente sozinho.
+      if (readOnly) return;
       // Botão principal apenas: o secundário é do menu de contexto, e o do
       // meio é do pan da lousa.
       if (event.button !== 0) return;
@@ -153,7 +166,7 @@ export function WindowFrame({
         latest: {},
       };
     },
-    [item.x, item.y, item.width, item.height, onFocus]
+    [item.x, item.y, item.width, item.height, onFocus, readOnly]
   );
 
   const moveGesture = useCallback(
@@ -210,6 +223,7 @@ export function WindowFrame({
 
   const handleKeyMove = useCallback(
     (event: React.KeyboardEvent) => {
+      if (readOnly) return;
       const step = event.shiftKey ? 1 : KEYBOARD_STEP;
       const delta = {
         ArrowUp: { x: 0, y: -step },
@@ -223,7 +237,7 @@ export function WindowFrame({
       event.preventDefault();
       onCommit({ x: item.x + delta.x, y: item.y + delta.y });
     },
-    [item.x, item.y, onCommit]
+    [item.x, item.y, onCommit, readOnly]
   );
 
   return (
@@ -255,19 +269,30 @@ export function WindowFrame({
         zIndex: item.zIndex,
       }}
       className={cn(
-        "group/window absolute flex flex-col overflow-hidden rounded-lg border-[0.5px] transition-shadow duration-200 motion-reduce:transition-none",
-        toneClass ?? "border-border bg-background",
-        focused
-          ? "border-subtle-foreground shadow-[0_12px_40px_-12px] shadow-black/25"
-          : "shadow-[0_4px_16px_-8px] shadow-black/15"
+        "group/window absolute flex flex-col overflow-hidden rounded-lg border-[0.5px] transition-all duration-200 motion-reduce:transition-none",
+        borderless
+          ? focused
+            ? "border-border/60 bg-background/80 p-1.5 shadow-[0_12px_40px_-12px] shadow-black/25 backdrop-blur-sm"
+            : "border-transparent bg-transparent p-0 shadow-none"
+          : cn(
+              toneClass ?? "border-border bg-background",
+              focused
+                ? "border-subtle-foreground shadow-[0_12px_40px_-12px] shadow-black/25"
+                : "shadow-[0_4px_16px_-8px] shadow-black/15"
+            )
       )}
     >
       <header
         className={cn(
-          "flex h-9 shrink-0 items-center gap-1 px-1",
+          "flex h-9 shrink-0 items-center gap-1 px-1 transition-opacity duration-150 motion-reduce:transition-none",
           // A linha da barra de título é mais fraca que a moldura: ela separa
           // duas partes da mesma janela, não a janela do resto da lousa.
-          !minimized && "border-b border-border/50"
+          !minimized && "border-b border-border/50",
+          // Sem moldura, a barra some com o resto do quadro — e volta junto
+          // com ele, ao passar o mouse ou focar, para o arraste e os botões
+          // continuarem alcançáveis.
+          chromeHidden &&
+            "opacity-0 group-hover/window:opacity-100 group-focus-within/window:opacity-100"
         )}
       >
         {/* A alça é um botão: recebe foco, aparece na navegação por Tab e
@@ -283,8 +308,13 @@ export function WindowFrame({
           // O navegador tentaria rolar a página com o gesto; aqui o gesto é
           // nosso do começo ao fim.
           style={{ touchAction: "none" }}
-          aria-label={`Mover ${title}. Use as setas para posicionar.`}
-          className="flex h-7 min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg px-1.5 text-left active:cursor-grabbing"
+          aria-label={
+            readOnly ? title : `Mover ${title}. Use as setas para posicionar.`
+          }
+          className={cn(
+            "flex h-7 min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 text-left",
+            readOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+          )}
         >
           {icon}
           <span
@@ -301,35 +331,43 @@ export function WindowFrame({
           </span>
         </button>
 
-        <div
-          className={cn(
-            "flex shrink-0 items-center gap-0.5 transition-opacity duration-150 motion-reduce:transition-none",
-            // Some quando a janela está em repouso e ninguém está nela: uma
-            // lousa com vinte janelas não precisa de sessenta botões
-            // competindo por atenção. Recolhida é a exceção — sem o botão de
-            // expandir à vista, a única saída seria o menu do botão direito.
-            focused || minimized
-              ? "opacity-100"
-              : "opacity-0 group-hover/window:opacity-100 group-focus-within/window:opacity-100"
-          )}
-        >
-          <ChromeButton
-            label={minimized ? `Expandir ${title}` : `Recolher ${title}`}
-            onClick={() =>
-              onCommit({ state: minimized ? "normal" : "minimized" })
-            }
-          >
-            {minimized ? (
-              <Square className="size-3" />
-            ) : (
-              <Minus className="size-3.5" />
+        {/* No modo de leitura, só "Expandir" continua — sem ela uma janela
+            recolhida antes de entrar no modo ficaria escondida para sempre,
+            e ler é exatamente o que o modo promete. "Recolher" e "Fechar"
+            tiram conteúdo de vista; por isso somem. */}
+        {(!readOnly || minimized) && (
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-0.5 transition-opacity duration-150 motion-reduce:transition-none",
+              // Some quando a janela está em repouso e ninguém está nela: uma
+              // lousa com vinte janelas não precisa de sessenta botões
+              // competindo por atenção. Recolhida é a exceção — sem o botão de
+              // expandir à vista, a única saída seria o menu do botão direito.
+              focused || minimized
+                ? "opacity-100"
+                : "opacity-0 group-hover/window:opacity-100 group-focus-within/window:opacity-100"
             )}
-          </ChromeButton>
+          >
+            <ChromeButton
+              label={minimized ? `Expandir ${title}` : `Recolher ${title}`}
+              onClick={() =>
+                onCommit({ state: minimized ? "normal" : "minimized" })
+              }
+            >
+              {minimized ? (
+                <Square className="size-3" />
+              ) : (
+                <Minus className="size-3.5" />
+              )}
+            </ChromeButton>
 
-          <ChromeButton label={`Fechar ${title}`} onClick={onClose}>
-            <X className="size-3.5" />
-          </ChromeButton>
-        </div>
+            {!readOnly && (
+              <ChromeButton label={`Fechar ${title}`} onClick={onClose}>
+                <X className="size-3.5" />
+              </ChromeButton>
+            )}
+          </div>
+        )}
       </header>
 
       {!minimized && (
@@ -338,33 +376,35 @@ export function WindowFrame({
 
           {/* Alça de redimensionar. Também é botão, também responde às setas
               — com foco nela, as setas mudam largura e altura. */}
-          <button
-            type="button"
-            onPointerDown={(event) => beginGesture("resize", event)}
-            onPointerMove={moveGesture}
-            onPointerUp={endGesture}
-            onPointerCancel={endGesture}
-            onKeyDown={(event) => {
-              const step = event.shiftKey ? 1 : KEYBOARD_STEP;
-              const delta = {
-                ArrowUp: { w: 0, h: -step },
-                ArrowDown: { w: 0, h: step },
-                ArrowLeft: { w: -step, h: 0 },
-                ArrowRight: { w: step, h: 0 },
-              }[event.key];
-              if (!delta) return;
-              event.preventDefault();
-              onCommit({
-                width: Math.max(MIN_WIDTH, item.width + delta.w),
-                height: Math.max(MIN_HEIGHT, item.height + delta.h),
-              });
-            }}
-            style={{ touchAction: "none" }}
-            aria-label={`Redimensionar ${title}. Use as setas para ajustar.`}
-            className="absolute right-0 bottom-0 flex size-6 cursor-nwse-resize items-center justify-center rounded-tl-lg text-subtle-foreground opacity-0 transition-opacity duration-150 group-hover/window:opacity-100 group-focus-within/window:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
-          >
-            <ResizeGrip />
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onPointerDown={(event) => beginGesture("resize", event)}
+              onPointerMove={moveGesture}
+              onPointerUp={endGesture}
+              onPointerCancel={endGesture}
+              onKeyDown={(event) => {
+                const step = event.shiftKey ? 1 : KEYBOARD_STEP;
+                const delta = {
+                  ArrowUp: { w: 0, h: -step },
+                  ArrowDown: { w: 0, h: step },
+                  ArrowLeft: { w: -step, h: 0 },
+                  ArrowRight: { w: step, h: 0 },
+                }[event.key];
+                if (!delta) return;
+                event.preventDefault();
+                onCommit({
+                  width: Math.max(MIN_WIDTH, item.width + delta.w),
+                  height: Math.max(MIN_HEIGHT, item.height + delta.h),
+                });
+              }}
+              style={{ touchAction: "none" }}
+              aria-label={`Redimensionar ${title}. Use as setas para ajustar.`}
+              className="absolute right-0 bottom-0 flex size-6 cursor-nwse-resize items-center justify-center rounded-tl-lg text-subtle-foreground opacity-0 transition-opacity duration-150 group-hover/window:opacity-100 group-focus-within/window:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none"
+            >
+              <ResizeGrip />
+            </button>
+          )}
         </>
       )}
     </article>

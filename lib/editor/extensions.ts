@@ -5,6 +5,8 @@ import { Highlight } from "@tiptap/extension-highlight";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { Typography } from "@tiptap/extension-typography";
 import { Placeholder } from "@tiptap/extensions";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 
 import { lowlight } from "@/lib/editor/lowlight";
@@ -72,6 +74,77 @@ const AgendaEnter = Extension.create({
     };
   },
 });
+
+/**
+ * Backspace no começo de uma tarefa vazia remove o item e volta para a
+ * anterior.
+ *
+ * A proteção do marcador `- [ ]` já é do schema (`AgendaDocument`, acima): uma
+ * transação que tiraria a caixa e deixasse um parágrafo solto é inválida, e o
+ * ProseMirror a recusa sozinho — nenhum JS precisa vigiar isso. O que falta é
+ * só a segunda metade: com a caixa **já vazia**, o próximo Backspace apaga o
+ * item inteiro (não só o texto, que já não existe) e leva o cursor para o
+ * fim da tarefa anterior, em vez de travar numa lacuna entre as duas. A
+ * única caixa de primeiro nível fica: a Agenda sempre precisa ter um lugar
+ * onde escrever.
+ */
+/** Trata o Backspace antes do keymap padrão da lista poder transformar a caixa. */
+export function handleAgendaTaskBackspace(view: EditorView) {
+  const { selection } = view.state;
+  const { $from } = selection;
+  const selectedTask = selection instanceof NodeSelection && selection.node.type.name === "taskItem";
+  const taskAtBoundary = $from.nodeAfter?.type.name === "taskItem";
+
+  let taskItemPosition: number;
+  let taskItem: typeof selection.$from.parent;
+  let taskListDepth: number;
+
+  if (selectedTask) {
+    taskItemPosition = selection.from;
+    taskItem = selection.node;
+    taskListDepth = $from.depth;
+  } else if (taskAtBoundary) {
+    taskItemPosition = $from.pos;
+    taskItem = $from.nodeAfter!;
+    taskListDepth = $from.depth;
+  } else {
+    if (!selection.empty || $from.parentOffset !== 0) return false;
+
+    let taskItemDepth = -1;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      if ($from.node(depth).type.name === "taskItem") {
+        taskItemDepth = depth;
+        break;
+      }
+    }
+    if (taskItemDepth === -1) return false;
+
+    taskItem = $from.node(taskItemDepth);
+    taskListDepth = taskItemDepth - 1;
+    taskItemPosition = $from.before(taskItemDepth);
+  }
+
+  if (taskItem.textContent.length > 0) return false;
+
+  const taskList = $from.node(taskListDepth);
+  if (taskList.type.name !== "taskList") return false;
+
+  // A lista de primeiro nível não pode ficar sem sua última caixa. Listas
+  // aninhadas podem sumir por inteiro: o item pai continua íntegro.
+  if (taskListDepth === 1 && taskList.childCount === 1) return true;
+
+  const transaction = view.state.tr.delete(
+    taskItemPosition,
+    taskItemPosition + taskItem.nodeSize
+  );
+  const previousTask = TextSelection.near(
+    transaction.doc.resolve(taskItemPosition),
+    -1
+  );
+
+  view.dispatch(transaction.setSelection(previousTask).scrollIntoView());
+  return true;
+}
 
 /**
  * `Mod+Alt+D` recolhe/expande um bloco de detalhes.
