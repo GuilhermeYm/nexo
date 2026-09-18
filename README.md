@@ -1,5 +1,7 @@
 # Nexo
 
+![O segundo cérebro que você sempre quis, sem o trabalho que você sempre evitou. Capture em segundos. Encontre em milissegundos.](.github/assets/banner.png)
+
 Um organizador pessoal que aceita o material como ele chega — um PDF, um
 áudio, uma ideia meio formada às duas da manhã — e devolve organizado. A IA
 faz a primeira classificação; a lousa é onde você reorganiza do seu jeito,
