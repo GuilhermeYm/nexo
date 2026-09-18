@@ -1,7 +1,8 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { markNoteForReading } from "@/lib/ai/note-reading";
 import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -186,11 +187,30 @@ export async function POST(request: Request) {
         type: "note",
         source: "user",
       })
-      .returning({ id: notes.id, title: notes.title });
+      .returning({
+        id: notes.id,
+        userId: notes.userId,
+        workspaceId: notes.workspaceId,
+        title: notes.title,
+        content: notes.content,
+        source: notes.source,
+        status: notes.status,
+        taskDate: notes.taskDate,
+      });
 
     await invalidateNoteListCache(user.id);
 
-    return NextResponse.json({ note: created }, { status: 201 });
+    // O rascunho guardado na conta vira nota como as outras, e a IA passa a
+    // vê-lo. Só marca: nota recém-criada ainda vai ser editada, e quem lê é o
+    // editor quando a pessoa parar (ou a varredura do dashboard).
+    after(async function markCreatedNote() {
+      await markNoteForReading(created);
+    });
+
+    return NextResponse.json(
+      { note: { id: created.id, title: created.title } },
+      { status: 201 }
+    );
   } catch (error) {
     const code = await logServerError("POST /api/notes", error, { userId }, request);
     return errorResponse(500, "Erro ao guardar a nota.", code);

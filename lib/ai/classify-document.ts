@@ -16,7 +16,7 @@ import { z } from "zod";
  * para o fluxo de upload continuar testável de ponta a ponta sem custo.
  */
 
-const NOTE_TYPES = [
+export const NOTE_TYPES = [
   "note",
   "task",
   "journal",
@@ -62,6 +62,10 @@ export interface ClassifyOutput {
    * esperado desta instalação, não um defeito para investigar.
    */
   failure: ClassifyFailure | null;
+  /** Quem respondeu, quando foi o modelo. Nulo no stub. Vai para o detalhe
+   *  da tarefa no feed — é o que diz à pessoa qual IA leu o arquivo. */
+  provider: string | null;
+  model: string | null;
 }
 
 export interface ClassifyFailure {
@@ -72,7 +76,7 @@ export interface ClassifyFailure {
 }
 
 // ~8k chars bastam para classificar e mantêm o custo por chamada mínimo.
-const MAX_INPUT_CHARS = 8000;
+export const MAX_INPUT_CHARS = 8000;
 
 const SYSTEM_PROMPT = `Você é o organizador do aplicativo Nexo. Analise o documento do usuário e responda APENAS com um JSON no formato:
 {"title": string, "summary": string, "noteType": "note"|"task"|"journal"|"idea"|"meeting"|"document", "tags": string[]}
@@ -84,7 +88,7 @@ Regras:
 - "tags": de 1 a 5 tags em português, minúsculas, sem acentos, curtas (ex.: "financas", "reuniao", "ideia-app").
 - Responda somente o JSON, sem markdown nem texto adicional.`;
 
-interface Provider {
+export interface Provider {
   name: string;
   endpoint: string;
   apiKey: string;
@@ -98,7 +102,7 @@ interface Provider {
  * latência aqui é experiência. Trocar de provedor é trocar variável de
  * ambiente; nenhum componente sabe qual está no ar.
  */
-function resolveProvider(): Provider | null {
+export function resolveProvider(): Provider | null {
   const groqKey = process.env.GROQ_API_KEY;
   if (groqKey) {
     return {
@@ -131,12 +135,24 @@ export async function classifyDocument(
 
   if (!provider) {
     // Sem chave configurada não houve falha: é a instalação sem IA.
-    return { result: stubClassification(input), usedAi: false, failure: null };
+    return {
+      result: stubClassification(input),
+      usedAi: false,
+      failure: null,
+      provider: null,
+      model: null,
+    };
   }
 
   try {
     const result = await classifyWithProvider(input, provider);
-    return { result, usedAi: true, failure: null };
+    return {
+      result,
+      usedAi: true,
+      failure: null,
+      provider: provider.name,
+      model: provider.model,
+    };
   } catch (error) {
     // A falha nunca derruba o upload: o arquivo já está guardado, e uma nota
     // classificada pelo stub é melhor que nenhuma nota.
@@ -153,6 +169,8 @@ export async function classifyDocument(
         provider: provider.name,
         model: provider.model,
       },
+      provider: null,
+      model: null,
     };
   }
 }
@@ -219,7 +237,7 @@ async function classifyWithProvider(
 }
 
 /** Tira a cerca de markdown, quando o modelo insiste em colocá-la. */
-function unwrapJson(raw: string): string {
+export function unwrapJson(raw: string): string {
   const trimmed = raw.trim();
   const fence = "```";
   if (!trimmed.startsWith(fence)) return trimmed;

@@ -83,7 +83,7 @@ export async function processAudioTranscription(
     if (tagIds.length) {
       await db
         .insert(noteTags)
-        .values(tagIds.map((tagId) => ({ noteId: input.noteId, tagId })))
+        .values(tagIds.map((tagId) => ({ noteId: input.noteId, tagId, source: "ai" as const })))
         .onConflictDoNothing();
     }
 
@@ -102,6 +102,16 @@ export async function processAudioTranscription(
           model: transcription.model,
           transcriptChars: transcription.text.length,
           classified: classification.usedAi,
+          // O detalhe da tela cheia de Tarefas. Metadados, nunca o texto.
+          ...(classification.usedAi && {
+            tags: classification.result.tags,
+            typeSuggested: classification.result.noteType,
+            summarized: true,
+            summaryChars: classification.result.summary.length,
+            classifyProvider: classification.provider,
+            classifyModel: classification.model,
+          }),
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
         },
         finishedAt,
       })

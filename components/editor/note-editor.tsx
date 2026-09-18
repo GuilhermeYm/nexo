@@ -10,6 +10,7 @@ import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
+import { NoteAiSummary } from "@/components/editor/note-ai-summary";
 import { NoteTags } from "@/components/editor/note-tags";
 import { EditorZoomControls } from "@/components/editor/editor-zoom-controls";
 import {
@@ -30,6 +31,7 @@ import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { plainToRichDocument } from "@/lib/editor/document";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
 import { useEditorZoom, useEditorZoomShortcuts } from "@/hooks/use-editor-zoom";
+import type { NoteAiView } from "@/lib/notes/ai-view";
 import type { EditableNote } from "@/lib/notes/queries";
 import { cn } from "@/lib/utils";
 
@@ -53,43 +55,99 @@ import { cn } from "@/lib/utils";
 
 const SAVE_DELAY = 900;
 
+/**
+ * Quanto tempo parado até a IA ler a nota. Curto demais relê quem só foi
+ * buscar café; longo demais e a aba fecha antes — o que não perde nada (sair
+ * também avisa), só adia. Ver docs/IA.md.
+ */
+const READ_AFTER_QUIET_MS = 90_000;
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 interface NoteEditorProps {
   note: EditableNote;
   workspaces: WorkspaceSummary[];
+  /** A leitura da IA pintada no servidor; o componente a mantém viva. */
+  ai: NoteAiView | null;
 }
 
-export function NoteEditor({ note, workspaces }: NoteEditorProps) {
+export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
   const router = useRouter();
   const [title, setTitle] = useState(note.title);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queued = useRef<{ title?: string; contentRich?: unknown }>({});
+  // Salvou algo que a IA ainda não foi chamada a ler.
+  const unread = useRef(false);
+  const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef(0);
+
+  /**
+   * Pede a leitura por IA. Só avisa o servidor: **se** a nota merece
+   * leitura já foi decidido quando ela foi salva, e o pedido sem nada
+   * pendente não custa chamada de modelo nenhuma.
+   */
+  const requestRead = useCallback(
+    (keepalive = false) => {
+      if (readTimer.current) clearTimeout(readTimer.current);
+      readTimer.current = null;
+      if (!unread.current) return;
+      unread.current = false;
+      void fetch(`/api/notes/${note.id}/analyze`, { method: "POST", keepalive }).catch(
+        () => {
+          // Sem problema: a varredura do dashboard apanha a nota depois.
+        }
+      );
+    },
+    [note.id]
+  );
 
   const flush = useCallback(
-    async (keepalive = false) => {
+    async (keepalive = false, read = false) => {
       const patch = queued.current;
       queued.current = {};
       if (timer.current) clearTimeout(timer.current);
       timer.current = null;
-      if (Object.keys(patch).length === 0) return;
+      if (Object.keys(patch).length === 0) {
+        if (read) requestRead(keepalive);
+        return;
+      }
+
+      // Saindo: o pedido de leitura vai no próprio salvamento. Dois fetches
+      // com `keepalive` não têm ordem garantida, e a leitura chegando antes
+      // do texto leria a versão anterior.
+      if (read) {
+        if (readTimer.current) clearTimeout(readTimer.current);
+        readTimer.current = null;
+        unread.current = false;
+      }
 
       setSaveState("saving");
+      inFlight.current += 1;
       try {
-        const response = await fetch(`/api/notes/${note.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-          keepalive,
-        });
+        const response = await fetch(
+          `/api/notes/${note.id}${read ? "?analyze=1" : ""}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+            keepalive,
+          }
+        );
         setSaveState(response.ok ? "saved" : "error");
+        if (response.ok && !read) {
+          unread.current = true;
+          if (readTimer.current) clearTimeout(readTimer.current);
+          readTimer.current = setTimeout(() => requestRead(), READ_AFTER_QUIET_MS);
+        }
       } catch {
         setSaveState("error");
+      } finally {
+        inFlight.current -= 1;
       }
     },
-    [note.id]
+    [note.id, requestRead]
   );
 
   const queue = useCallback(
@@ -102,19 +160,42 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
   );
 
   // Sair da página com texto na fila é o momento em que ele mais se perde.
+  // É também quando a IA é avisada: o servidor lê a nota mesmo com a aba já
+  // fechada, porque a leitura roda lá, em `after()`.
   useEffect(() => {
     function onHide() {
-      void flush(true);
+      if (document.visibilityState === "hidden") void flush(true, true);
+    }
+    function onPageHide() {
+      void flush(true, true);
     }
 
-    window.addEventListener("pagehide", onHide);
+    window.addEventListener("pagehide", onPageHide);
     document.addEventListener("visibilitychange", onHide);
     return () => {
-      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pagehide", onPageHide);
       document.removeEventListener("visibilitychange", onHide);
-      void flush(true);
+      void flush(true, true);
     };
   }, [flush]);
+
+  // O aviso do navegador ao fechar, **só** com texto que ainda não chegou ao
+  // servidor. O navegador não deixa escrever mensagem própria — mostra a
+  // dele, genérica. Com tudo salvo não há aviso: a leitura por IA não precisa
+  // da aba aberta, e interromper a pessoa por ela seria incomodar à toa.
+  useEffect(() => {
+    function onBeforeUnload(event: BeforeUnloadEvent) {
+      const pending =
+        Object.keys(queued.current).length > 0 || inFlight.current > 0;
+      if (!pending) return;
+      event.preventDefault();
+      // Navegadores antigos só mostram o aviso com `returnValue` preenchido.
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   const editor = useEditor({
     // Obrigatório no App Router: renderizar o editor já no servidor produz
@@ -353,8 +434,13 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
             style={{ zoom: textZoom.zoom / 100 }}
             className={cn("mt-8 [&_.tiptap]:min-h-[60vh]", PROSE_EDITOR_CLASS)}
           />
-          <div className="mt-6 flex justify-end border-t border-border pt-3 print:hidden">
+          {/* O rodapé da nota: o resumo da Nexo no canto, o zoom do outro
+              lado. No celular o zoom sobe e o resumo fica embaixo, com a
+              largura inteira para ser lido. */}
+          <div className="mt-6 flex flex-col-reverse gap-4 border-t border-border pt-3 sm:flex-row sm:items-start sm:justify-between print:hidden">
+            <NoteAiSummary noteId={note.id} initial={ai} />
             <EditorZoomControls
+              className="shrink-0 self-end sm:self-auto"
               zoom={textZoom.zoom}
               onDecrease={() => {
                 textZoom.decrease();

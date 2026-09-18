@@ -31,6 +31,8 @@ const EXPECTED_TABLES = [
   "attachments",
   "audit_logs",
   "error_reports",
+  "note_ai_state",
+  "note_tag_rejections",
   "note_tags",
   "notes",
   "notifications",
@@ -78,6 +80,23 @@ const COLUMN_GRANTS = [
       "user_reported_at",
     ],
   },
+  // A contabilidade da IA sobre as notas (0024). O dono lê o que a interface
+  // mostra — estado, resumo, tipo sugerido; hashes, tranca e recuo são do
+  // servidor.
+  {
+    table: "note_ai_state",
+    privilege: "SELECT",
+    columns: [
+      "enabled",
+      "note_id",
+      "read_at",
+      "state",
+      "suggested_type",
+      "summary",
+      "updated_at",
+      "user_id",
+    ],
+  },
 ];
 
 /**
@@ -105,6 +124,12 @@ const SERVER_ONLY_WRITES = [
   // confere a sessão. Solto pelo PostgREST, o mesmo caminho serviria para
   // reescrever o que o servidor registrou.
   { table: "error_reports", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  // 0024. `note_tags.source` diz se a tag é da pessoa ou da IA; com escrita
+  // pelo PostgREST, um cliente forjado gravaria a própria tag como `ai` e a
+  // procedência viraria enfeite. Marcar e desmarcar passam pela rota.
+  { table: "note_tags", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  { table: "note_ai_state", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  { table: "note_tag_rejections", privileges: ["INSERT", "UPDATE", "DELETE"] },
 ];
 
 /** Funções internas que nenhuma rota chama por RPC. */

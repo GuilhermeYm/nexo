@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { sweepPendingNotes } from "@/lib/ai/note-reading";
 import {
   listAiJobs,
   listRecentNotes,
@@ -45,6 +47,14 @@ export default async function DashboardPage() {
   if (workspaceList.length === 0) {
     workspaceList = await createDefaultWorkspace(user.id);
   }
+
+  // A rede de segurança da leitura por IA: a nota cuja aba fechou antes de
+  // qualquer gatilho chegar é apanhada aqui, fora da resposta. No máximo duas
+  // por carga, por índice parcial — nunca uma varredura da tabela.
+  const ownerId = user.id;
+  after(async function sweepNotesAfterRender() {
+    await sweepPendingNotes(ownerId);
+  });
 
   const [jobs, notes, topTags, unreadCount] = await Promise.all([
     listAiJobs(user.id),

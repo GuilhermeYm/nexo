@@ -192,6 +192,10 @@ const AI_JOB_COLUMNS = {
  * O feed de Tarefas: o que os agentes fizeram, estão fazendo, ou pararam de
  * fazer por falta de crédito.
  *
+ * **As fixadas** (`isPinnedJob`): as paradas por falta de crédito e as
+ * leituras de nota ainda na fila — a nota que a pessoa escreveu e a IA ainda
+ * não leu, inclusive a da aba que fechou no meio.
+ *
  * **As tarefas paradas por falta de crédito são fixas.** Elas pedem uma
  * decisão do usuário — assinar para retomar — e guardam `credits_cost` para a
  * cobrança dessa retomada. Não podem cair da lista porque tarefas mais novas
@@ -208,26 +212,23 @@ export async function listAiJobs(
   userId: string,
   limit = JOBS_LIMIT
 ): Promise<AiJobItem[]> {
+  // O espelho em SQL de `isPinnedJob` (`lib/dashboard/pinned-jobs.ts`).
+  // Mudou lá, muda aqui.
+  const pinnedCondition = or(
+    eq(aiJobs.status, "insufficient_credits"),
+    and(eq(aiJobs.kind, "summarize"), eq(aiJobs.status, "queued"))
+  );
+
   const pinnedQuery = db
     .select(AI_JOB_COLUMNS)
     .from(aiJobs)
-    .where(
-      and(
-        eq(aiJobs.userId, userId),
-        eq(aiJobs.status, "insufficient_credits")
-      )
-    )
+    .where(and(eq(aiJobs.userId, userId), pinnedCondition))
     .orderBy(desc(aiJobs.createdAt));
 
   const historyQuery = db
     .select(AI_JOB_COLUMNS)
     .from(aiJobs)
-    .where(
-      and(
-        eq(aiJobs.userId, userId),
-        ne(aiJobs.status, "insufficient_credits")
-      )
-    )
+    .where(and(eq(aiJobs.userId, userId), sql`not (${pinnedCondition})`))
     .orderBy(
       // Em execução e na fila no topo do histórico; o resto por data.
       sql`case

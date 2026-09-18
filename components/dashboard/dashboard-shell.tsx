@@ -460,7 +460,7 @@ export function DashboardShell({
         </div>
 
         {/* A janela */}
-        <main className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-background">
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl border border-border bg-background">
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-14 sm:py-20">
             <div
               data-dashboard-enter=""

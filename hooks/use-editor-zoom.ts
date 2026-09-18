@@ -13,6 +13,9 @@ function clampZoom(value: number): number {
 }
 
 function parseZoom(raw: string | null): number {
+  // Sem preferência gravada é o padrão. `Number(null)` é 0, e 0 passaria
+  // pelo `isFinite` e cairia no mínimo — todo aparelho novo abria em 80%.
+  if (raw === null || raw.trim() === "") return DEFAULT_EDITOR_ZOOM;
   const value = Number(raw);
   return Number.isFinite(value) ? clampZoom(value) : DEFAULT_EDITOR_ZOOM;
 }

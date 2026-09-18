@@ -214,7 +214,7 @@ export function Sidebar({
             </button>
           </div>
 
-          <ul className="mt-1.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+          <ul className="mt-1.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain">
             {workspaces.map((workspace) => (
               <WorkspaceRow
                 key={workspace.id}

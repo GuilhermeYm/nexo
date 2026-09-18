@@ -1,7 +1,8 @@
 import { and, eq, ne } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { markNoteForReading, readNote } from "@/lib/ai/note-reading";
 import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -157,7 +158,16 @@ export async function PATCH(
         updatedAt: new Date(),
       })
       .where(scope)
-      .returning({ id: notes.id, title: notes.title });
+      .returning({
+        id: notes.id,
+        userId: notes.userId,
+        workspaceId: notes.workspaceId,
+        title: notes.title,
+        content: notes.content,
+        source: notes.source,
+        status: notes.status,
+        taskDate: notes.taskDate,
+      });
 
     if (!updated) return errorResponse(404, "Nota não encontrada.");
 
@@ -174,6 +184,17 @@ export async function PATCH(
     }
 
     await invalidateNoteListCache(user.id);
+
+    // A IA lê a nota fora da resposta — a pessoa nunca espera por ela.
+    // Marcar é barato (decide se mudou o bastante); ler só acontece quando o
+    // editor avisa que a pessoa parou ou saiu (`?analyze=1`, mandado com
+    // `keepalive` no fechamento da aba). Ver docs/IA.md.
+    const analyze = new URL(request.url).searchParams.get("analyze") === "1";
+    const ownerId = user.id;
+    after(async function readNoteAfterSave() {
+      await markNoteForReading(updated);
+      if (analyze) await readNote(ownerId, updated.id, { request });
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

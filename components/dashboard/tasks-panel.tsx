@@ -5,6 +5,7 @@ import {
   CircleCheck,
   Coins,
   LoaderCircle,
+  Maximize2,
   Pin,
   Sparkles,
   Tags,
@@ -15,6 +16,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { EmptyState, Panel, QuietFooter } from "@/components/dashboard/panel";
+import { TasksFullscreen } from "@/components/dashboard/tasks-fullscreen";
 import { ErrorReport } from "@/components/errors/error-report";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useLiveResource } from "@/hooks/use-live-resource";
@@ -25,6 +27,7 @@ import {
   STALE_AFTER_MS,
   toIsoString,
 } from "@/lib/dashboard/format";
+import { isPinnedJob } from "@/lib/dashboard/pinned-jobs";
 import type { AiJobItem } from "@/lib/dashboard/queries";
 import { readApiFailure } from "@/lib/api-failure";
 import { cn } from "@/lib/utils";
@@ -124,6 +127,7 @@ export function TasksPanel({
   // item do histórico, mas uma queda de rede nesse segundo request não pode
   // ressuscitar visualmente uma tarefa que o servidor já excluiu.
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
+  const [expanded, setExpanded] = useState(false);
   const visibleItems = items.filter((job) => !deletedIds.has(job.id));
 
   const handleDeleted = useCallback(
@@ -140,12 +144,8 @@ export function TasksPanel({
     registerRefresh?.(refresh);
   }, [registerRefresh, refresh]);
 
-  const pinned = visibleItems.filter(
-    (job) => job.status === "insufficient_credits"
-  );
-  const history = visibleItems.filter(
-    (job) => job.status !== "insufficient_credits"
-  );
+  const pinned = visibleItems.filter(isPinnedJob);
+  const history = visibleItems.filter((job) => !isPinnedJob(job));
 
   const clock = now || renderedAt;
   const quiet =
@@ -154,11 +154,23 @@ export function TasksPanel({
     lastActivity(history) < clock - STALE_AFTER_MS;
 
   return (
+    <>
     <Panel
       title="Tarefas"
       count={pinned.length}
       status={status}
       isRefreshing={isRefreshing}
+      action={
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          title="Tela cheia — o histórico inteiro, com o detalhe de cada tarefa"
+          className="-mr-1.5 flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
+        >
+          <Maximize2 className="size-3.5" aria-hidden="true" />
+          <span className="sr-only">Abrir Tarefas em tela cheia</span>
+        </button>
+      }
     >
       {visibleItems.length === 0 ? (
         <EmptyState
@@ -175,10 +187,10 @@ export function TasksPanel({
         <div className="flex min-h-full flex-col">
           {pinned.length > 0 && (
             <div className="border-b border-border bg-tag-1/60">
-              <p className="flex items-center gap-1.5 px-4 pt-3 pb-1.5 text-[11px] font-semibold tracking-wide text-tag-1-foreground uppercase">
-                <Pin className="size-3" aria-hidden="true" />
-                Fixado até você retomar
-              </p>
+              <h3 className="flex items-center gap-1.5 px-4 pt-3 pb-1.5 text-xs font-semibold text-muted-foreground">
+                <Pin className="size-3 text-tag-1-foreground" aria-hidden="true" />
+                Fixado até acontecer
+              </h3>
               <ul className="divide-y divide-tag-1-foreground/10">
                 {pinned.map((job, index) => (
                   <JobRow
@@ -219,6 +231,15 @@ export function TasksPanel({
         </div>
       )}
     </Panel>
+
+    <TasksFullscreen
+      open={expanded}
+      onClose={() => setExpanded(false)}
+      pinned={pinned}
+      live={items}
+      now={clock}
+    />
+    </>
   );
 }
 
@@ -346,7 +367,7 @@ function JobRow({
             {state.label}
           </span>
 
-          {pinned && (
+          {pinned && job.status === "insufficient_credits" && (
             <button
               type="button"
               disabled

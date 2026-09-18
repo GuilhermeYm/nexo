@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { errorResponse, logServerError } from "@/lib/api";
+import { getJobDetail } from "@/lib/dashboard/job-history";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { aiJobs, errorReports } from "@/lib/db/schema";
@@ -10,6 +11,51 @@ import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 
 const jobIdSchema = z.string().uuid();
+
+/**
+ * O detalhe de uma tarefa, para a tela cheia de Tarefas.
+ *
+ * Só metadados do que a IA fez — tags, tipo, provedor, tempos, código de
+ * erro — e, na leitura de nota, o resumo atual lido de `note_ai_state`. O
+ * texto da nota nunca sai por aqui. Tarefa de outra conta responde 404, igual
+ * a uma inexistente.
+ */
+export async function GET(
+  request: Request,
+  ctx: RouteContext<"/api/jobs/[id]">
+) {
+  const supabase = await createClient();
+  let userId: string | null = null;
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
+
+    const { id } = await ctx.params;
+    const parsedId = jobIdSchema.safeParse(id);
+    if (!parsedId.success) return errorResponse(400, "Tarefa inválida.");
+
+    const limit = await rateLimit({
+      key: `jobs:detail:${user.id}`,
+      limit: 240,
+      windowMs: 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas consultas seguidas. Aguarde um instante.");
+    }
+
+    const job = await getJobDetail(user.id, parsedId.data);
+    if (!job) return errorResponse(404, "Tarefa não encontrada.");
+
+    return NextResponse.json({ job });
+  } catch (error) {
+    const code = await logServerError("GET /api/jobs/[id]", error, { userId }, request);
+    return errorResponse(500, "Erro ao carregar a tarefa.", code);
+  }
+}
 
 /**
  * Remove do histórico uma tarefa que terminou em falha.

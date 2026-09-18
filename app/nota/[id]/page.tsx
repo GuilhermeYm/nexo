@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { NoteEditor } from "@/components/editor/note-editor";
 import { listWorkspaces } from "@/lib/dashboard/queries";
+import { getNoteAiView } from "@/lib/notes/ai-view";
 import { getOwnedNote } from "@/lib/notes/queries";
 import { createClient } from "@/lib/supabase/server";
 
@@ -33,12 +34,13 @@ export default async function NotaPage(props: PageProps<"/nota/[id]">) {
 
   // 404 e não 403 quando a nota é de outra pessoa: confirmar que ela existe
   // já seria vazar informação.
-  const [note, workspaces] = await Promise.all([
+  const [note, workspaces, ai] = await Promise.all([
     getOwnedNote(user.id, id),
     listWorkspaces(user.id),
+    getNoteAiView(user.id, id),
   ]);
 
   if (!note) notFound();
 
-  return <NoteEditor note={note} workspaces={workspaces} />;
+  return <NoteEditor note={note} workspaces={workspaces} ai={ai} />;
 }

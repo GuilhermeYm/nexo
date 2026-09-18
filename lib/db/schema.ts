@@ -220,6 +220,12 @@ export const noteTags = pgTable(
   {
     noteId: uuid("note_id").notNull(),
     tagId: uuid("tag_id").notNull(),
+    /**
+     * De quem é o vínculo. A IA só acrescenta e só mexe nos dela; os da
+     * pessoa são intocáveis. Só o servidor escreve esta tabela desde 0024 —
+     * sem isso um cliente forjado marcaria a própria tag como `ai`.
+     */
+    source: noteSourceEnum("source").default("user").notNull(),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.noteId, table.tagId] }),
@@ -880,5 +886,93 @@ export const errorReports = pgTable(
     reportedIdx: index("error_reports_reported_idx").on(table.userReportedAt),
     // A varredura da retenção.
     lastSeenIdx: index("error_reports_last_seen_idx").on(table.lastSeenAt),
+  })
+);
+
+/* -------------------------------------------------------------------------
+ * A IA lendo as notas da pessoa — ver drizzle/0024 e docs/IA.md
+ * ---------------------------------------------------------------------- */
+
+export const NOTE_AI_STATES = [
+  "idle",
+  "pending",
+  "running",
+  "done",
+  "skipped",
+  "waiting_configuration",
+  "failed",
+] as const;
+
+export type NoteAiStateValue = (typeof NOTE_AI_STATES)[number];
+
+/**
+ * A contabilidade da IA sobre uma nota, **fora de `notes`**.
+ *
+ * O trigger `notes_updated_at` dispara em todo UPDATE de `notes`. Se o "já
+ * li" ou o resumo morassem lá, cada passada da IA faria a nota subir em
+ * Recentes — e o guarda por timestamp se reclassificaria para sempre. Aqui
+ * `updated_at` não tem trigger: quem muda a linha escreve à mão.
+ */
+export const noteAiState = pgTable(
+  "note_ai_state",
+  {
+    noteId: uuid("note_id").primaryKey().notNull(),
+    userId: uuid("user_id").notNull(),
+    state: text("state").$type<NoteAiStateValue>().default("idle").notNull(),
+    /** Hash do texto normalizado já lido — o guarda contra releitura. */
+    contentHash: text("content_hash"),
+    /** Hash do texto normalizado salvo por último. */
+    dirtyHash: text("dirty_hash"),
+    readChars: integer("read_chars").default(0).notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    summary: text("summary"),
+    /** O hash do texto que `summary` resume. ≠ `dirtyHash` = resumo velho. */
+    summaryHash: text("summary_hash"),
+    /** Sugestão. A IA nunca escreve `notes.type` numa nota da pessoa. */
+    suggestedType: noteTypeEnum("suggested_type"),
+    jobId: uuid("job_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    attempts: integer("attempts").default(0).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    runsDay: date("runs_day"),
+    runsCount: integer("runs_count").default(0).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userIdx: index("note_ai_state_user_idx").on(table.userId),
+    pendingIdx: index("note_ai_state_pending_idx")
+      .on(table.userId, table.updatedAt)
+      .where(sql`${table.state} in ('pending', 'failed', 'running', 'waiting_configuration')`),
+    noteFk: foreignKey({
+      columns: [table.noteId, table.userId],
+      foreignColumns: [notes.id, notes.userId],
+      name: "note_ai_state_note_fk",
+    }).onDelete("cascade"),
+  })
+);
+
+/**
+ * A pessoa tirou uma tag que a IA pôs: a IA não a põe de volta nesta nota.
+ * Tabela à parte para a leitura quente das tags não mudar em lugar nenhum —
+ * só o leitor consulta as rejeições.
+ */
+export const noteTagRejections = pgTable(
+  "note_tag_rejections",
+  {
+    noteId: uuid("note_id").notNull(),
+    tagId: uuid("tag_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.noteId, table.tagId] }),
+    userIdx: index("note_tag_rejections_user_idx").on(table.userId),
+    noteFk: foreignKey({
+      columns: [table.noteId, table.userId],
+      foreignColumns: [notes.id, notes.userId],
+      name: "note_tag_rejections_note_fk",
+    }).onDelete("cascade"),
   })
 );

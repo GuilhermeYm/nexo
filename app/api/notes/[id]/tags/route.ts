@@ -2,9 +2,10 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { rememberTagRejection } from "@/lib/ai/note-reading";
 import { errorResponse, logServerError } from "@/lib/api";
 import { db } from "@/lib/db";
-import { noteTags, notes, tags } from "@/lib/db/schema";
+import { noteTagRejections, noteTags, notes, tags } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -114,12 +115,27 @@ export async function POST(
       })
       .returning({ id: tags.id, name: tags.name, color: tags.color });
 
-    // O vínculo. `onConflictDoNothing` torna o POST idempotente: marcar de
-    // novo não é erro.
+    // O vínculo. Idempotente: marcar de novo não é erro. Se a IA já tinha
+    // posto esta tag, a pessoa marcá-la é adotá-la — a procedência passa a
+    // ser dela, e a IA deixa de poder mexer.
     await db
       .insert(noteTags)
-      .values({ noteId: id, tagId: tag.id })
-      .onConflictDoNothing();
+      .values({ noteId: id, tagId: tag.id, source: "user" })
+      .onConflictDoUpdate({
+        target: [noteTags.noteId, noteTags.tagId],
+        set: { source: "user" },
+      });
+
+    // Quem recusou a tag e depois a quis de volta mudou de ideia.
+    await db
+      .delete(noteTagRejections)
+      .where(
+        and(
+          eq(noteTagRejections.noteId, id),
+          eq(noteTagRejections.tagId, tag.id),
+          eq(noteTagRejections.userId, user.id)
+        )
+      );
 
     await invalidateNoteListCache(user.id);
 
@@ -154,9 +170,13 @@ export async function DELETE(
 
     // Só o vínculo sai. A tag continua existindo — ela pode marcar outras
     // notas, e varrer tag órfã é outra conversa.
-    await db
+    const [removed] = await db
       .delete(noteTags)
-      .where(and(eq(noteTags.noteId, id), eq(noteTags.tagId, tagId)));
+      .where(and(eq(noteTags.noteId, id), eq(noteTags.tagId, tagId)))
+      .returning({ source: noteTags.source });
+
+    // Tirar uma tag que a IA pôs é recado: ela não a põe de volta nesta nota.
+    await rememberTagRejection(user.id, id, tagId, removed?.source ?? null);
 
     await invalidateNoteListCache(user.id);
 

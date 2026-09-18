@@ -14,6 +14,7 @@ import {
 } from "@/lib/db/schema";
 import {
   classifyDocument,
+  MAX_INPUT_CHARS,
   type ClassifyFailure,
 } from "@/lib/ai/classify-document";
 import { hasAudioTranscriptionProvider } from "@/lib/ai/transcribe-audio";
@@ -268,6 +269,8 @@ export async function POST(request: Request) {
       result: classification,
       usedAi,
       failure: classifyFailure,
+      provider: classifyProvider,
+      model: classifyModel,
     } = await classifyDocument({
       text,
       filename: file.name,
@@ -351,6 +354,9 @@ export async function POST(request: Request) {
       errorCode: classifyErrorCode,
       startedAt: classifyStartedAt,
       finishedAt: classifyFinishedAt,
+      provider: classifyProvider,
+      model: classifyModel,
+      inputChars: text.length,
     });
 
     // 4) Upsert das tags do usuário e vínculo com a nota.
@@ -373,7 +379,10 @@ export async function POST(request: Request) {
     if (allTags.length) {
       await db
         .insert(noteTags)
-        .values(allTags.map((tag) => ({ noteId: note.id, tagId: tag.id })));
+        // Procedência `ai`: foi a classificação que escolheu, não a pessoa.
+        .values(
+          allTags.map((tag) => ({ noteId: note.id, tagId: tag.id, source: "ai" as const }))
+        );
     }
 
     // 5) Registra o anexo já vinculado à nota.
@@ -450,6 +459,10 @@ async function recordClassifyJob(options: {
   errorCode: string | null;
   startedAt: Date;
   finishedAt: Date;
+  provider: string | null;
+  model: string | null;
+  /** Tamanho do texto extraído — o que a IA teve para ler. */
+  inputChars: number;
 }): Promise<void> {
   const { classification, usedAi } = options;
   const typeLabel = NOTE_TYPE_LABEL[classification.noteType] ?? "Nota";
@@ -486,6 +499,24 @@ async function recordClassifyJob(options: {
           )
         : null,
       errorCode: options.errorCode,
+      // O que a tela cheia de Tarefas mostra no detalhe. Só metadados: o
+      // resumo e o texto do arquivo nunca entram aqui — `result` é legível
+      // pelo dono via PostgREST, e o conteúdo mora na nota.
+      result: usedAi
+        ? {
+            tags: classification.tags,
+            typeSuggested: classification.noteType,
+            summarized: true,
+            summaryChars: classification.summary.length,
+            inputChars: Math.min(options.inputChars, MAX_INPUT_CHARS),
+            noteChars: options.inputChars,
+            truncated: options.inputChars > MAX_INPUT_CHARS,
+            durationMs:
+              options.finishedAt.getTime() - options.startedAt.getTime(),
+            provider: options.provider,
+            model: options.model,
+          }
+        : null,
       startedAt: options.startedAt,
       finishedAt: options.finishedAt,
     });

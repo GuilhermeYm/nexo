@@ -9,6 +9,8 @@ import {
   aiJobs,
   attachments,
   errorReports,
+  noteAiState,
+  noteTagRejections,
   notes,
   notifications,
   tags,
@@ -136,6 +138,18 @@ export async function POST(request: Request) {
         .where(eq(aiJobs.userId, user.id))
         .returning({ id: aiJobs.id });
 
+      // A contabilidade da IA sobre as notas. Cairia por cascata com
+      // `notes`, mas explícito é o que garante que ninguém a esqueça quando a
+      // cascata mudar — e o resumo é texto derivado do que a pessoa escreveu.
+      const aiStates = await tx
+        .delete(noteAiState)
+        .where(eq(noteAiState.userId, user.id))
+        .returning({ noteId: noteAiState.noteId });
+
+      await tx
+        .delete(noteTagRejections)
+        .where(eq(noteTagRejections.userId, user.id));
+
       // `note_tags` cai por cascata daqui e de `tags`.
       const removedAttachments = await tx
         .delete(attachments)
@@ -179,6 +193,7 @@ export async function POST(request: Request) {
         windows: windows.length,
         connections: connections.length,
         aiJobs: jobs.length,
+        noteAiStates: aiStates.length,
         notifications: removedNotifications.length,
         errorReports: removedErrorReports.length,
       };

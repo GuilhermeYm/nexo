@@ -238,6 +238,11 @@ a {
   --animate-ranking-change: ranking-change 0.42s cubic-bezier(0.16, 1, 0.3, 1)
     both;
   --animate-ranking-flash: ranking-flash 1.1s ease-out both;
+  /* Tarefas em tela cheia: a folha se revela de cima para baixo, como quem
+     puxa o painel até o fim. `backwards` pelo mesmo motivo do
+     `dashboard-enter` — reter o `clip-path` prenderia descendentes `fixed`. */
+  --animate-sheet-open: sheet-open 0.28s cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
   /* O rascunho se revela como uma folha que se abre a partir da captura.
      Só toca quando a pessoa pede para escrever; não é animação de chegada da
      página. */
@@ -403,6 +408,17 @@ a {
   from {
     clip-path: inset(0 0 100% 0 round 1rem);
     opacity: 0;
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 1rem);
+    opacity: 1;
+  }
+}
+
+@keyframes sheet-open {
+  from {
+    clip-path: inset(0 0 55% 0 round 1rem);
+    opacity: 0.4;
   }
   to {
     clip-path: inset(0 0 0 0 round 1rem);
