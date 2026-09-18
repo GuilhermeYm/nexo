@@ -35,7 +35,6 @@ import {
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { ErrorReport } from "@/components/errors/error-report";
-import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { AttachmentWindowBody } from "@/components/workspace/attachment-window-body";
 import { NotePicker } from "@/components/workspace/note-picker";
 import { ToolPropertiesPanel } from "@/components/workspace/tool-properties-panel";
@@ -138,16 +137,8 @@ interface BoardProps {
    * lousa que parece não ter mudado nada.
    */
   focusWindowId: string | null;
-  /** Teto de elementos do plano, só para a mensagem quando ele é atingido. */
+  /** Teto de elementos da lousa, só para a mensagem quando ele é atingido. */
   windowCap: number;
-  /**
-   * Assinar resolveria o teto desta pessoa?
-   *
-   * No Gratuito, sim: o teto que ela encontra é o do plano. No Pro o teto é o
-   * absoluto (anti-abuso, igual para todos), e oferecer o Pro a quem já paga
-   * é a interface não saber com quem está falando.
-   */
-  canUpgrade: boolean;
 }
 
 export function Board({
@@ -156,7 +147,6 @@ export function Board({
   initialConnections,
   focusWindowId,
   windowCap,
-  canUpgrade,
 }: BoardProps) {
   const { viewport, restored, toBoard, zoomTo, panBy, fitTo } =
     useBoardViewport(workspace.id);
@@ -1144,11 +1134,7 @@ export function Board({
   // atrás do constante.
   const notice: BoardNotice | null =
     error ??
-    (workspaceError
-      ? { message: workspaceError, upgrade: false, code: null }
-      : null);
-  // Só quem tem para onde subir recebe o convite; no Pro o teto é o absoluto.
-  const capIsPlanLimit = atCap && canUpgrade;
+    (workspaceError ? { message: workspaceError, code: null } : null);
 
   /**
    * A recuperação é deliberadamente curta: o cartão não vira uma peça fixa
@@ -1784,12 +1770,6 @@ export function Board({
                 {notice ? (
                   <>
                     {notice.message}
-                    {notice.upgrade && (
-                      <>
-                        {" "}
-                        <UpgradeLink />
-                      </>
-                    )}
                     {/* O relato precisa de campo e botões — por isso o
                         contêiner virou `div`: `<div>` dentro de `<p>` faz o
                         navegador fechar o parágrafo sozinho, e o cartão iria
@@ -1810,15 +1790,8 @@ export function Board({
                     </p>
                     <p>{eraseSummary(lastErased)}</p>
                   </>
-                ) : capIsPlanLimit ? (
-                  <>
-                    Esta lousa chegou aos {windowCap} elementos do plano
-                    Gratuito. Feche algo, ou <UpgradeLink label="conheça o Pro" />
-                    , onde a lousa não tem esse teto.
-                  </>
                 ) : (
-                  // Teto absoluto: não é oferta, é proteção — e não há o que
-                  // vender para quem já está no plano mais alto.
+                  // Teto absoluto: não é oferta, é proteção contra abuso.
                   `Esta lousa chegou ao limite de ${windowCap} elementos. Feche algo para abrir espaço.`
                 )}
               </div>

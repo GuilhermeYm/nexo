@@ -3,13 +3,13 @@ import { sql } from "drizzle-orm";
 
 import { agendaTitle } from "@/lib/agenda/day";
 import { getAgendaDay } from "@/lib/agenda/queries";
-import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
+import { errorResponse, logServerError } from "@/lib/api";
 import { db } from "@/lib/db";
 import { notes } from "@/lib/db/schema";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
-import { getNoteCaptureContext } from "@/lib/usage/queries";
+import { getHomeWorkspaceId } from "@/lib/usage/queries";
 import { agendaDateSchema, putAgendaSchema } from "@/lib/validations/agenda";
 
 /**
@@ -109,13 +109,7 @@ export async function PUT(request: Request, ctx: Ctx) {
       return errorResponse(400, "Escreva uma tarefa antes.");
     }
 
-    const context = await getNoteCaptureContext(user.id);
-    if (context.captureQuota && !context.captureQuota.ok) {
-      return planLimitResponse(
-        409,
-        `Você já fez as ${context.captureQuota.limit} capturas deste mês do plano Gratuito. No Pro elas são ilimitadas.`
-      );
-    }
+    const homeWorkspaceId = await getHomeWorkspaceId(user.id);
 
     const tally = countTaskItems(contentRich);
 
@@ -124,7 +118,7 @@ export async function PUT(request: Request, ctx: Ctx) {
       .values({
         // Do token, nunca do corpo.
         userId: user.id,
-        workspaceId: context.homeWorkspaceId,
+        workspaceId: homeWorkspaceId,
         title: agendaTitle(date),
         content,
         contentRich: contentRich ?? null,

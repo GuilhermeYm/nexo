@@ -233,7 +233,8 @@ export async function listAiJobs(
       sql`case
         when ${aiJobs.status} = 'running' then 0
         when ${aiJobs.status} = 'queued' then 1
-        else 2
+        when ${aiJobs.status} = 'waiting_configuration' then 2
+        else 3
       end`,
       desc(aiJobs.createdAt)
     )

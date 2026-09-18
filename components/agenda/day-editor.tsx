@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EditorBubbleMenu } from "@/components/editor/editor-bubble-menu";
 import { ErrorReport } from "@/components/errors/error-report";
-import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { toAgendaDocument } from "@/lib/agenda/scaffold";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
 import {
@@ -13,7 +12,7 @@ import {
   handleAgendaTaskBackspace,
 } from "@/lib/editor/extensions";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
-import { readApiFailure, type ApiFailure } from "@/lib/plan-limit";
+import { readApiFailure, type ApiFailure } from "@/lib/api-failure";
 import { cn } from "@/lib/utils";
 
 /**
@@ -106,9 +105,6 @@ export function DayEditor({
           response,
           "Não foi possível abrir o dia."
         );
-        // Recusa por teto não é erro: o texto continua na tela, sem vermelho,
-        // e o convite aparece ao lado. Ver docs/PLANOS.md.
-        if (parsed.upgrade) blocked.current = true;
         setFailure(parsed);
         return null;
       }
@@ -332,24 +328,17 @@ function AgendaFailure({
 }) {
   return (
     <div
-      className={cn(
-        "flex flex-wrap items-center gap-x-2 gap-y-1 text-xs",
-        failure.upgrade ? "text-muted-foreground" : "text-error"
-      )}
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-error"
       role="alert"
     >
       <span>{failure.message}</span>
-      {failure.upgrade ? (
-        <UpgradeLink />
-      ) : (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="font-medium underline decoration-border underline-offset-4"
-        >
-          Tentar de novo
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="font-medium underline decoration-border underline-offset-4"
+      >
+        Tentar de novo
+      </button>
       {/* Só há código quando houve defeito de verdade — ver docs/ERRORS.md. */}
       {failure.code && (
         <ErrorReport code={failure.code} route="/api/agenda" compact />

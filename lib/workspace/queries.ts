@@ -17,7 +17,6 @@ import {
   attachments,
   noteTags,
   notes,
-  profiles,
   tags,
   workspaceConnections,
   workspaceWindows,
@@ -470,7 +469,7 @@ export async function listOpenableNotes(
   }));
 }
 
-/** Quantas janelas esta lousa já tem — para conferir contra o teto do plano. */
+/** Quantas janelas esta lousa já tem — para conferir contra o teto. */
 export async function countBoardWindows(
   userId: string,
   workspaceId: string
@@ -486,17 +485,6 @@ export async function countBoardWindows(
     );
 
   return row?.total ?? 0;
-}
-
-/** O plano da pessoa, para as rotas resolverem os limites. */
-export async function getUserPlan(userId: string): Promise<string> {
-  const [row] = await db
-    .select({ plan: profiles.plan })
-    .from(profiles)
-    .where(eq(profiles.id, userId))
-    .limit(1);
-
-  return row?.plan ?? "free";
 }
 
 type JoinedRow = {
@@ -539,7 +527,6 @@ function buildExcerpt(content: string | null): string | null {
 }
 
 export interface BoardWriteContext {
-  plan: string;
   windowCount: number;
   /** Próximo `z_index` livre nesta lousa. */
   nextZ: number;
@@ -554,7 +541,8 @@ export interface BoardWriteContext {
  * Antes isto eram quatro idas ao banco em sequência — dono do workspace,
  * plano, contagem para o teto e topo da pilha. Some com o `getUser()` da
  * rota e a criação levava mais de um segundo, tempo suficiente para a pessoa
- * clicar em "Nova nota" e começar a digitar antes de a janela existir.
+ * clicar em "Nova nota" e começar a digitar antes de a janela existir. O
+ * plano saiu junto com a assinatura, e com ele o `join` em `profiles`.
  *
  * Devolve `null` quando o workspace não é desta pessoa — o `join` com
  * `workspaces` filtrado por `user_id` é a própria verificação de dono.
@@ -565,7 +553,6 @@ export async function getBoardWriteContext(
 ): Promise<BoardWriteContext | null> {
   const [row] = await db
     .select({
-      plan: profiles.plan,
       windowCount: sql<number>`(
         select count(*)::int from workspace_windows ww
         where ww.workspace_id = ${workspaces.id} and ww.user_id = ${userId}
@@ -586,11 +573,10 @@ export async function getBoardWriteContext(
       )`,
     })
     .from(workspaces)
-    .innerJoin(profiles, eq(profiles.id, workspaces.userId))
     .where(and(eq(workspaces.id, workspaceId), eq(workspaces.userId, userId)))
     .limit(1);
 
-  return row ? { ...row, plan: row.plan ?? "free" } : null;
+  return row ?? null;
 }
 
 export interface OpenableAttachment {

@@ -55,3 +55,14 @@ undefined/
 /docs
 
 .markdownlint.json
+
+# Gravações e prints de tela para depuração, soltos na raiz. A barra inicial
+# é o que importa: os assets de verdade vivem em `public/` e continuam valendo.
+/*.mp4
+/*.mov
+/*.webm
+/*.mkv
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif

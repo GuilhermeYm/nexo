@@ -21,9 +21,8 @@ import {
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { ErrorReport } from "@/components/errors/error-report";
-import { UpgradeLink } from "@/components/ui/upgrade-link";
 import type { RecentNote } from "@/lib/dashboard/queries";
-import { readApiFailure } from "@/lib/plan-limit";
+import { readApiFailure } from "@/lib/api-failure";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,12 +47,9 @@ type UploadState =
   | { phase: "idle" }
   | { phase: "sending"; filename: string }
   | { phase: "done"; filename: string }
-  // `upgrade` separa o teto do plano do defeito de verdade: um pede assinatura,
-  // o outro pede tentar de novo, e a linha de rodapé diz coisas diferentes.
   | {
       phase: "error";
       message: string;
-      upgrade?: boolean;
       /** Código do relatório, quando o servidor registrou um defeito. */
       code?: string | null;
     };
@@ -167,9 +163,6 @@ export function CommandBar({
         });
 
         if (!response.ok) {
-          // O teto de plano chega com mensagem própria e com a marca
-          // `upgrade` — ela vale mais que qualquer texto genérico, porque
-          // explica que não houve defeito nenhum.
           const failure = await readApiFailure(
             response,
             response.status === 429
@@ -181,13 +174,12 @@ export function CommandBar({
 
           setUpload({
             phase: "error",
-            // O 429 é da nossa proteção contra abuso, não do plano: a
-            // mensagem do servidor ali não ajuda mais que a nossa.
+            // O 429 é da proteção contra abuso: a mensagem do servidor ali
+            // não ajuda mais que a nossa.
             message:
               response.status === 429
                 ? "Limite de envios por hora atingido."
                 : failure.message,
-            upgrade: failure.upgrade,
             code: failure.code,
           });
           return;
@@ -514,27 +506,14 @@ export function CommandBar({
               {upload.filename} chegou. A classificação aparece em Tarefas.
             </span>
           ) : upload.phase === "error" ? (
-            // Teto do plano não é erro, e não se pinta de vermelho: o ícone é
-            // de informação e o texto fica na cor de sempre, seguido do
-            // caminho para os planos. Pintar isso de vermelho ensinaria a
-            // pessoa que ela quebrou alguma coisa.
-            upload.upgrade ? (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Sparkles className="size-3.5 shrink-0" aria-hidden="true" />
-                <span>
-                  {upload.message} <UpgradeLink />
-                </span>
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-error">
-                <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-                {upload.message}
-              </span>
-            )
+            <span className="flex items-center gap-1.5 text-error">
+              <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+              {upload.message}
+            </span>
           ) : (
             <>
-              Busca e envio estão no ar. Pedir à IA chega junto com os créditos
-              — e vai responder sobre workspaces, pastas e tags.
+              Busca e envio estão no ar. Pedir à IA em linguagem natural vem
+              depois — e vai responder sobre workspaces, pastas e tags.
             </>
           )}
         </p>

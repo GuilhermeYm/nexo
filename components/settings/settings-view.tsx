@@ -83,8 +83,8 @@ export function SettingsView({
           </div>
 
           <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-            A sua conta, quanto do plano você já usou neste mês, o que falhou
-            por aqui e as preferências deste navegador.
+            A sua conta, o que você guardou neste mês, o que falhou por aqui
+            e as preferências deste navegador.
           </p>
 
           <Tabs
@@ -109,7 +109,6 @@ export function SettingsView({
                 userName={userName}
                 userEmail={userEmail}
                 memberSince={memberSince}
-                plan={usage.plan}
               />
             </TabsContent>
 
@@ -129,12 +128,6 @@ export function SettingsView({
 
 /* ---------------------------------------------------------------------- */
 
-const PLAN_LABEL: Record<UsageSnapshot["plan"], string> = {
-  free: "Gratuito",
-  pro: "Pro",
-  enterprise: "Enterprise",
-};
-
 const resetDateFormat = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
   month: "long",
@@ -149,197 +142,73 @@ const memberSinceFormat = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
 });
 
+/**
+ * A aba "Uso".
+ *
+ * Eram medidores com barra contra o teto de cada plano. Não existe mais plano
+ * nem teto: cada pessoa sobe a própria instância e paga o próprio Supabase,
+ * então o número aqui é **informação sobre o seu acervo**, não um saldo
+ * correndo para o fim. Uma barra sem limite seria uma barra mentindo sobre
+ * existir um.
+ */
 function UsagePanel({ usage }: { usage: UsageSnapshot }) {
-  const { plan, limits, captures, storageBytes, workspaces, capturesResetAt } =
-    usage;
-  const isFree = plan === "free";
+  const { captures, storageBytes, workspaces, capturesResetAt } = usage;
 
   return (
-    <div className="space-y-8">
-      {/* Plano atual */}
-      <section className="rounded-2xl border border-border bg-secondary/50 p-5">
-        <div className="flex items-center gap-2.5">
-          <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
-            Plano atual
-          </span>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-xs font-semibold",
-              isFree
-                ? "bg-tertiary text-muted-foreground"
-                : "bg-accent text-accent-foreground"
-            )}
-          >
-            {PLAN_LABEL[plan]}
-          </span>
-        </div>
-
-        {isFree ? (
-          <>
-            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              O Pro tira os tetos abaixo: capturas ilimitadas, workspaces sem
-              limite e 20 GB de arquivos.
-            </p>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Link
-                href="/#planos"
-                className="inline-flex h-9 items-center rounded-full bg-accent px-4 text-sm font-semibold text-accent-foreground transition-colors duration-150 hover:bg-accent/90 pointer-coarse:h-11"
-              >
-                Ver planos
-              </Link>
-              <span className="text-xs text-subtle-foreground">
-                O pagamento é liberado quando a integração com o Stripe estiver
-                pronta.
-              </span>
-            </div>
-          </>
-        ) : (
-          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            Sem tetos de captura ou de workspace. O armazenamento vai até 20 GB.
-          </p>
-        )}
-      </section>
-
-      {/* Medidores */}
-      <div className="space-y-6">
-        <Meter
+    <div className="space-y-6">
+      <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
+        <Stat
           label="Capturas neste mês"
-          used={captures.total}
-          limit={limits.capturesPerMonth}
+          value={captures.total.toLocaleString("pt-BR")}
           detail={`${captures.notes} ${
             captures.notes === 1 ? "nota" : "notas"
           } · ${captures.uploads} ${
             captures.uploads === 1 ? "arquivo" : "arquivos"
-          }`}
-          footnote={`Zera em ${resetDateFormat.format(new Date(capturesResetAt))}.`}
-          atLimitHint={
-            isFree
-              ? "Teto do mês atingido. No Pro as capturas são ilimitadas."
-              : undefined
-          }
+          } · zera em ${resetDateFormat.format(new Date(capturesResetAt))}`}
         />
-
-        <Meter
+        <Stat
           label="Armazenamento"
-          used={storageBytes}
-          limit={limits.storageBytes}
-          format={formatBytes}
-          atLimitHint={isFree ? "Cheio. O Pro tem 20 GB." : undefined}
+          value={formatBytes(storageBytes)}
+          detail="Ocupado no bucket do seu projeto Supabase."
         />
-
-        {/* `alarm={false}`: no Gratuito, 1 de 1 é o estado de repouso de toda
-            conta — não é problema nenhum, e não pode nascer vermelho no
-            primeiro dia. A linha diz o que o plano dá, e só. */}
-        <Meter
+        <Stat
           label="Workspaces"
-          used={workspaces}
-          limit={limits.workspaces}
-          alarm={false}
-          footnote={
-            isFree ? "O Gratuito tem um; no Pro são ilimitados." : undefined
-          }
+          value={workspaces.toLocaleString("pt-BR")}
         />
-      </div>
+      </dl>
+
+      <p className="text-xs leading-relaxed text-subtle-foreground">
+        Nenhum destes números tem teto na aplicação. Quem limita é o plano do
+        seu projeto Supabase e o provedor de IA que você configurou.
+      </p>
     </div>
   );
 }
 
-/**
- * Um medidor: rótulo, "quanto de quanto", barra e as linhas de apoio.
- *
- * Quando o plano não impõe teto (`limit === null`) não há barra — uma barra
- * cheia ou vazia ali mentiria sobre existir um limite. No lugar, uma linha
- * dizendo isso.
- */
-function Meter({
+/** Uma linha de número na aba "Uso". */
+function Stat({
   label,
-  used,
-  limit,
+  value,
   detail,
-  footnote,
-  atLimitHint,
-  alarm = true,
-  format = (value) => value.toLocaleString("pt-BR"),
 }: {
   label: string;
-  used: number;
-  limit: number | null;
+  value: string;
   detail?: string;
-  footnote?: string;
-  atLimitHint?: string;
-  /**
-   * Encostar no teto é um problema?
-   *
-   * Para capturas e armazenamento, sim: a próxima ação vai ser recusada. Para
-   * workspaces no Gratuito, não — 1 de 1 é o estado de repouso de toda conta,
-   * e alarmar sobre ele faria a tela nascer vermelha sem nada ter acontecido.
-   */
-  alarm?: boolean;
-  format?: (value: number) => string;
 }) {
-  const unlimited = limit === null;
-  const ratio = unlimited || limit === 0 ? 0 : used / limit;
-  const pct = Math.min(100, Math.round(ratio * 100));
-  const atLimit = alarm && !unlimited && used >= (limit as number);
-
-  const fillColor = atLimit
-    ? "bg-error"
-    : alarm && ratio >= 0.8
-      ? "bg-tag-5-foreground"
-      : "bg-accent";
-
   return (
-    <section>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-medium text-foreground">{label}</h2>
-        <p className="shrink-0 text-sm tabular-nums text-muted-foreground">
-          <span className={atLimit ? "font-semibold text-error" : "text-foreground"}>
-            {format(used)}
-          </span>
-          {unlimited ? (
-            <span className="text-subtle-foreground"> · sem limite</span>
-          ) : (
-            <span className="text-subtle-foreground"> de {format(limit as number)}</span>
-          )}
-        </p>
+    <div className="flex items-baseline justify-between gap-4 bg-secondary/40 px-4 py-3.5">
+      <div className="min-w-0">
+        <dt className="text-sm font-medium text-foreground">{label}</dt>
+        {detail && (
+          <dd className="mt-0.5 text-xs leading-relaxed text-subtle-foreground">
+            {detail}
+          </dd>
+        )}
       </div>
-
-      {unlimited ? (
-        <p className="mt-2 text-xs text-subtle-foreground">
-          Sem limite neste plano.
-        </p>
-      ) : (
-        <div
-          className="mt-2.5 h-2 overflow-hidden rounded-full bg-secondary"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={limit as number}
-          aria-valuenow={Math.min(used, limit as number)}
-          aria-label={label}
-        >
-          <div
-            className={cn(
-              "h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none",
-              fillColor
-            )}
-            // Um fio de barra quando há qualquer uso, para "1 de 50" não sumir.
-            style={{ width: used > 0 ? `${Math.max(pct, 2)}%` : "0%" }}
-          />
-        </div>
-      )}
-
-      {(detail || footnote) && (
-        <p className="mt-2 text-xs text-subtle-foreground">
-          {detail}
-          {detail && footnote ? " · " : ""}
-          {footnote}
-        </p>
-      )}
-
-      {atLimit && atLimitHint && (
-        <p className="mt-1.5 text-xs font-medium text-error">{atLimitHint}</p>
-      )}
-    </section>
+      <dd className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+        {value}
+      </dd>
+    </div>
   );
 }
 
@@ -350,18 +219,15 @@ function AccountPanel({
   userName,
   userEmail,
   memberSince,
-  plan,
 }: {
   userId: string;
   userName: string | null;
   userEmail: string;
   memberSince: string | null;
-  plan: UsageSnapshot["plan"];
 }) {
   const rows: { label: string; value: string }[] = [
     { label: "Nome", value: userName?.trim() || "—" },
     { label: "E-mail", value: userEmail || "—" },
-    { label: "Plano", value: PLAN_LABEL[plan] },
     {
       label: "Membro desde",
       value: memberSince

@@ -1,9 +1,11 @@
+import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
+import { errorResponse, logServerError } from "@/lib/api";
+import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { notes } from "@/lib/db/schema";
+import { notes, workspaceWindows } from "@/lib/db/schema";
 import {
   countTaskItems,
   richDocumentSchema,
@@ -11,7 +13,7 @@ import {
 } from "@/lib/editor/document";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
-import { getNoteCaptureContext } from "@/lib/usage/queries";
+import { getHomeWorkspaceId } from "@/lib/usage/queries";
 import { NOTE_TYPES } from "@/lib/notes/list";
 import { listOwnedNotes } from "@/lib/notes/queries";
 import {
@@ -45,6 +47,13 @@ const listNotesSchema = z.object({
   type: z.enum(["all", ...NOTE_TYPES]).default("all"),
   sort: z.enum(["updated", "created", "title"]).default("updated"),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
+});
+
+const deleteNotesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(100).refine(
+    (ids) => new Set(ids).size === ids.length,
+    "As notas selecionadas são inválidas."
+  ),
 });
 
 export async function GET(request: Request) {
@@ -155,18 +164,7 @@ export async function POST(request: Request) {
     // sido excluído. Uma nota com `workspace_id` nulo continua achável pela
     // busca, mas não aparece em lousa nenhuma — é assim que conteúdo some de
     // vista sem ter sido apagado.
-    const context = await getNoteCaptureContext(user.id);
-
-    // Teto de capturas do mês. A alavanca que separa Gratuito de Pro é
-    // limite, e este é um dos que a página de planos promete: sem a checagem
-    // aqui, "50 capturas por mês" seria decoração.
-    if (context.captureQuota && !context.captureQuota.ok) {
-      return planLimitResponse(
-        409,
-        `Você já fez as ${context.captureQuota.limit} capturas deste mês do plano Gratuito. No Pro elas são ilimitadas.`
-      );
-    }
-
+    const homeWorkspaceId = await getHomeWorkspaceId(user.id);
     const tally =
       input.contentRich !== undefined
         ? countTaskItems(input.contentRich)
@@ -177,7 +175,7 @@ export async function POST(request: Request) {
       .values({
         // Do token, nunca do corpo.
         userId: user.id,
-        workspaceId: context.homeWorkspaceId,
+        workspaceId: homeWorkspaceId,
         title: input.title || firstLine(content) || "Sem título",
         content,
         contentRich: input.contentRich ?? null,
@@ -196,6 +194,92 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = await logServerError("POST /api/notes", error, { userId }, request);
     return errorResponse(500, "Erro ao guardar a nota.", code);
+  }
+}
+
+/**
+ * Exclui, de uma vez, as notas selecionadas no acervo.
+ *
+ * A exclusão continua sendo lógica, como em `DELETE /api/notes/[id]`. O
+ * escopo inclui o dono e `task_date IS NULL`: uma chamada forjada não pode
+ * transformar as listas diárias da Agenda em itens apagáveis do acervo.
+ */
+export async function DELETE(request: Request) {
+  const supabase = await createClient();
+  let userId: string | null = null;
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
+
+    const limit = await rateLimit({
+      key: `notes:delete-batch:${user.id}`,
+      limit: 30,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas exclusões seguidas. Aguarde um pouco.");
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = deleteNotesSchema.safeParse(body);
+    if (!parsed.success) {
+      return errorResponse(
+        400,
+        parsed.error.issues[0]?.message ?? "Notas selecionadas inválidas."
+      );
+    }
+
+    const ids = parsed.data.ids;
+    const removed = await db.transaction(async (tx) => {
+      const removed = await tx
+        .update(notes)
+        .set({ status: "deleted", updatedAt: new Date() })
+        .where(
+          and(
+            inArray(notes.id, ids),
+            eq(notes.userId, user.id),
+            ne(notes.status, "deleted"),
+            isNull(notes.taskDate)
+          )
+        )
+        .returning({ id: notes.id, title: notes.title });
+      // Janelas são apenas a apresentação da nota; deixá-las abertas para
+      // conteúdo apagado produziria uma lousa inconsistente.
+      await tx
+        .delete(workspaceWindows)
+        .where(
+          and(
+            inArray(workspaceWindows.noteId, ids),
+            eq(workspaceWindows.userId, user.id)
+          )
+        );
+      return removed;
+    });
+
+    if (removed.length === 0) return errorResponse(404, "Nenhuma nota encontrada.");
+
+    await Promise.all(
+      removed.map((note) =>
+        writeAuditLog({
+          action: "DELETE",
+          tableName: "notes",
+          recordId: note.id,
+          userId: user.id,
+          oldData: { title: note.title },
+          request,
+        })
+      )
+    );
+    await invalidateNoteListCache(user.id);
+
+    return NextResponse.json({ ok: true, deleted: removed.length });
+  } catch (error) {
+    const code = await logServerError("DELETE /api/notes", error, { userId }, request);
+    return errorResponse(500, "Erro ao excluir as notas.", code);
   }
 }
 

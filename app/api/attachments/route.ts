@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { createClient } from "@/lib/supabase/server";
@@ -16,19 +16,24 @@ import {
   classifyDocument,
   type ClassifyFailure,
 } from "@/lib/ai/classify-document";
+import { hasAudioTranscriptionProvider } from "@/lib/ai/transcribe-audio";
+import { processAudioTranscription } from "@/lib/ai/process-audio-transcription";
 import { redactAndTrim } from "@/lib/errors/redact";
 import { reportError } from "@/lib/errors/report";
 import { rateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit";
-import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
-import { formatBytes } from "@/lib/utils";
-import { getUploadQuotaContext } from "@/lib/usage/queries";
+import { errorResponse, logServerError } from "@/lib/api";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { matchesSignature, readSignature } from "@/lib/validations/file-signature";
 
 const BUCKET = "files";
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — igual ao limite do bucket
 const PDF_PARSE_TIMEOUT_MS = 15_000;
+
+// O callback de `after()` da transcrição precisa de tempo depois do 201. Em
+// VPS/Node o Next termina callbacks pendentes num shutdown gracioso; plataformas
+// que entendem esta configuração podem estender o limite da rota para ele.
+export const maxDuration = 75;
 
 type AttachmentType = "pdf" | "document" | "audio";
 
@@ -142,29 +147,6 @@ export async function POST(request: Request) {
       return errorResponse(413, "Arquivo maior que 25MB.");
     }
 
-    // Tetos do plano, antes de gastar upload e classificação num arquivo que
-    // não vai poder ficar. Os dois são promessa da página de planos: "50
-    // capturas por mês" e "200 MB de arquivos" no Gratuito.
-    //
-    // `planLimitResponse` e não `errorResponse`: bater no teto não é defeito,
-    // e a interface precisa saber disso para oferecer o Pro em vez de mandar
-    // a pessoa tentar de novo.
-    const quota = await getUploadQuotaContext(user.id, file.size);
-
-    if (quota.captures && !quota.captures.ok) {
-      return planLimitResponse(
-        409,
-        `Você já fez as ${quota.captures.limit} capturas deste mês do plano Gratuito. No Pro elas são ilimitadas.`
-      );
-    }
-
-    if (quota.storage && !quota.storage.ok) {
-      return planLimitResponse(
-        413,
-        `Os ${formatBytes(quota.storage.limit)} de arquivos do plano Gratuito estão cheios. O Pro tem 20 GB.`
-      );
-    }
-
     // O MIME vem do cliente — confere se o conteúdo bate com o declarado.
     const signature = await readSignature(file);
     if (!matchesSignature(file.type, signature)) {
@@ -189,6 +171,93 @@ export async function POST(request: Request) {
       );
       uploadedPath = null;
       return errorResponse(500, "Não foi possível salvar o arquivo.", code);
+    }
+
+    // Áudio não tem texto até ser transcrito. Criamos o conteúdo primeiro e
+    // deixamos o worker terminar depois da resposta para não prender o envio.
+    if (attachmentType === "audio") {
+      const title = file.name.replace(/\.[^.]+$/, "").slice(0, 200) || "Áudio";
+      const providerReady = hasAudioTranscriptionProvider();
+      const [note] = await db
+        .insert(notes)
+        .values({
+          userId: user.id,
+          title,
+          content: providerReady
+            ? "Áudio aguardando transcrição."
+            : "Áudio aguardando a configuração de uma chave de IA para ser transcrito.",
+          type: "document",
+          source: "user",
+          metadata: {
+            filename: file.name,
+            mimeType: file.type,
+            sizeBytes: file.size,
+            transcription: providerReady ? "queued" : "waiting_configuration",
+          },
+        })
+        .returning();
+
+      const [attachment] = await db
+        .insert(attachments)
+        .values({
+          userId: user.id,
+          noteId: note.id,
+          type: attachmentType,
+          storagePath: uploadedPath,
+          filename: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+        })
+        .returning();
+
+      const [job] = await db
+        .insert(aiJobs)
+        .values({
+          userId: user.id,
+          noteId: note.id,
+          kind: "transcribe",
+          status: providerReady ? "queued" : "waiting_configuration",
+          label: providerReady
+            ? `Transcrevendo ${file.name}`
+            : `Transcrição aguardando IA: ${file.name}`,
+          detail: providerReady
+            ? "O áudio está guardado; a transcrição e a classificação aparecem nesta nota quando terminarem."
+            : "Configure GROQ_API_KEY ou OPENAI_API_KEY nesta instância e envie um novo áudio para transcrevê-lo.",
+        })
+        .returning({ id: aiJobs.id });
+
+      await writeAuditLog({
+        action: "CREATE",
+        tableName: "attachments",
+        recordId: attachment.id,
+        userId: user.id,
+        newData: {
+          filename: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+        },
+        request,
+      });
+      await invalidateNoteListCache(user.id);
+
+      if (providerReady) {
+        after(async function runAudioTranscription() {
+          await processAudioTranscription({
+            file,
+            filename: file.name,
+            mimeType: file.type,
+            userId: user.id,
+            noteId: note.id,
+            jobId: job.id,
+            request,
+          });
+        });
+      }
+
+      return NextResponse.json(
+        { note, attachment, tags: [], aiClassified: false },
+        { status: 201 }
+      );
     }
 
     // 2) Extrai texto e classifica (Groq ou OpenAI se houver chave; stub

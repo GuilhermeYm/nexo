@@ -2,10 +2,11 @@ import Link from "next/link";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { NEXO_GITHUB_URL } from "@/lib/site";
 
 interface FooterColumn {
   title: string;
-  links: { label: string; href: string }[];
+  links: { label: string; href: string; external?: boolean }[];
 }
 
 const FOOTER_COLUMNS: FooterColumn[] = [
@@ -14,15 +15,14 @@ const FOOTER_COLUMNS: FooterColumn[] = [
     links: [
       { label: "Funcionalidades", href: "#features" },
       { label: "Como funciona", href: "#como-funciona" },
-      { label: "Planos", href: "#planos" },
+      { label: "Instalar", href: "#instalar" },
       { label: "Perguntas frequentes", href: "#faq" },
     ],
   },
   {
-    title: "Conta",
+    title: "Código",
     links: [
-      { label: "Entrar", href: "/login" },
-      { label: "Criar conta", href: "/registro" },
+      { label: "Repositório no GitHub", href: NEXO_GITHUB_URL, external: true },
     ],
   },
   {
@@ -42,10 +42,11 @@ const FOOTER_COLUMNS: FooterColumn[] = [
  * de baixo é a parte burocrática, em tipo menor, porque ninguém chega aqui
  * procurando por ela.
  *
- * Os ícones de GitHub e X saíram: apontavam para as homepages dos serviços, e
- * não para perfis da Nexo. Um ícone social que não leva ao perfil é um beco
- * sem saída disfarçado de prova de existência — quando os perfis existirem,
- * eles voltam com os endereços certos.
+ * A coluna "Conta" (Entrar/Criar conta) saiu: não existe mais uma instância
+ * central para se cadastrar. `/login` e `/registro` seguem no código, para
+ * quem sobe a própria instância — só não são mais anunciados na landing.
+ * O ícone de GitHub também não volta como ícone: sem um brand-icon
+ * instalado, o link de texto na coluna "Código" é a versão honesta.
  */
 export function Footer() {
   const year = new Date().getFullYear();
@@ -72,7 +73,13 @@ export function Footer() {
             </p>
 
             <Button asChild className="mt-7">
-              <Link href="/registro">Começar gratuitamente</Link>
+              <a
+                href={NEXO_GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Ver no GitHub
+              </a>
             </Button>
           </div>
 
@@ -86,16 +93,29 @@ export function Footer() {
                   {column.title}
                 </h3>
                 <ul className="mt-3 flex flex-col gap-1">
-                  {column.links.map((link) => (
-                    <li key={link.href}>
-                      <Link
-                        href={link.href}
-                        className="inline-block py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground pointer-coarse:py-2.5"
-                      >
-                        {link.label}
-                      </Link>
-                    </li>
-                  ))}
+                  {column.links.map((link) =>
+                    link.external ? (
+                      <li key={link.href}>
+                        <a
+                          href={link.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground pointer-coarse:py-2.5"
+                        >
+                          {link.label}
+                        </a>
+                      </li>
+                    ) : (
+                      <li key={link.href}>
+                        <Link
+                          href={link.href}
+                          className="inline-block py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground pointer-coarse:py-2.5"
+                        >
+                          {link.label}
+                        </Link>
+                      </li>
+                    )
+                  )}
                 </ul>
               </div>
             ))}

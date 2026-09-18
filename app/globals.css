@@ -221,9 +221,18 @@ a {
   --animate-row-in: row-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-row-flash: row-flash 1.2s ease-out both;
   /* O dashboard abre como uma mesa que se organiza: cada bloco se revela em
-     sequência curta, e os itens da lista acompanham o painel ao qual pertencem. */
+     sequência curta, e os itens da lista acompanham o painel ao qual pertencem.
+
+     `backwards` e não `both`: o quadro final é igual ao estado natural do
+     elemento, então reter o `forwards` não muda nada na tela — só deixa
+     `transform` e `clip-path` aplicados para sempre. Qualquer um dos dois
+     vira containing block para descendente `fixed` (foi o que prendeu a tela
+     cheia do rascunho dentro do bloco) e promove a uma camada recortada, e
+     uma dúzia dessas camadas atrás de uma sobreposição dá faixa sem
+     repintar. O `backwards` é o que importava: ele segura o estado inicial
+     durante o `animation-delay`, sem piscar. */
   --animate-dashboard-enter: dashboard-enter 0.46s cubic-bezier(0.16, 1, 0.3, 1)
-    both;
+    backwards;
   /* Uma etiqueta que muda de posição ganhou mais associações — a revelação
      curta identifica a alteração sem coreografar o retrato inicial. */
   --animate-ranking-change: ranking-change 0.42s cubic-bezier(0.16, 1, 0.3, 1)

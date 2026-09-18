@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "audit": "node --env-file=.env scripts/audit-security.mjs",
+    "db:migrate": "node --env-file=.env scripts/apply-migration.mjs",
     "notify": "node --env-file=.env scripts/notify.mjs",
     "errors": "node --env-file=.env scripts/errors.mjs",
     "shots": "node scripts/shots.mjs",
@@ -19,7 +20,6 @@
     "shots:eraser": "node --env-file=.env scripts/shot-eraser.mjs",
     "shots:links": "node --env-file=.env scripts/shot-connections.mjs",
     "shots:entrada": "node --env-file=.env scripts/shot-inbox.mjs",
-    "shots:planos": "node --env-file=.env scripts/shot-plans.mjs",
     "shots:erros": "node --env-file=.env scripts/shot-errors.mjs",
     "shots:agenda": "node --env-file=.env scripts/shot-agenda.mjs"
   },

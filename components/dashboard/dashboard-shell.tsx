@@ -12,13 +12,12 @@ import { Sidebar } from "@/components/dashboard/sidebar";
 import { TasksPanel } from "@/components/dashboard/tasks-panel";
 import { TodayTasks } from "@/components/dashboard/today-tasks";
 import { TopTags } from "@/components/dashboard/top-tags";
-import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { HOME_TAB, useOpenTabs } from "@/hooks/use-open-tabs";
 import { usePersistedFlag } from "@/hooks/use-persisted-flag";
 import { firstName, greetingFor } from "@/lib/dashboard/format";
 import { ErrorReport } from "@/components/errors/error-report";
 import { isErrorCode } from "@/lib/errors/code";
-import { readApiFailure } from "@/lib/plan-limit";
+import { readApiFailure } from "@/lib/api-failure";
 import type {
   AiJobItem,
   RecentNote,
@@ -154,16 +153,6 @@ export function DashboardShell({
             : "Não foi possível criar."
         );
 
-        // O teto do plano vai para o aviso de rodapé, não para a barra de
-        // abas: ali cabe uma frase inteira e o caminho para os planos, e a
-        // faixa das abas tem 12px de altura útil ao lado do campo. O campo de
-        // nome fecha junto, porque insistir nele não vai mudar a resposta.
-        if (failure.upgrade) {
-          setCreating(false);
-          setNotice({ message: failure.message, upgrade: true });
-          return;
-        }
-
         setCreateError(failure.message);
         return;
       }
@@ -181,26 +170,19 @@ export function DashboardShell({
 
   /**
    * O aviso de rodapé.
-   *
-   * `upgrade` muda duas coisas além do texto: o aviso ganha o caminho para os
-   * planos e **para de sumir sozinho**. Um convite que desaparece em 3,6s é um
-   * link que ninguém alcança — e um aviso com link precisa aceitar ponteiro,
-   * o que o contêiner (`pointer-events-none`, para não cobrir a tela) não dá
-   * de graça.
    */
   const [notice, setNotice] = useState<{
     message: string;
-    upgrade?: boolean;
     /**
-     * O código do relatório de erro, quando houve defeito. Como o `upgrade`,
-     * ele muda o aviso de pílula para bloco e **desliga o sumiço sozinho**:
-     * um código que desaparece em 3,6s é um código que ninguém anota.
+     * O código do relatório de erro, quando houve defeito. Ele muda o aviso
+     * de pílula para bloco e **desliga o sumiço sozinho**: um código que
+     * desaparece em 3,6s é um código que ninguém anota.
      */
     code?: string | null;
   } | null>(null);
 
   useEffect(() => {
-    if (!notice || notice.upgrade || notice.code) return;
+    if (!notice || notice.code) return;
     const timer = setTimeout(() => setNotice(null), 3600);
     return () => clearTimeout(timer);
   }, [notice]);
@@ -580,24 +562,17 @@ export function DashboardShell({
             "flex max-w-[min(38rem,100%)] items-start gap-2 border border-border bg-background px-4 py-2 text-sm text-foreground",
             "shadow-[0_8px_28px_-10px] shadow-black/35",
             "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-            // O aviso do plano — e o de erro com código — carregam link, campo
-            // e um "×", então viram um bloco com cantos suaves; o aviso comum
-            // continua a pílula de sempre.
-            notice?.upgrade || notice?.code ? "rounded-2xl" : "rounded-full",
+            // O aviso de erro com código carrega campo e um "×", então vira
+            // um bloco com cantos suaves; o aviso comum continua a pílula.
+            notice?.code ? "rounded-2xl" : "rounded-full",
             notice
               ? "pointer-events-auto translate-y-0 opacity-100"
               : "pointer-events-none translate-y-2 opacity-0"
           )}
         >
           <div className="min-w-0">
-            <p className={cn(notice?.upgrade || notice?.code ? "" : "leading-6")}>
+            <p className={cn(notice?.code ? "" : "leading-6")}>
               {notice?.message ?? ""}
-              {notice?.upgrade && (
-                <>
-                  {" "}
-                  <UpgradeLink />
-                </>
-              )}
             </p>
 
             {notice?.code && (
@@ -610,8 +585,8 @@ export function DashboardShell({
             )}
           </div>
 
-          {/* Sem auto-dismiss, os dois avisos que ficam precisam de saída. */}
-          {(notice?.upgrade || notice?.code) && (
+          {/* Sem auto-dismiss, o aviso que fica precisa de saída. */}
+          {notice?.code && (
             <button
               type="button"
               onClick={() => setNotice(null)}

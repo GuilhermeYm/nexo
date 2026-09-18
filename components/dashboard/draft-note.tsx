@@ -3,12 +3,12 @@
 import { LoaderCircle, Maximize2, Minimize2, PenLine, Trash2, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { UpgradeLink } from "@/components/ui/upgrade-link";
 import { useHideDraft } from "@/hooks/use-hide-draft";
 import { useLocalDraft } from "@/hooks/use-local-draft";
 import { richTextToPlain } from "@/lib/editor/document";
-import { readApiFailure } from "@/lib/plan-limit";
+import { readApiFailure } from "@/lib/api-failure";
 import { cn } from "@/lib/utils";
 
 /**
@@ -66,12 +66,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
   // até a vista no render seguinte — o convite veio de baixo da dobra.
   const rootRef = useRef<HTMLElement | null>(null);
   const scrollOnOpen = useRef(false);
-  // `upgrade` distingue o teto do plano de uma falha: no primeiro caso o
-  // rascunho não foi guardado e **não adianta** tentar de novo neste mês.
-  const [error, setError] = useState<{
-    message: string;
-    upgrade: boolean;
-  } | null>(null);
+  const [error, setError] = useState<{ message: string } | null>(null);
   const [armed, setArmed] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -187,10 +182,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
       setExpanded(false);
       onSaved(note.title);
     } catch {
-      setError({
-        message: "Sem conexão. O rascunho continua aqui.",
-        upgrade: false,
-      });
+      setError({ message: "Sem conexão. O rascunho continua aqui." });
     } finally {
       setSaving(false);
     }
@@ -228,7 +220,7 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
     );
   }
 
-  return (
+  const section = (
     <section
       ref={(el) => {
         rootRef.current = el;
@@ -359,24 +351,15 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
           </button>
         )}
 
-        {/* O teto do plano não trunca: a frase inteira precisa ser lida, e o
-            caminho para os planos vem depois dela. Os demais avisos continuam
-            numa linha só — eles cabem. */}
         <p
           role="status"
           className={cn(
-            "basis-full text-xs leading-relaxed sm:ml-auto sm:basis-auto sm:text-right",
-            error?.upgrade
-              ? "text-muted-foreground"
-              : error
-                ? "truncate text-error"
-                : "truncate text-subtle-foreground"
+            "basis-full truncate text-xs leading-relaxed sm:ml-auto sm:basis-auto sm:text-right",
+            error ? "text-error" : "text-subtle-foreground"
           )}
         >
           {error ? (
-            <>
-              {error.message} {error.upgrade && <UpgradeLink />}
-            </>
+            error.message
           ) : filled ? (
             "Guardado neste navegador."
           ) : (
@@ -386,4 +369,15 @@ export function DraftNote({ onSaved, registerOpen }: DraftNoteProps) {
       </div>
     </section>
   );
+
+  // Tela cheia sai por portal, direto no `body`: o pai anima a entrada do
+  // dashboard com `transform`/`clip-path` que terminam aplicados (fill-mode
+  // `both`), e qualquer um dos dois vira containing block para `fixed` —
+  // sem o portal, o "tela cheia" fica preso à área do bloco animado em vez
+  // de cobrir o viewport, e o resto da tela continua visível por trás.
+  if (expanded && typeof document !== "undefined") {
+    return createPortal(section, document.body);
+  }
+
+  return section;
 }

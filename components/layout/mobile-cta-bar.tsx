@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { NEXO_GITHUB_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,7 +14,9 @@ import { cn } from "@/lib/utils";
  * uns 10.000px: quem rolou até o meio ficava sem nenhuma saída além de rolar
  * de volta. Em vez de um menu hambúrguer (que resolve navegação e não resolve
  * conversão), a barra carrega as duas coisas que importam numa superfície de
- * persuasão: o preço e o botão.
+ * persuasão: o atalho para o passo seguinte e o botão. Carregava o preço no
+ * lugar do atalho; não há mais preço, e quem responde "e agora?" hoje são os
+ * passos da instalação.
  *
  * Ela aparece só depois do hero — enquanto o CTA original está na tela, um
  * segundo CTA fixo seria repetição ocupando 15% de um aparelho de 390px.
@@ -43,13 +46,15 @@ export function MobileCtaBar() {
     >
       <div className="flex items-center gap-3 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <Link
-          href="#planos"
+          href="#instalar"
           className="shrink-0 px-2 py-3 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
         >
-          Planos
+          Instalar
         </Link>
         <Button asChild className="flex-1">
-          <Link href="/registro">Começar gratuitamente</Link>
+          <a href={NEXO_GITHUB_URL} target="_blank" rel="noopener noreferrer">
+            Ver no GitHub
+          </a>
         </Button>
       </div>
     </div>

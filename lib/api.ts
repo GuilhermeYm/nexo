@@ -9,8 +9,7 @@ import { reportError } from "@/lib/errors/report";
  * servidor viu. Ele vai como **campo próprio** do JSON, e não só embutido na
  * frase: quem exibe precisa poder mostrar o código separado (copiável, com um
  * botão "Reportar" ao lado), e extrair isso de uma frase em português é
- * garantir que a interface quebre no dia em que alguém reescrever o texto —
- * exatamente o argumento que já vale para a marca `upgrade`.
+ * garantir que a interface quebre no dia em que alguém reescrever o texto.
  *
  * O código é opaco de propósito: quem o tem não ganha nada com ele. É seguro
  * exibir, ditar por telefone e colar num e-mail.
@@ -20,33 +19,6 @@ export function errorResponse(status: number, message: string, code?: string) {
     code ? { error: message, code } : { error: message },
     { status }
   );
-}
-
-/**
- * Recusa por **teto de plano** — não por erro.
- *
- * A diferença importa para quem está do outro lado. "Não foi possível enviar"
- * é um defeito: a pessoa tenta de novo, e falha de novo, sem saber por quê.
- * Bater no teto do Gratuito não é defeito nenhum — é o produto funcionando
- * como anunciado, e a resposta certa não é tentar de novo, é assinar (ou
- * esperar o mês virar).
- *
- * Por isso a marca `upgrade: true` vai no corpo: ela é o que permite a
- * interface trocar a cara de erro pelo convite, com o caminho para os planos.
- * O texto continua vindo pronto do servidor, porque é ele quem sabe qual teto
- * estourou e qual é o número dele.
- *
- * O status continua sendo o que o caso pede (409 para "não cabe mais", 413
- * para "não cabe este arquivo"): a marca informa a interface, não substitui o
- * protocolo.
- *
- * **Teto não vira relatório de erro.** Uma resposta daqui nunca passa por
- * `logServerError`, e é por isso que ela não tem código: `error_reports`
- * guarda defeito, e encher a tabela de recusas previstas afogaria justamente
- * o que ela existe para deixar visível.
- */
-export function planLimitResponse(status: number, message: string) {
-  return NextResponse.json({ error: message, upgrade: true }, { status });
 }
 
 /**

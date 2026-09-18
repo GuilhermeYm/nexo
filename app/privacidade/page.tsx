@@ -5,109 +5,135 @@ import { LegalDocument } from "@/components/layout/legal-document";
 export const metadata: Metadata = {
   title: "Privacidade — Nexo",
   description:
-    "Que dados a Nexo guarda, por que guarda, com quem compartilha e como você exerce seus direitos sob a LGPD.",
+    "Nexo é software auto-hospedado: este documento explica o que a aplicação guarda e para onde envia dados, e serve de ponto de partida para quem sobe a própria instância.",
 };
 
 export default function PrivacidadePage() {
   return (
     <LegalDocument
       title="Privacidade"
-      summary="A Nexo vende a ideia de que privacidade é estrutura, não selo. Esta página descreve a estrutura — o que é guardado, onde, por quanto tempo e quem alcança."
-      updatedAt="29 de agosto de 2026"
+      summary="Nexo não é um serviço que alguém opera por você — é software que você sobe com as suas próprias chaves. Esta página explica o que a aplicação guarda e para onde ela envia dados, e serve de modelo para quem for disponibilizar a própria instância a outras pessoas."
+      updatedAt="17 de setembro de 2026"
     >
       <section>
-        <h2>1. Quem trata os seus dados</h2>
+        <h2>1. O que este documento é (e o que não é)</h2>
         <p>
-          A Nexo é a controladora dos dados descritos abaixo, nos termos da Lei
-          Geral de Proteção de Dados (Lei 13.709/2018). Contato para qualquer
-          assunto desta página:{" "}
-          <a href="mailto:contato@nexo.app">contato@nexo.app</a>.
+          O Nexo é distribuído como código aberto para você rodar na sua
+          própria infraestrutura: o seu projeto Supabase, e as suas próprias
+          chaves de IA e de pagamento, quando aplicável. Não existe um servidor
+          central operado pelas pessoas que mantêm este projeto onde o seu
+          conteúdo ou o de terceiros seja processado — ele fica na instância
+          que você configurou.
+        </p>
+        <p>
+          Se você é a única pessoa usando a sua instância, você é ao mesmo
+          tempo quem trata os dados e quem os fornece — este documento
+          descreve, nesse caso, apenas o comportamento do software.
+        </p>
+        <p>
+          Se você disponibiliza a sua instância para outras pessoas usarem
+          (uma equipe, a família, um produto seu), <strong>você</strong> passa
+          a ser quem responde pelos dados delas perante a Lei Geral de
+          Proteção de Dados (Lei 13.709/2018) ou legislação equivalente. Este
+          texto é um ponto de partida para a sua própria política — troque o
+          e-mail de contato abaixo pelo seu, e revise com alguém que conheça a
+          lei que se aplica a você antes de publicar.
         </p>
       </section>
 
       <section>
-        <h2>2. O que guardamos</h2>
+        <h2>2. O que a aplicação guarda</h2>
+        <p>Tudo abaixo fica no projeto Supabase que você mesmo configurou:</p>
         <ul>
           <li>
             <strong>Dados de conta:</strong> e-mail, nome e foto de perfil, se
-            você fornecer.
+            fornecidos.
           </li>
           <li>
-            <strong>Seu conteúdo:</strong> as notas, tarefas, ideias e arquivos
-            que você envia, além dos resumos, tipos e tags que a Nexo gera a
-            partir deles.
+            <strong>O conteúdo:</strong> as notas, tarefas, ideias e arquivos
+            enviados, além dos resumos, tipos e tags que a classificação
+            automática gera a partir deles.
           </li>
           <li>
-            <strong>Dados de assinatura:</strong> plano, status e período
-            vigente. Os dados do cartão ficam com a Stripe — nós nunca os vemos.
+            <strong>Dados de assinatura</strong>, só se o operador da instância
+            tiver configurado links de cobrança: plano, status e período
+            vigente. Os dados do cartão nunca passam pela aplicação — ficam
+            com a Stripe.
           </li>
           <li>
             <strong>Registros técnicos:</strong> data, endereço IP e navegador
             associados a alterações e exclusões de dados sensíveis, guardados
-            numa trilha de auditoria para investigar acessos indevidos.
+            numa trilha de auditoria para investigar acessos indevidos naquela
+            instância.
           </li>
         </ul>
       </section>
 
       <section>
-        <h2>3. Para que usamos, e com que base legal</h2>
+        <h2>3. Para que serve cada dado</h2>
         <ul>
           <li>
-            <strong>Operar o serviço</strong> — guardar, classificar e devolver
-            o seu conteúdo. Base: execução do contrato.
+            <strong>Operar a aplicação</strong> — guardar, classificar e
+            devolver o conteúdo enviado.
           </li>
           <li>
-            <strong>Cobrar a assinatura</strong> — Base: execução do contrato.
+            <strong>Cobrança</strong>, se o operador da instância habilitou
+            pagamento.
           </li>
           <li>
             <strong>Segurança e auditoria</strong> — detectar e investigar
-            acesso indevido. Base: legítimo interesse.
+            acesso indevido dentro daquela instância.
           </li>
           <li>
-            <strong>Comunicação de serviço</strong> — avisos sobre a conta,
-            cobrança e mudanças nestes documentos. Base: execução do contrato.
+            <strong>Comunicação de serviço</strong> — avisos sobre conta,
+            cobrança ou mudanças neste documento, quando o operador enviar
+            esse tipo de aviso.
           </li>
         </ul>
         <p>
-          Não vendemos os seus dados, e não os usamos para publicidade
-          direcionada.
+          O software em si não vende dados, não os usa para publicidade
+          direcionada e não os usa para treinar modelo nenhum.
         </p>
       </section>
 
       <section>
-        <h2>4. Com quem compartilhamos</h2>
+        <h2>4. Para onde os dados saem — e só quando você configura</h2>
         <p>
-          Somente com os fornecedores necessários para o serviço funcionar, e
-          apenas com o que cada um precisa:
+          Nada disto acontece por padrão: cada item abaixo depende de uma
+          chave que o operador da instância preencheu no próprio{" "}
+          <code>.env</code>. Sem a chave, aquele envio simplesmente não
+          acontece.
         </p>
         <ul>
           <li>
             <strong>Supabase</strong> — banco de dados, autenticação e
-            armazenamento de arquivos.
+            armazenamento de arquivos. É a própria infraestrutura escolhida
+            pelo operador, não um serviço de terceiro alheio à instância.
           </li>
           <li>
-            <strong>Stripe</strong> — processamento de pagamento da assinatura.
+            <strong>Groq ou OpenAI</strong> — o provedor de modelo de
+            linguagem usado na classificação automática, se uma das duas
+            chaves estiver configurada. Recebe o texto extraído da captura
+            para produzir resumo, tipo e tags daquele item, e nada além disso.
+            A seção 5 detalha exatamente o que sai.
           </li>
           <li>
-            <strong>Groq</strong> — o provedor de modelo de linguagem. Recebe o
-            texto extraído da captura para produzir o resumo, o tipo e as tags
-            daquele item, e nada além disso. A seção 5 detalha o que sai daqui.
+            <strong>Stripe</strong> — processamento de pagamento, só se o
+            operador tiver configurado links de cobrança.
           </li>
         </ul>
         <p>
-          Alguns desses fornecedores processam dados fora do Brasil. A
-          transferência acontece com as salvaguardas contratuais previstas na
-          LGPD.
+          Sem nenhuma chave de IA configurada, a classificação automática
+          simplesmente não roda: entra um classificador determinístico local,
+          sem custo e sem nada saindo da instância.
         </p>
       </section>
 
       <section>
         <h2>5. Inteligência artificial</h2>
         <p>
-          A classificação automática é feita por um provedor de modelo de
-          linguagem — hoje a <strong>Groq</strong>. Isso significa que uma parte
-          do que você captura <strong>sai da nossa infraestrutura</strong>, e
-          vale dizer exatamente qual:
+          Quando a classificação automática está ativa (seção 4), uma parte do
+          que é capturado sai da instância — e vale dizer exatamente o quê:
         </p>
         <ul>
           <li>
@@ -116,37 +142,45 @@ export default function PrivacidadePage() {
             caracteres.
           </li>
           <li>
-            <strong>O que não é enviado:</strong> nada que identifique você. A
-            requisição não leva o seu e-mail, o seu nome nem o identificador da
-            sua conta — do lado do provedor, aquele texto não tem dono.
+            <strong>O que não é enviado:</strong> nada que identifique a
+            pessoa. A requisição não leva e-mail, nome nem identificador de
+            conta — do lado do provedor, aquele texto não tem dono.
           </li>
           <li>
             <strong>Quando acontece:</strong> só no envio de um arquivo, uma
-            vez por captura. Nem a busca, nem as notas que você escreve à mão,
-            nem o que já está guardado são enviados para lá.
+            vez por captura. Nem a busca, nem as notas escritas à mão, nem o
+            que já está guardado são enviados para lá.
           </li>
         </ul>
         <p>
-          <strong>Nós não usamos o seu conteúdo para nada além de devolvê-lo
-          organizado para você:</strong> não treinamos modelos com ele, não o
-          vendemos e não o usamos para publicidade. Mas o trecho enviado é
-          processado pela Groq, nos servidores e sob os termos dela — é um
-          tratamento que acontece fora daqui, e a política deles vale sobre
-          aquele trecho enquanto ele estiver lá. Se um documento for sensível
-          demais para atravessar essa fronteira, ele não deve ser enviado para
-          classificação.
+          O trecho enviado é processado nos servidores do provedor escolhido
+          (Groq ou OpenAI) e sob os termos dele — é um tratamento que acontece
+          fora da instância. Se um documento for sensível demais para
+          atravessar essa fronteira, ele não deve ser enviado para
+          classificação automática.
         </p>
         <p>
           A classificação é sempre identificada como automática e sempre
-          reversível: o que a IA escreveu ou marcou, você edita ou apaga.
+          reversível: o que a IA escreveu ou marcou pode ser editado ou
+          apagado.
         </p>
       </section>
 
       <section>
-        <h2>6. Como o isolamento funciona na prática</h2>
+        <h2>6. Por que existe login, e como o isolamento entre contas funciona</h2>
         <p>
-          A separação entre contas não é uma regra da aplicação, que poderia
-          falhar num bug: ela está no banco de dados.
+          Uma instância auto-hospedada não é sempre de uma pessoa só. O
+          cenário comum é o oposto: alguém sobe o Nexo num servidor pessoal e
+          disponibiliza para quem mora na casa, para a própria organização, ou
+          simplesmente porque duas pessoas dividem o mesmo computador e cada
+          uma quer o próprio espaço, sem ver o conteúdo da outra. O sistema de
+          contas continua existindo por causa desse caso — não é resquício do
+          modelo antigo de serviço hospedado.
+        </p>
+        <p>
+          Numa instância com mais de uma conta, a separação entre elas não é
+          uma regra da aplicação, que poderia falhar num bug: ela está no
+          banco de dados.
         </p>
         <ul>
           <li>
@@ -156,7 +190,7 @@ export default function PrivacidadePage() {
           </li>
           <li>
             Os arquivos ficam em <strong>buckets privados</strong>, alcançáveis
-            apenas por links temporários assinados para você.
+            apenas por links temporários assinados para quem os enviou.
           </li>
           <li>
             A sessão vive num <strong>cookie httpOnly</strong>, que scripts da
@@ -164,7 +198,7 @@ export default function PrivacidadePage() {
           </li>
           <li>
             Alterações e exclusões em dados sensíveis geram registro na trilha
-            de auditoria.
+            de auditoria daquela instância.
           </li>
         </ul>
       </section>
@@ -172,52 +206,60 @@ export default function PrivacidadePage() {
       <section>
         <h2>7. Cookies e armazenamento no navegador</h2>
         <p>
-          A Nexo não usa cookies de publicidade nem de rastreamento de
+          A aplicação não usa cookies de publicidade nem de rastreamento de
           terceiros. Existem dois itens apenas:
         </p>
         <ul>
           <li>
-            O <strong>cookie de sessão</strong>, necessário para manter você
-            conectado.
+            O <strong>cookie de sessão</strong>, necessário para manter a
+            pessoa conectada.
           </li>
           <li>
-            A sua escolha de <strong>tema claro ou escuro</strong>, guardada
-            localmente no seu navegador e nunca enviada para nós.
+            A escolha de <strong>tema claro ou escuro</strong>, guardada
+            localmente no navegador e nunca enviada ao servidor.
           </li>
         </ul>
       </section>
 
       <section>
-        <h2>8. Por quanto tempo guardamos</h2>
+        <h2>8. Por quanto tempo os dados ficam guardados</h2>
         <p>
-          O seu conteúdo fica enquanto a sua conta existir. Ao excluir uma nota
-          ou um arquivo, ele sai do serviço; ao encerrar a conta, os dados
-          associados são removidos, exceto o que a lei nos obriga a reter — como
-          registros fiscais de pagamento e a trilha de auditoria, mantida pelo
-          prazo legal aplicável.
+          O conteúdo fica enquanto a conta existir naquela instância. Ao
+          excluir uma nota ou um arquivo, ele sai do banco; ao encerrar a
+          conta, os dados associados são removidos, exceto o que a lei exigir
+          reter — como registros fiscais de pagamento, quando houver cobrança,
+          e a trilha de auditoria, pelo prazo legal aplicável. Backups do
+          próprio projeto Supabase seguem a política de retenção que o
+          operador da instância configurou lá.
         </p>
       </section>
 
       <section>
-        <h2>9. Os seus direitos</h2>
+        <h2>9. Os direitos de quem tem dados numa instância</h2>
         <p>
-          A LGPD garante a você confirmar a existência de tratamento, acessar os
+          A LGPD garante confirmar a existência de tratamento, acessar os
           dados, corrigir dados incompletos ou desatualizados, solicitar
-          anonimização ou eliminação, pedir portabilidade, saber com quem
-          compartilhamos e revogar consentimento.
+          anonimização ou eliminação, pedir portabilidade, saber com quem os
+          dados são compartilhados e revogar consentimento.
         </p>
         <p>
           Para exercer qualquer um deles, escreva para{" "}
-          <a href="mailto:contato@nexo.app">contato@nexo.app</a>. Respondemos em
-          até 15 dias.
+          <a href="mailto:contato@exemplo.com">contato@exemplo.com</a>{" "}
+          <em>
+            — endereço de exemplo: quem administra esta instância deve
+            substituí-lo pelo próprio contato antes de publicá-la para
+            terceiros.
+          </em>
         </p>
       </section>
 
       <section>
-        <h2>10. Mudanças nesta política</h2>
+        <h2>10. Mudanças neste documento</h2>
         <p>
-          Se algo relevante mudar, atualizamos a data no topo desta página e
-          avisamos por e-mail antes de a mudança valer.
+          Este texto acompanha o código do projeto. Se algo relevante mudar no
+          que a aplicação guarda ou para onde envia dados, a data no topo
+          desta página é atualizada junto — e quem administra uma instância
+          para terceiros deve avisá-los antes de a mudança valer.
         </p>
       </section>
     </LegalDocument>

@@ -9,7 +9,7 @@ import {
   workspaceConnections,
   workspaceWindows,
 } from "@/lib/db/schema";
-import { windowCapFor } from "@/lib/plans";
+import { ABSOLUTE_WINDOWS_PER_BOARD } from "@/lib/limits";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -88,10 +88,10 @@ export async function POST(
       return errorResponse(404, "Nada disto existe mais para restaurar.");
     }
 
-    // O teto do plano vale aqui como vale na criação: quem apagou uma lousa
-    // cheia e encheu outra no meio-tempo não passa por baixo do limite pelo
-    // caminho do desfazer.
-    const cap = windowCapFor(context.plan);
+    // O teto vale aqui como vale na criação: quem apagou uma lousa cheia e
+    // encheu outra no meio-tempo não passa por baixo do limite pelo caminho
+    // do desfazer.
+    const cap = ABSOLUTE_WINDOWS_PER_BOARD;
     if (context.windowCount + candidates.length > cap) {
       return errorResponse(
         409,

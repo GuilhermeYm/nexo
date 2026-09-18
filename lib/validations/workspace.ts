@@ -4,7 +4,7 @@ import { richDocumentSchema } from "@/lib/editor/document";
 import {
   ABSOLUTE_CONNECTIONS_PER_BOARD,
   ABSOLUTE_WINDOWS_PER_BOARD,
-} from "@/lib/plans";
+} from "@/lib/limits";
 import {
   CONNECTION_HEADS,
   CONNECTION_STROKES,

@@ -11,6 +11,7 @@ import {
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { NoteTags } from "@/components/editor/note-tags";
+import { EditorZoomControls } from "@/components/editor/editor-zoom-controls";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -28,6 +29,7 @@ import type { WorkspaceSummary } from "@/lib/dashboard/queries";
 import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { plainToRichDocument } from "@/lib/editor/document";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
+import { useEditorZoom, useEditorZoomShortcuts } from "@/hooks/use-editor-zoom";
 import type { EditableNote } from "@/lib/notes/queries";
 import { cn } from "@/lib/utils";
 
@@ -134,6 +136,8 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
     onUpdate: ({ editor: current }) =>
       queue({ contentRich: current.getJSON() }),
   });
+  const textZoom = useEditorZoom("nexo-note-editor-zoom");
+  useEditorZoomShortcuts(editor, textZoom);
 
   const handleTitle = useCallback(
     (value: string) => {
@@ -297,11 +301,14 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
         </div>
       </header>
 
-      <EditorToolbar editor={editor} className="print:hidden" />
+      <EditorToolbar
+        editor={editor}
+        className="print:hidden"
+      />
       <EditorBubbleMenu editor={editor} />
 
       <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
-        <div className="mx-auto w-full max-w-2xl px-6 pt-10 pb-32">
+        <div className="mx-auto w-full max-w-2xl px-6 pt-10 pb-12">
           <label className="sr-only" htmlFor="note-title">
             Título da nota
           </label>
@@ -343,8 +350,26 @@ export function NoteEditor({ note, workspaces }: NoteEditorProps) {
               são desta tela. */}
           <EditorContent
             editor={editor}
+            style={{ zoom: textZoom.zoom / 100 }}
             className={cn("mt-8 [&_.tiptap]:min-h-[60vh]", PROSE_EDITOR_CLASS)}
           />
+          <div className="mt-6 flex justify-end border-t border-border pt-3 print:hidden">
+            <EditorZoomControls
+              zoom={textZoom.zoom}
+              onDecrease={() => {
+                textZoom.decrease();
+                editor?.commands.focus();
+              }}
+              onIncrease={() => {
+                textZoom.increase();
+                editor?.commands.focus();
+              }}
+              onReset={() => {
+                textZoom.reset();
+                editor?.commands.focus();
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>

@@ -29,8 +29,7 @@ import { createClient } from "@/lib/supabase/server";
  * Tarefas, as notificações da Entrada e os relatórios de erro da conta.
  *
  * **O que fica:** o login e o cadastro. A linha de `profiles` não é tocada —
- * nome, avatar, plano e os campos de assinatura do Stripe são identidade da
- * conta, não conteúdo. `audit_logs` também fica: é a trilha que existe para
+ * nome e avatar são identidade da conta, não conteúdo. `audit_logs` também fica: é a trilha que existe para
  * tornar justamente esta ação investigável depois, e esta rota escreve nela.
  *
  * Depois disto o dashboard recria sozinho um workspace padrão no próximo
@@ -203,7 +202,7 @@ export async function POST(request: Request) {
     await notifySystem({
       userId: user.id,
       title: "Seu ambiente foi zerado",
-      body: "Workspaces, notas, arquivos e a lousa foram apagados a seu pedido. O login e o plano continuam como estavam. É só começar de novo.",
+      body: "Workspaces, notas, arquivos e a lousa foram apagados a seu pedido. O seu login continua como estava. É só começar de novo.",
       metadata: { kind: "account_reset" },
     });
 

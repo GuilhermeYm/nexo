@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
+import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { listWorkspaces } from "@/lib/dashboard/queries";
-import { limitsFor } from "@/lib/plans";
-import { getUserPlan } from "@/lib/workspace/queries";
 import { db } from "@/lib/db";
 import { workspaces } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
@@ -64,21 +62,6 @@ export async function POST(request: Request) {
     const parsed = createWorkspaceSchema.safeParse(await request.json());
     if (!parsed.success) {
       return errorResponse(400, "Nome de workspace inválido.");
-    }
-
-    // Teto do plano. A página de planos promete "1 workspace" no Gratuito;
-    // enquanto a rota não conferir isso, a promessa é decoração.
-    const workspaceCap = limitsFor(await getUserPlan(user.id)).workspaces;
-    if (workspaceCap !== null) {
-      const existing = await listWorkspaces(user.id);
-      if (existing.length >= workspaceCap) {
-        return planLimitResponse(
-          409,
-          workspaceCap === 1
-            ? "O plano Gratuito tem um workspace. No Pro eles são ilimitados."
-            : `Seu plano permite ${workspaceCap} workspaces.`
-        );
-      }
     }
 
     const [created] = await db

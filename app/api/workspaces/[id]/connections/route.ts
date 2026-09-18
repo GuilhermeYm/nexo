@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { errorResponse, logServerError } from "@/lib/api";
 import { db } from "@/lib/db";
 import { workspaceConnections, workspaceWindows } from "@/lib/db/schema";
-import { ABSOLUTE_CONNECTIONS_PER_BOARD } from "@/lib/plans";
+import { ABSOLUTE_CONNECTIONS_PER_BOARD } from "@/lib/limits";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import {

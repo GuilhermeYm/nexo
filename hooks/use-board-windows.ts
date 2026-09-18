@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { readApiFailure } from "@/lib/plan-limit";
+import { readApiFailure } from "@/lib/api-failure";
 import { createClient } from "@/lib/supabase/client";
 import { authorizeRealtime } from "@/lib/supabase/realtime";
 import { paletteFromName } from "@/lib/tags/palette";
@@ -137,32 +137,26 @@ export type NotePatch = {
 };
 
 /**
- * O aviso que a lousa mostra.
- *
- * `upgrade` marca o teto do plano, que **não é defeito**: o cartão troca a
- * cara de erro pelo convite ao Pro, e não pede "tente de novo" para uma coisa
- * que vai ser recusada de novo. Vem do servidor por `readApiFailure`.
+ * O aviso que a lousa mostra. Vem do servidor por `readApiFailure`.
  */
 export interface BoardNotice {
   message: string;
-  upgrade: boolean;
   /**
    * O código do relatório de erro, quando o servidor registrou um defeito.
-   * Nulo no teto de plano e em tudo que não é defeito nosso — ver
-   * `lib/plan-limit.ts`.
+   * Nulo em tudo que não é defeito nosso — ver `lib/api-failure.ts`.
    */
   code?: string | null;
 }
 
 /**
- * Uma falha que nunca é teto de plano — rede caiu, 500, cascade recusou.
+ * Uma falha sem código de relatório — rede caiu, cascade recusou.
  *
  * Função pura fora do componente de propósito: como `setError` do `useState`
  * já é estável, nenhum dos sete `useCallback` daqui precisa ganhar uma
  * dependência nova para chamá-la.
  */
 function plainNotice(message: string): BoardNotice {
-  return { message, upgrade: false, code: null };
+  return { message, code: null };
 }
 
 export function useBoardWindows(

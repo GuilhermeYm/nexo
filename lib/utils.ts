@@ -10,7 +10,7 @@ export function cn(...inputs: ClassValue[]) {
 /**
  * Bytes num rótulo curto: "0 B", "180 MB", "1,4 GB", "ilimitado".
  *
- * `null` é "sem limite" (a convenção de `lib/plans.ts`). Uma casa decimal só
+ * `null` é "sem limite". Uma casa decimal só
  * quando o número é pequeno o bastante para ela dizer algo — "1,4 GB" ajuda,
  * "847,3 MB" é ruído.
  */

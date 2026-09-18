@@ -9,17 +9,18 @@ import { useEffect, useRef } from "react";
 import { HeroDemo } from "@/components/sections/hero-demo";
 import { HeroVideoBackground } from "@/components/sections/hero-video-background";
 import { Button } from "@/components/ui/button";
+import { NEXO_GITHUB_URL } from "@/lib/site";
 
 gsap.registerPlugin(ScrollTrigger);
 
-// Só entra aqui o que é verdade hoje. "Código aberto" saiu: o PRODUCT.md marca
-// a alegação como não confirmada, e o lugar dela é ocupado por um fato do
-// sistema — os arquivos ficam mesmo em buckets privados (ver AGENTS.md §8).
+// Código aberto agora é verdade, não aspiração: quem quiser, sobe a própria
+// instância a partir do repositório. Os arquivos continuam em buckets
+// privados porque isso é do Supabase de cada um, não uma promessa nossa.
 const TRUST_POINTS = [
-  "Assinatura mensal ou anual",
-  "Projeto brasileiro",
+  "Código aberto",
+  "Você hospeda",
+  "Sem assinatura",
   "Arquivos em buckets privados",
-  "Multiplataforma",
 ];
 
 export function HeroSection() {
@@ -145,10 +146,14 @@ export function HeroSection() {
 
         <div className="mt-10 flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
           <Button asChild size="lg" data-animate="cta">
-            <Link href="/registro">
-              Começar gratuitamente
+            <a
+              href={NEXO_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Ver no GitHub
               <ArrowRight className="size-4" />
-            </Link>
+            </a>
           </Button>
           <Button asChild size="lg" variant="outline" data-animate="cta">
             <Link href="#como-funciona">

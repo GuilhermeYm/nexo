@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   Search,
   Sparkles,
+  Trash2,
   UserRound,
   X,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import {
   formatAbsolute,
@@ -83,6 +85,14 @@ export function NotesView({
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [preview, setPreview] = useState<NotePreview | null>(null);
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">(
+    "idle"
+  );
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting" | "error">(
     "idle"
   );
   const firstRequest = useRef(true);
@@ -182,12 +192,66 @@ export function NotesView({
   const filtered = query.trim() || source !== "all" || type !== "all";
 
   function clearFilters() {
+    resetSelection();
     setQuery("");
     setSource("all");
     setType("all");
     setSort("updated");
     inputRef.current?.focus();
   }
+
+  function resetSelection() {
+    setSelectedNoteIds(new Set());
+    setDeleteDialogOpen(false);
+  }
+
+  function toggleNoteSelection(noteId: string) {
+    setSelectedNoteIds((current) => {
+      const next = new Set(current);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+  }
+
+  function toggleVisibleNotes() {
+    const visibleIds = result.notes.map((note) => note.id);
+    const everyVisibleNoteIsSelected = visibleIds.every((id) => selectedNoteIds.has(id));
+    setSelectedNoteIds((current) => {
+      const next = new Set(current);
+      for (const id of visibleIds) {
+        if (everyVisibleNoteIsSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function deleteSelectedNotes() {
+    if (selectedNoteIds.size === 0) return;
+    setDeleteStatus("deleting");
+
+    try {
+      const response = await fetch("/api/notes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selectedNoteIds] }),
+      });
+      if (!response.ok) throw new Error("delete request failed");
+
+      setSelectedNoteIds(new Set());
+      setSelectionMode(false);
+      setDeleteDialogOpen(false);
+      setDeleteStatus("idle");
+      closePreview();
+      await loadPage(1, false);
+    } catch {
+      setDeleteStatus("error");
+    }
+  }
+
+  const everyVisibleNoteIsSelected =
+    result.notes.length > 0 && result.notes.every((note) => selectedNoteIds.has(note.id));
 
   return (
     <div className="flex min-h-dvh bg-secondary p-2 sm:p-3">
@@ -216,16 +280,40 @@ export function NotesView({
                 mesmo lugar.
               </p>
             </div>
-            <p
-              aria-live="polite"
-              className="text-sm tabular-nums text-subtle-foreground"
-            >
-              {status === "loading"
-                ? hasLoadedInitial
-                  ? "Atualizando…"
-                  : "Buscando no servidor…"
-                : `${result.total} ${result.total === 1 ? "nota" : "notas"}`}
-            </p>
+            <div className="flex items-center gap-3">
+              <p
+                aria-live="polite"
+                className="text-sm tabular-nums text-subtle-foreground"
+              >
+                {status === "loading"
+                  ? hasLoadedInitial
+                    ? "Atualizando…"
+                    : "Buscando no servidor…"
+                  : `${result.total} ${result.total === 1 ? "nota" : "notas"}`}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectionMode((active) => !active);
+                  setSelectedNoteIds(new Set());
+                }}
+                className={cn(
+                  "h-9 rounded-xl border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                  selectionMode
+                    ? "border-accent bg-accent text-accent-foreground"
+                    : "border-error/30 text-error hover:bg-error/10"
+                )}
+              >
+                {selectionMode ? (
+                  "Cancelar"
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <Trash2 className="size-4" aria-hidden="true" />
+                    Apagar
+                  </span>
+                )}
+              </button>
+            </div>
           </header>
 
           <section aria-label="Filtros de notas" className="mt-8">
@@ -238,10 +326,16 @@ export function NotesView({
                 ref={inputRef}
                 type="search"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  resetSelection();
+                  setQuery(event.target.value);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
-                    if (query) setQuery("");
+                    if (query) {
+                      resetSelection();
+                      setQuery("");
+                    }
                     else inputRef.current?.blur();
                   }
                 }}
@@ -253,6 +347,7 @@ export function NotesView({
                 <button
                   type="button"
                   onClick={() => {
+                    resetSelection();
                     setQuery("");
                     inputRef.current?.focus();
                   }}
@@ -266,14 +361,23 @@ export function NotesView({
 
             <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex w-fit rounded-xl bg-secondary p-1" aria-label="Filtrar por autoria">
-                <SourceButton active={source === "all"} onClick={() => setSource("all")}>
+                <SourceButton active={source === "all"} onClick={() => {
+                  resetSelection();
+                  setSource("all");
+                }}>
                   Todas
                 </SourceButton>
-                <SourceButton active={source === "user"} onClick={() => setSource("user")}>
+                <SourceButton active={source === "user"} onClick={() => {
+                  resetSelection();
+                  setSource("user");
+                }}>
                   <UserRound className="size-3.5" aria-hidden="true" />
                   Você
                 </SourceButton>
-                <SourceButton active={source === "ai"} onClick={() => setSource("ai")}>
+                <SourceButton active={source === "ai"} onClick={() => {
+                  resetSelection();
+                  setSource("ai");
+                }}>
                   <Sparkles className="size-3.5" aria-hidden="true" />
                   Nexo
                 </SourceButton>
@@ -283,7 +387,10 @@ export function NotesView({
                 <SelectControl
                   label="Tipo"
                   value={type}
-                  onChange={(value) => setType(value as TypeFilter)}
+                  onChange={(value) => {
+                    resetSelection();
+                    setType(value as TypeFilter);
+                  }}
                   options={[
                     { value: "all", label: "Todos os tipos" },
                     ...NOTE_TYPES.map((value) => ({
@@ -295,7 +402,10 @@ export function NotesView({
                 <SelectControl
                   label="Ordenar"
                   value={sort}
-                  onChange={(value) => setSort(value as NoteListSort)}
+                  onChange={(value) => {
+                    resetSelection();
+                    setSort(value as NoteListSort);
+                  }}
                   options={SORT_OPTIONS}
                   icon={sort === "title" ? ArrowDownAZ : CalendarClock}
                 />
@@ -330,6 +440,36 @@ export function NotesView({
               />
             ) : (
               <>
+                {selectionMode && (
+                  <div className="mb-4 flex flex-col gap-3 rounded-xl bg-secondary px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                    <p className="text-sm font-medium text-foreground" aria-live="polite">
+                      {selectedNoteIds.size === 0
+                        ? "Escolha as notas que deseja apagar"
+                        : `${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={toggleVisibleNotes}
+                        className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      >
+                        {everyVisibleNoteIsSelected ? "Limpar seleção" : "Selecionar visíveis"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={selectedNoteIds.size === 0}
+                        onClick={() => {
+                          setDeleteStatus("idle");
+                          setDeleteDialogOpen(true);
+                        }}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        Apagar
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div
                   className={cn(
                     "grid min-h-0 gap-6",
@@ -343,6 +483,9 @@ export function NotesView({
                         note={note}
                         now={now}
                         selected={note.id === selectedNoteId}
+                        selectionMode={selectionMode}
+                        checked={selectedNoteIds.has(note.id)}
+                        onCheckedChange={() => toggleNoteSelection(note.id)}
                         onSelect={() => void showPreview(note.id)}
                       />
                     ))}
@@ -383,6 +526,18 @@ export function NotesView({
           </section>
         </div>
       </main>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Apagar notas selecionadas?"
+        description="Elas sairão do seu acervo e das lousas em que estiverem abertas. Esta ação não pode ser desfeita agora."
+        subject={`${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`}
+        confirmLabel="Apagar notas"
+        busyLabel="Apagando notas…"
+        busy={deleteStatus === "deleting"}
+        error={deleteStatus === "error" ? "Não foi possível apagar as notas. Tente novamente." : undefined}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={() => void deleteSelectedNotes()}
+      />
     </div>
   );
 }
@@ -453,22 +608,39 @@ function NoteRow({
   note,
   now,
   selected,
+  selectionMode,
+  checked,
+  onCheckedChange,
   onSelect,
 }: {
   note: NoteListItem;
   now: number;
   selected: boolean;
+  selectionMode: boolean;
+  checked: boolean;
+  onCheckedChange: () => void;
   onSelect: () => void;
 }) {
   return (
-    <li>
+    <li className="flex">
+      {selectionMode && (
+        <label className="flex shrink-0 cursor-pointer items-start px-3 pt-7 sm:px-4" title={`Selecionar ${note.title}`}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={onCheckedChange}
+            className="size-4 rounded border-border accent-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          />
+          <span className="sr-only">Selecionar {note.title}</span>
+        </label>
+      )}
       <button
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
         title="Clique para ler a prévia"
         className={cn(
-          "group grid w-full grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-1 py-5 text-left transition-colors hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:px-4",
+          "group grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-1 py-5 text-left transition-colors hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:px-4",
           selected && "bg-secondary/65"
         )}
       >

@@ -1,13 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 
 import { Board } from "@/components/workspace/board";
-import { windowCapFor } from "@/lib/plans";
+import { ABSOLUTE_WINDOWS_PER_BOARD } from "@/lib/limits";
 import { createClient } from "@/lib/supabase/server";
-import {
-  getOwnedWorkspace,
-  getUserPlan,
-  readBoard,
-} from "@/lib/workspace/queries";
+import { getOwnedWorkspace, readBoard } from "@/lib/workspace/queries";
 
 export const metadata = {
   title: "Workspace — Nexo",
@@ -52,10 +48,7 @@ export default async function WorkspacePage(
   const workspace = await getOwnedWorkspace(user.id, id);
   if (!workspace) notFound();
 
-  const [board, plan] = await Promise.all([
-    readBoard(user.id, id),
-    getUserPlan(user.id),
-  ]);
+  const board = await readBoard(user.id, id);
 
   return (
     <Board
@@ -63,11 +56,7 @@ export default async function WorkspacePage(
       initialWindows={board.windows}
       initialConnections={board.connections}
       focusWindowId={focusWindowId}
-      windowCap={windowCapFor(plan)}
-      // Quem já é Pro bate no teto absoluto anti-abuso, não numa oferta:
-      // convidá-lo a assinar o que ele já assinou seria a interface não
-      // sabendo com quem está falando.
-      canUpgrade={plan === "free"}
+      windowCap={ABSOLUTE_WINDOWS_PER_BOARD}
     />
   );
 }

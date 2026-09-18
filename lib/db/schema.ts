@@ -37,19 +37,6 @@ const tsvector = customType<{ data: string }>({
   },
 });
 
-export const subscriptionStatusEnum = pgEnum("subscription_status", [
-  "trialing",
-  "active",
-  "canceled",
-  "incomplete",
-  "incomplete_expired",
-  "past_due",
-  "unpaid",
-  "paused",
-]);
-
-export const planEnum = pgEnum("plan", ["free", "pro", "enterprise"]);
-
 export const noteTypeEnum = pgEnum("note_type", [
   "note",
   "task",
@@ -86,19 +73,9 @@ export const profiles = pgTable(
     id: uuid("id").primaryKey().notNull(),
     displayName: text("display_name"),
     avatarUrl: text("avatar_url"),
-    subscriptionStatus: subscriptionStatusEnum("subscription_status").default("trialing"),
-    stripeCustomerId: text("stripe_customer_id"),
-    stripeSubscriptionId: text("stripe_subscription_id"),
-    plan: planEnum("plan").default("free").notNull(),
-    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => ({
-    stripeCustomerIdx: uniqueIndex("profiles_stripe_customer_id_idx").on(
-      table.stripeCustomerId
-    ),
-  })
+  }
 );
 
 /**
@@ -373,6 +350,7 @@ export const aiJobKindEnum = pgEnum("ai_job_kind", [
  */
 export const aiJobStatusEnum = pgEnum("ai_job_status", [
   "queued",
+  "waiting_configuration",
   "running",
   "succeeded",
   "failed",
@@ -748,7 +726,7 @@ export const workspaceConnectionsRelations = relations(
 /**
  * Tipo da notificação.
  *
- * - `system`: mensagens da Nexo (boas-vindas, atualizações, limites de plano,
+ * - `system`: mensagens da Nexo (boas-vindas, atualizações,
  *   avisos de segurança). Quem escreve é o servidor.
  * - `user`: mensagens vindas de outros usuários (compartilhamentos,
  *   convites, menções). Ainda não implementado; a coluna existe para a

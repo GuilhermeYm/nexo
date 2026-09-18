@@ -1,169 +1,132 @@
 import type { Metadata } from "next";
 
 import { LegalDocument } from "@/components/layout/legal-document";
+import { NEXO_GITHUB_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Termos de uso — Nexo",
   description:
-    "As regras de uso da Nexo: conta, conteúdo, classificação por IA, planos, cancelamento e responsabilidades.",
+    "Nexo é software auto-hospedado e sem assinatura: o que estes termos cobrem, o que cabe a quem sobe uma instância, e as garantias que não existem.",
 };
 
 export default function TermosPage() {
   return (
     <LegalDocument
       title="Termos de uso"
-      summary="As regras do jogo, em português e sem letra miúda. Ao criar uma conta na Nexo, você concorda com o que está escrito aqui."
-      updatedAt="28 de agosto de 2026"
+      summary="Nexo não é um serviço vendido por alguém — é software que você sobe e opera. Isto descreve o que vem junto com o código, o que fica por sua conta, e o que não é prometido."
+      updatedAt="17 de setembro de 2026"
     >
       <section>
-        <h2>1. O que é a Nexo</h2>
+        <h2>1. O que é o Nexo</h2>
         <p>
-          A Nexo é um organizador pessoal: você envia textos, arquivos, áudios,
+          O Nexo é um organizador pessoal: você envia textos, arquivos, áudios,
           imagens e links, e a aplicação classifica, resume e marca esse
-          material para que você o reencontre depois. O serviço é oferecido pela
-          internet, no formato de assinatura, e está{" "}
+          material para que você o reencontre depois. Ele é distribuído como{" "}
+          <a href={NEXO_GITHUB_URL} target="_blank" rel="noopener noreferrer">
+            código aberto
+          </a>{" "}
+          para ser executado na sua própria infraestrutura, e está{" "}
           <strong>em desenvolvimento ativo</strong> — funcionalidades entram,
           mudam e saem enquanto o produto amadurece.
         </p>
-      </section>
-
-      <section>
-        <h2>2. Sua conta</h2>
         <p>
-          Para usar a Nexo você precisa criar uma conta com um e-mail válido e
-          ter pelo menos 18 anos, ou usar o serviço com o consentimento de quem
-          é responsável por você.
-        </p>
-        <ul>
-          <li>
-            Você é responsável pela sua senha e por tudo que acontecer na sua
-            conta.
-          </li>
-          <li>
-            Uma conta pertence a uma pessoa. Não compartilhe credenciais.
-          </li>
-          <li>
-            Se perceber acesso indevido, avise em{" "}
-            <a href="mailto:contato@nexo.app">contato@nexo.app</a>.
-          </li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>3. O que você não pode fazer</h2>
-        <ul>
-          <li>
-            Enviar conteúdo ilegal, ou material sobre o qual você não tem
-            direito de uso.
-          </li>
-          <li>
-            Tentar acessar dados de outra pessoa, contornar o isolamento entre
-            contas ou testar a segurança do serviço sem autorização escrita.
-          </li>
-          <li>
-            Automatizar uso a ponto de degradar o serviço para os demais, ou
-            revender o acesso.
-          </li>
-        </ul>
-        <p>
-          Descumprir esta seção pode levar à suspensão ou ao encerramento da
-          conta.
+          <strong>Não há assinatura, plano, cobrança nem teto de uso.</strong>{" "}
+          Ninguém fatura nada por esta aplicação. O que existe de custo é o da
+          sua própria infraestrutura: o projeto Supabase que você criou e, se
+          você configurar uma, a chave do provedor de IA — ambos contratados
+          por você, diretamente com eles.
         </p>
       </section>
 
       <section>
-        <h2>4. O conteúdo é seu</h2>
+        <h2>2. Quem responde por uma instância</h2>
         <p>
-          Tudo que você envia continua sendo seu. Nós não reivindicamos
-          propriedade sobre as suas notas, arquivos ou anotações.
+          Quem sobe a aplicação responde por ela. Se você a executa só para si,
+          isto começa e termina em você. Se você a disponibiliza para outras
+          pessoas — a casa, a organização, um produto seu —, é você quem
+          responde perante elas: pelas regras de uso que você definir, pelos
+          dados que passarem por lá e pela disponibilidade do que você hospeda.
+          Quem escreve este código não opera nenhuma instância e não tem acesso
+          a nenhuma.
         </p>
         <p>
-          Você nos concede apenas a permissão técnica necessária para operar o
-          serviço: armazenar o material, processá-lo para gerar resumos, tipos e
-          tags, e devolvê-lo a você quando pedir. Essa permissão existe enquanto
-          o conteúdo estiver na sua conta e termina quando você o apaga.
+          A página de <a href="/privacidade">Privacidade</a> descreve o lado de
+          dados dessa mesma divisão.
+        </p>
+      </section>
+
+      <section>
+        <h2>3. A licença do código</h2>
+        <p>
+          O que você pode fazer com o código — usar, modificar, redistribuir,
+          e sob quais condições — é o que a licença do repositório diz, e ela
+          prevalece sobre qualquer coisa escrita nesta página. Ela está no
+          arquivo <strong>LICENSE</strong>, junto ao código.
+        </p>
+      </section>
+
+      <section>
+        <h2>4. O conteúdo é de quem o escreveu</h2>
+        <p>
+          O material guardado numa instância pertence a quem o colocou lá. O
+          software não reivindica nada sobre ele, e nada do que passa por uma
+          instância chega a quem mantém este projeto — não há para onde chegar.
         </p>
       </section>
 
       <section>
         <h2>5. Classificação automática</h2>
         <p>
-          A Nexo usa modelos de linguagem para decidir o tipo de cada captura,
-          escrever o resumo e criar as tags. <strong>Ela erra.</strong> O
-          resultado é uma sugestão automática, sempre identificada como tal e
-          sempre editável por você. Não use a Nexo como única fonte para
-          decisões jurídicas, médicas ou financeiras.
+          Quando configurada, a classificação automática usa modelos de
+          linguagem para decidir o tipo de cada captura, escrever o resumo e
+          criar as tags. <strong>Ela erra.</strong> O resultado é uma sugestão
+          automática, sempre identificada como tal e sempre editável. Não use o
+          Nexo como única fonte para decisões jurídicas, médicas ou
+          financeiras.
+        </p>
+        <p>
+          A chave do provedor é sua, a conta é sua e os termos dele valem sobre
+          o que for enviado. Sem chave configurada, nada é enviado para fora da
+          instância.
         </p>
       </section>
 
       <section>
-        <h2>6. Planos, cobrança e cancelamento</h2>
-        <ul>
-          <li>
-            O plano Gratuito não exige cartão e tem limites de captura e de
-            armazenamento descritos na página de planos.
-          </li>
-          <li>
-            O plano Pro é cobrado mensal ou anualmente, por meio da Stripe. Nós
-            não armazenamos os dados do seu cartão.
-          </li>
-          <li>
-            Você pode cancelar quando quiser, sem multa. O Pro continua valendo
-            até o fim do período já pago; depois disso a conta volta ao plano
-            Gratuito.
-          </li>
-          <li>
-            Preços podem mudar. Se mudarem, avisamos por e-mail antes da
-            renovação seguinte, e você decide se continua.
-          </li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>7. Serviço em desenvolvimento</h2>
+        <h2>6. Sem garantia</h2>
         <p>
-          A Nexo é oferecida &ldquo;como está&rdquo;. Não garantimos ausência de
-          falhas nem disponibilidade ininterrupta, e não há acordo de nível de
-          serviço. Funcionalidades anunciadas como{" "}
+          O software é oferecido <strong>&ldquo;como está&rdquo;</strong>, sem
+          garantia de qualquer espécie. Não há promessa de ausência de falhas,
+          de disponibilidade, de adequação a uma finalidade específica nem
+          acordo de nível de serviço, e não há suporte contratado. Quem executa
+          assume o risco de executar — inclusive o de perder dados por uma
+          falha, uma migration mal aplicada ou uma configuração errada.
+        </p>
+        <p>
+          Faça backup do seu banco. Funcionalidades anunciadas como{" "}
           <strong>&ldquo;em breve&rdquo;</strong> são intenção declarada, não
-          compromisso de data — e você não deve assinar contando com elas.
+          compromisso de data.
         </p>
       </section>
 
       <section>
-        <h2>8. Encerramento</h2>
+        <h2>7. Limite de responsabilidade</h2>
         <p>
-          Você pode encerrar sua conta a qualquer momento. Nós podemos encerrar
-          ou suspender uma conta que descumpra estes termos, com aviso prévio
-          sempre que for possível dar um.
+          Na máxima extensão permitida pela lei aplicável, quem escreve e
+          distribui este código não responde por danos decorrentes do uso ou da
+          impossibilidade de uso do software, incluindo perda de dados ou de
+          lucros. Nada aqui afasta direitos que a lei garanta de forma
+          inafastável a quem, no seu caso concreto, seja consumidor de alguém —
+          e esse alguém, se existir, é quem opera a instância, não este
+          projeto.
         </p>
       </section>
 
       <section>
-        <h2>9. Limite de responsabilidade</h2>
+        <h2>8. Mudanças neste documento</h2>
         <p>
-          Na máxima extensão permitida pela lei brasileira, a nossa
-          responsabilidade por qualquer reclamação relacionada ao serviço fica
-          limitada ao valor que você pagou nos 12 meses anteriores ao fato. Isso
-          não afasta os direitos que o Código de Defesa do Consumidor garante a
-          você.
-        </p>
-      </section>
-
-      <section>
-        <h2>10. Lei e foro</h2>
-        <p>
-          Estes termos são regidos pela lei brasileira. Fica eleito o foro do
-          domicílio do consumidor para resolver qualquer controvérsia.
-        </p>
-      </section>
-
-      <section>
-        <h2>11. Mudanças nestes termos</h2>
-        <p>
-          Se mudarmos algo relevante, atualizamos a data no topo desta página e
-          avisamos por e-mail antes de a mudança valer. Dúvidas:{" "}
-          <a href="mailto:contato@nexo.app">contato@nexo.app</a>.
+          Este texto acompanha o código. Se algo relevante mudar, a data no
+          topo muda junto — e quem opera uma instância para terceiros deve
+          avisá-los antes de a mudança valer para eles.
         </p>
       </section>
     </LegalDocument>

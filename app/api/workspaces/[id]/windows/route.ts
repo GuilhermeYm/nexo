@@ -1,7 +1,7 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { errorResponse, logServerError, planLimitResponse } from "@/lib/api";
+import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import {
@@ -10,11 +10,10 @@ import {
   workspaceConnections,
   workspaceWindows,
 } from "@/lib/db/schema";
-import { windowCapFor } from "@/lib/plans";
+import { ABSOLUTE_WINDOWS_PER_BOARD } from "@/lib/limits";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
-import { checkCaptureQuota } from "@/lib/usage/queries";
 import {
   connectionContentColumns,
   getBoardWriteContext,
@@ -97,43 +96,20 @@ export async function POST(
     }
     const input = parsed.data;
 
-    // Dono do workspace, plano, contagem para o teto e topo da pilha numa
+    // Dono do workspace, contagem para o teto e topo da pilha numa
     // consulta só. Eram quatro em sequência, e a soma delas atrasava a
     // criação a ponto de a pessoa clicar em "Nova nota" e começar a digitar
     // antes de a janela existir para receber o texto.
     const context = await getBoardWriteContext(user.id, workspaceId);
     if (!context) return errorResponse(404, "Workspace não encontrado.");
 
-    // Teto do plano. A alavanca que separa Gratuito de Pro é esta — não onde
-    // o dado mora.
-    // Teto de elementos da lousa. No Gratuito ele é do plano; no Pro, o teto
-    // absoluto anti-abuso — que não é oferta e por isso não convida a assinar.
-    const cap = windowCapFor(context.plan);
-    if (context.windowCount >= cap) {
-      const message = `Esta lousa chegou ao limite de ${cap} elementos.`;
-      return context.plan === "free"
-        ? planLimitResponse(
-            409,
-            `${message} No Pro a lousa não tem esse teto.`
-          )
-        : errorResponse(409, message);
-    }
-
-    // Criar uma nota nova aqui é uma captura, e conta contra o teto mensal do
-    // plano. Abrir uma nota que já existe (`noteId`), um anexo, um post-it ou
-    // uma caixa de texto não cria captura nenhuma — nada disso é barrado.
-    //
-    // O plano vem de `context`: ele já foi lido no mesmo SELECT que resolveu o
-    // dono do workspace, e reler seria uma terceira ida ao banco no caminho
-    // que esta rota justamente reduziu a uma.
-    if (input.kind === "note" && input.title && !input.noteId) {
-      const quota = await checkCaptureQuota(user.id, context.plan);
-      if (quota && !quota.ok) {
-        return planLimitResponse(
-          409,
-          `Você já fez as ${quota.limit} capturas deste mês do plano Gratuito. No Pro elas são ilimitadas.`
-        );
-      }
+    // Teto absoluto anti-abuso — não é oferta, é o que impede um cliente
+    // adulterado de encher a lousa sem fim.
+    if (context.windowCount >= ABSOLUTE_WINDOWS_PER_BOARD) {
+      return errorResponse(
+        409,
+        `Esta lousa chegou ao limite de ${ABSOLUTE_WINDOWS_PER_BOARD} elementos.`
+      );
     }
 
     const size = DEFAULT_WINDOW_SIZE[input.kind];

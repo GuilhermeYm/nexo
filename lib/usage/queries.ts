@@ -4,14 +4,13 @@ import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { profiles } from "@/lib/db/schema";
-import { type Plan, type PlanLimits, limitsFor } from "@/lib/plans";
 
 /**
  * Leituras de consumo.
  *
  * Mesmo arranjo do dashboard e da lousa: as consultas vivem fora das rotas
- * porque tanto o Server Component das configurações quanto as rotas que
- * precisam barrar um free no teto usam as mesmas contas.
+ * porque tanto o Server Component das configurações quanto as rotas de
+ * escrita usam as mesmas contas.
  *
  * **Uma ida ao banco por rota, não quatro.** Toda função aqui monta as contas
  * como subconsultas escalares penduradas na linha do perfil, em vez de fazer
@@ -40,8 +39,8 @@ import { type Plan, type PlanLimits, limitsFor } from "@/lib/plans";
  * Dentro da subconsulta, esse `"id"` solto não resolve para `profiles.id` —
  * resolve para `w.id`, porque `workspaces` também tem uma coluna `id`. A
  * condição vira `w.user_id = w.id`, que nunca é verdadeira: a contagem volta
- * zero e o workspace volta nulo, **sem erro nenhum**. As cotas deixariam de
- * bloquear e ninguém ficaria sabendo.
+ * zero e o workspace volta nulo, **sem erro nenhum**. A nota nasceria fora de
+ * qualquer workspace e ninguém ficaria sabendo.
  *
  * Com o uuid ligado como parâmetro não há nome para resolver errado.
  */
@@ -53,7 +52,7 @@ import { type Plan, type PlanLimits, limitsFor } from "@/lib/plans";
  * uma nota também, então a contagem de notas exclui as que nasceram de um
  * anexo — senão o upload contaria duas vezes.
  *
- * Notas apagadas continuam contando: o teto é sobre o ato de capturar, não
+ * Notas apagadas continuam contando: o número é sobre o ato de capturar, não
  * sobre o que sobrou.
  */
 function noteCaptures(userId: string) {
@@ -106,134 +105,32 @@ export interface CaptureUsage {
   notes: number;
   /** Arquivos enviados. */
   uploads: number;
-  /** `notes + uploads` — é a soma que o teto mensal do plano limita. */
+  /** `notes + uploads` — o que a aba "Uso" mostra como capturas do mês. */
   total: number;
-}
-
-export interface QuotaCheck {
-  /** `true` quando ainda cabe mais uma. */
-  ok: boolean;
-  /** Quanto já foi consumido. */
-  used: number;
-  /** O teto do plano. */
-  limit: number;
-}
-
-/**
- * Monta a verificação a partir de um teto que pode não existir.
- *
- * `null` quando o plano não impõe teto (Pro) — quem chama trata isso como
- * "pode seguir".
- */
-function quota(limit: number | null, used: number, incoming = 1): QuotaCheck | null {
-  if (limit === null) return null;
-  return { ok: used + incoming <= limit, used, limit };
 }
 
 /* ---------------------------------------------------------------------- */
 /* O que cada rota precisa saber, numa consulta só                          */
 /* ---------------------------------------------------------------------- */
 
-export interface NoteCaptureContext {
-  plan: Plan;
-  captures: CaptureUsage;
-  /** Onde a nota nasce. Pode ser nulo — a conta sem workspace nenhum. */
-  homeWorkspaceId: string | null;
-  /** `null` quando o plano não tem teto de capturas. */
-  captureQuota: QuotaCheck | null;
-}
-
 /**
- * Tudo o que `POST /api/notes` precisa antes do INSERT: o plano, o consumo do
- * mês e o workspace de destino. Uma viagem ao banco.
+ * Onde a nota nasce: o workspace padrão da conta.
+ *
+ * Pode ser nulo — a conta que ainda não tem workspace nenhum. Antes esta
+ * função devolvia também o plano e a cota do mês; não existem mais nem um
+ * nem outro, e o que sobrou é a única pergunta que a rota de fato precisa
+ * responder antes do INSERT.
  */
-export async function getNoteCaptureContext(
+export async function getHomeWorkspaceId(
   userId: string
-): Promise<NoteCaptureContext> {
+): Promise<string | null> {
   const [row] = await db
-    .select({
-      plan: profiles.plan,
-      notes: noteCaptures(userId),
-      uploads: uploadCaptures(userId),
-      homeWorkspaceId: homeWorkspace(userId),
-    })
+    .select({ homeWorkspaceId: homeWorkspace(userId) })
     .from(profiles)
     .where(eq(profiles.id, userId))
     .limit(1);
 
-  const plan = (row?.plan ?? "free") as Plan;
-  const captures = countsOf(row);
-
-  return {
-    plan,
-    captures,
-    homeWorkspaceId: row?.homeWorkspaceId ?? null,
-    captureQuota: quota(limitsFor(plan).capturesPerMonth, captures.total),
-  };
-}
-
-export interface UploadQuotaContext {
-  plan: Plan;
-  captures: QuotaCheck | null;
-  storage: QuotaCheck | null;
-}
-
-/**
- * Os dois tetos que um upload precisa respeitar, numa consulta só.
- *
- * O de capturas conta o mês; o de armazenamento soma o acervo inteiro e leva
- * em conta o arquivo que está chegando.
- */
-export async function getUploadQuotaContext(
-  userId: string,
-  incomingBytes: number
-): Promise<UploadQuotaContext> {
-  const [row] = await db
-    .select({
-      plan: profiles.plan,
-      notes: noteCaptures(userId),
-      uploads: uploadCaptures(userId),
-      storageBytes: storageBytes(userId),
-    })
-    .from(profiles)
-    .where(eq(profiles.id, userId))
-    .limit(1);
-
-  const plan = (row?.plan ?? "free") as Plan;
-  const limits = limitsFor(plan);
-
-  return {
-    plan,
-    captures: quota(limits.capturesPerMonth, countsOf(row).total),
-    storage: quota(
-      limits.storageBytes,
-      Number(row?.storageBytes ?? 0),
-      incomingBytes
-    ),
-  };
-}
-
-/**
- * O teto de capturas, para quem **já sabe o plano**.
- *
- * A rota da lousa é o caso: `getBoardWriteContext` já leu o plano no mesmo
- * SELECT que resolveu o dono do workspace, e reler seria desfazer justamente
- * a otimização que aquela função existe para fazer.
- *
- * A checagem e a inserção não são atômicas: dois pedidos simultâneos no limite
- * 49 podem ambos passar e a conta fechar em 51. É aceitável — fechar essa
- * fresta custaria uma transação segurando a linha do perfil durante a escrita
- * inteira, e o prejuízo de uma captura a mais é zero.
- */
-export async function checkCaptureQuota(
-  userId: string,
-  plan: Plan | string
-): Promise<QuotaCheck | null> {
-  const limit = limitsFor(plan).capturesPerMonth;
-  if (limit === null) return null;
-
-  const { total } = await countMonthlyCaptures(userId);
-  return quota(limit, total);
+  return row?.homeWorkspaceId ?? null;
 }
 
 /** As capturas do mês, sozinhas. Uma consulta, duas subconsultas. */
@@ -254,8 +151,6 @@ export async function countMonthlyCaptures(
 /* ---------------------------------------------------------------------- */
 
 export interface UsageSnapshot {
-  plan: Plan;
-  limits: PlanLimits;
   workspaces: number;
   captures: CaptureUsage;
   storageBytes: number;
@@ -267,7 +162,6 @@ export interface UsageSnapshot {
 export async function getUsageSnapshot(userId: string): Promise<UsageSnapshot> {
   const [row] = await db
     .select({
-      plan: profiles.plan,
       notes: noteCaptures(userId),
       uploads: uploadCaptures(userId),
       storageBytes: storageBytes(userId),
@@ -277,11 +171,7 @@ export async function getUsageSnapshot(userId: string): Promise<UsageSnapshot> {
     .where(eq(profiles.id, userId))
     .limit(1);
 
-  const plan = (row?.plan ?? "free") as Plan;
-
   return {
-    plan,
-    limits: limitsFor(plan),
     workspaces: row?.workspaces ?? 0,
     captures: countsOf(row),
     storageBytes: Number(row?.storageBytes ?? 0),

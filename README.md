@@ -11,21 +11,31 @@ com janelas que se arrastam e flechas entre elas.
 > pessoa sobe a própria instância, com o próprio projeto Supabase e as
 > próprias chaves de IA. Ninguém além de você (e dos serviços que você mesmo
 > escolheu configurar) vê os seus dados.
+>
+> O login continua existindo de propósito, não por inércia: uma instância
+> auto-hospedada raramente é de uma pessoa só — o cenário comum é alguém
+> subir isto num servidor pessoal e disponibilizar para quem mora na casa,
+> para a própria organização, ou simplesmente porque duas pessoas dividem o
+> mesmo computador e cada uma quer a própria conta, sem ver o conteúdo da
+> outra.
 
 ## O que existe hoje
 
-| Rota | O que faz |
-|---|---|
-| `/` | A página de venda. |
-| `/login`, `/registro` | Autenticação pelo Supabase Auth. |
-| `/dashboard` | Busca, envio de arquivo, o feed de tarefas da IA e as notas recentes. |
-| `/workspace/[id]` | A lousa: pan, zoom, janelas, post-its, anexos e ligações. |
-| `/nota/[id]` | O editor de texto rico (TipTap sobre ProseMirror). |
-| `/dashboard/tags` | As tags e o que está marcado com cada uma. |
+| Rota                  | O que faz                                                                                                                                                                                                                                                                                    |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                   | A landing pública — apresenta o projeto e leva ao repositório no GitHub, não a um cadastro.                                                                                                                                                                                                  |
+| `/login`, `/registro` | Autenticação pelo Supabase Auth. Não é mais anunciada na landing (não há uma instância central para se cadastrar), mas continua funcionando de verdade — é o que quem sobe a própria instância para a família, os colegas de trabalho ou só um segundo usuário no mesmo computador vai usar. |
+| `/dashboard`          | Busca, envio de arquivo, o feed de tarefas da IA e as notas recentes.                                                                                                                                                                                                                        |
+| `/workspace/[id]`     | A lousa: pan, zoom, janelas, post-its, anexos e ligações.                                                                                                                                                                                                                                    |
+| `/nota/[id]`          | O editor de texto rico (TipTap sobre ProseMirror).                                                                                                                                                                                                                                           |
+| `/dashboard/tags`     | As tags e o que está marcado com cada uma.                                                                                                                                                                                                                                                   |
 
 **Capturar** — solte um PDF, um `.docx`, um `.txt` ou um áudio na barra do
-dashboard. O texto é extraído no servidor e classificado: título, resumo,
-tipo e tags. Cada classificação vira uma linha no painel "Tarefas".
+dashboard. PDFs e textos têm o conteúdo extraído; áudios são transcritos em
+segundo plano quando uma chave de IA está configurada. A partir do texto, a
+Nexo cria título, resumo, tipo e tags. Cada etapa aparece no painel
+"Tarefas". Um `.docx` já pode ser guardado e baixado, mas sua extração de
+texto ainda não está implementada.
 
 **Organizar** — a lousa de um workspace é uma superfície navegável com
 janelas em cima. Notas, post-its, caixas de texto e o próprio arquivo (PDF
@@ -46,21 +56,27 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
    Postgres (Project Settings → Database → Connection string → modo
    "Session").
 2. **Preencha o `.env`**:
+
    ```bash
    cp .env.example .env      # e edite com os valores do passo anterior
    ```
+
 3. **Aplique as migrations**, na ordem, contra o seu próprio banco:
+
    ```bash
    for f in drizzle/*.sql; do
      node --env-file=.env scripts/apply-migration.mjs "$f"
    done
    ```
+
    Elas são idempotentes — rodar de novo não duplica nada.
 4. **(Opcional) gere uma chave da [Groq](https://console.groq.com/keys)** para
-   a classificação automática de documentos. Sem ela, e sem `OPENAI_API_KEY`,
-   o upload continua funcionando: entra um classificador determinístico, sem
-   custo, no lugar da IA.
+   a classificação automática e a transcrição de áudio. Sem ela, e sem
+   `OPENAI_API_KEY`, o upload continua funcionando: documentos recebem um
+   classificador determinístico e áudios ficam visivelmente aguardando a
+   configuração da IA, sem alegar que foram analisados.
 5. **Instale e rode:**
+
    ```bash
    bun install
    bun dev
@@ -72,19 +88,21 @@ uma mensagem que diz exatamente qual variável falta e onde preenchê-la.
 
 ### Variáveis de ambiente
 
-| Variável | Obrigatória? | Para quê |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Sim | Endereço do seu projeto Supabase. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Sim | Chave pública. O que protege os dados é a RLS, não ela. |
-| `DATABASE_URL` | Sim | Conexão Postgres do Drizzle — o mesmo projeto Supabase. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Só para os roteiros `bun run shots:*` | Ignora RLS; a aplicação em si nunca lê esta chave. |
-| `GROQ_API_KEY` / `GROQ_MODEL` | Não | Classificação por IA. Tem precedência sobre a OpenAI. |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | Não | Classificação por IA, se não houver chave da Groq. |
-| `NEXT_PUBLIC_STRIPE_CHECKOUT_MONTHLY` / `_YEARLY` | Não | Payment Links do Stripe. Sem eles, o CTA leva ao registro. |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Não | Rate limiting distribuído. Sem elas, cai num limitador em memória (ok para uma instância só). |
+| Variável                            | Obrigatória?                          | Para quê                                                                                      |
+| ----------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`          | Sim                                   | Endereço do seu projeto Supabase.                                                             |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`     | Sim                                   | Chave pública. O que protege os dados é a RLS, não ela.                                       |
+| `DATABASE_URL`                      | Sim                                   | Conexão Postgres do Drizzle — o mesmo projeto Supabase.                                       |
+| `SUPABASE_SERVICE_ROLE_KEY`         | Só para os roteiros `bun run shots:*` | Ignora RLS; a aplicação em si nunca lê esta chave.                                            |
+| `GROQ_API_KEY` / `GROQ_MODEL`       | Não                                   | Classificação por IA. Tem precedência sobre a OpenAI.                                         |
+| `GROQ_TRANSCRIPTION_MODEL`          | Não                                   | Modelo Groq de áudio; padrão `whisper-large-v3-turbo`. Usa a mesma chave Groq.                |
+| `OPENAI_API_KEY` / `OPENAI_MODEL`   | Não                                   | Classificação por IA, se não houver chave da Groq.                                            |
+| `OPENAI_TRANSCRIPTION_MODEL`        | Não                                   | Modelo OpenAI de áudio; padrão `gpt-4o-mini-transcribe`. Usa a mesma chave OpenAI.            |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Não                                   | Rate limiting distribuído. Sem elas, cai num limitador em memória (ok para uma instância só). |
 
 Sem nenhuma das duas chaves de IA (Groq/OpenAI), a aplicação inteira continua
-de pé — só a classificação automática vira um stub.
+de pé — documentos usam um classificador determinístico e áudios aguardam a
+configuração da chave para serem transcritos.
 
 ## Verificação
 
@@ -130,16 +148,15 @@ escolha documentada.
 
 O conteúdo é seu, e fica na sua própria instância — no seu projeto Supabase,
 com as suas chaves. Ninguém além de você opera um servidor central que veja
-os seus dados. A única coisa que sai da sua instância é a classificação
-automática, quando configurada: o nome e o texto extraído do arquivo — sem
-nada que identifique a sua conta — vão para o provedor de IA que **você**
-escolheu (Groq ou OpenAI), sob os termos dele.
+os seus dados. Quando a IA está configurada, o texto extraído de documentos
+e o conteúdo de áudio enviado para transcrição vão ao provedor que **você**
+escolheu (Groq ou OpenAI), sob os termos dele; nenhum identificador de conta
+é enviado junto.
 
-> A página `/privacidade` do produto ainda descreve um serviço hospedado
-> centralmente ("a Nexo" como controladora dos dados). Ela existe da época em
-> que este projeto era pensado como um serviço hospedado por terceiros, e
-> ainda não foi revista para o modelo auto-hospedado — trate-a como
-> desatualizada até lá.
+> A página `/privacidade` do produto já reflete o modelo auto-hospedado: quem
+> sobe uma instância para outras pessoas usarem é quem responde pelos dados
+> delas, não quem mantém este código. O e-mail de contato ali é um exemplo —
+> troque pelo seu antes de publicar a sua instância para terceiros.
 
 ## Licença
 

@@ -3,6 +3,8 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 
 import { EditorBubbleMenu } from "@/components/editor/editor-bubble-menu";
+import { EditorZoomControls } from "@/components/editor/editor-zoom-controls";
+import { useEditorZoom, useEditorZoomShortcuts } from "@/hooks/use-editor-zoom";
 import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { plainToRichDocument } from "@/lib/editor/document";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
@@ -63,6 +65,8 @@ export function DraftEditor({
     },
     onUpdate: ({ editor: current }) => onChange(current.getJSON()),
   });
+  const textZoom = useEditorZoom("nexo-draft-editor-zoom");
+  useEditorZoomShortcuts(editor, textZoom);
 
   return (
     <div className="mt-1 border-t border-border">
@@ -73,6 +77,7 @@ export function DraftEditor({
       {/* Altura e rolagem são desta tela; a tipografia vem compartilhada. */}
       <EditorContent
         editor={editor}
+        style={{ zoom: textZoom.zoom / 100 }}
         className={cn(
           "overflow-y-auto px-2.5 pt-2 pb-2.5 [&_.tiptap]:min-h-[7rem]",
           expanded
@@ -81,6 +86,23 @@ export function DraftEditor({
           PROSE_EDITOR_CLASS
         )}
       />
+      <div className="flex justify-end border-t border-border px-2.5 py-2">
+        <EditorZoomControls
+          zoom={textZoom.zoom}
+          onDecrease={() => {
+            textZoom.decrease();
+            editor?.commands.focus();
+          }}
+          onIncrease={() => {
+            textZoom.increase();
+            editor?.commands.focus();
+          }}
+          onReset={() => {
+            textZoom.reset();
+            editor?.commands.focus();
+          }}
+        />
+      </div>
     </div>
   );
 }

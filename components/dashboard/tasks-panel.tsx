@@ -26,7 +26,7 @@ import {
   toIsoString,
 } from "@/lib/dashboard/format";
 import type { AiJobItem } from "@/lib/dashboard/queries";
-import { readApiFailure } from "@/lib/plan-limit";
+import { readApiFailure } from "@/lib/api-failure";
 import { cn } from "@/lib/utils";
 
 /** Tabelas cuja mudança invalida este painel. Constante no módulo para o
@@ -54,6 +54,11 @@ interface StatusStyle {
 
 const STATUS: Record<string, StatusStyle> = {
   queued: { icon: LoaderCircle, tone: "text-subtle-foreground", label: "Na fila" },
+  waiting_configuration: {
+    icon: CircleAlert,
+    tone: "text-tag-1-foreground",
+    label: "Aguardando IA",
+  },
   running: {
     icon: LoaderCircle,
     tone: "text-tag-4-foreground",

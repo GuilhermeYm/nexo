@@ -8,14 +8,14 @@ import { FaqSection } from "@/components/sections/faq-section";
 import { FeaturesSection } from "@/components/sections/features-section";
 import { HeroSection } from "@/components/sections/hero-section";
 import { HowItWorksSection } from "@/components/sections/how-it-works-section";
-import { PricingSection } from "@/components/sections/pricing-section";
+import { SelfHostSection } from "@/components/sections/self-host-section";
 import { createClient } from "@/lib/supabase/server";
 
 /**
  * A landing pública — ou o caminho de volta para dentro, para quem já entrou.
  *
- * Quem já tem sessão não precisa ver a página que vende o produto que ele já
- * assinou: vai direto para o dashboard.
+ * Quem já tem sessão não precisa ver a página que apresenta o produto que ele
+ * já está usando: vai direto para o dashboard.
  *
  * A checagem é feita em duas etapas de propósito. `getUser()` valida o JWT no
  * servidor do Supabase, o que é uma ida à rede — e cobrá-la de **todo**
@@ -26,7 +26,7 @@ import { createClient } from "@/lib/supabase/server";
  * ninguém — a pessoa vê a landing, que é o comportamento certo.
  */
 export default async function Home() {
-  if (await hasSessionCookie()) {
+  if (hasSupabaseEnv() && (await hasSessionCookie())) {
     const supabase = await createClient();
     const {
       data: { user },
@@ -42,7 +42,7 @@ export default async function Home() {
         <HeroSection />
         <FeaturesSection />
         <HowItWorksSection />
-        <PricingSection />
+        <SelfHostSection />
         <FaqSection />
       </main>
       <Footer />
@@ -65,4 +65,17 @@ async function hasSessionCookie(): Promise<boolean> {
     .some(
       (cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("auth-token")
     );
+}
+
+/**
+ * Dá para subir só a landing, sem Supabase nenhum configurado — nenhuma
+ * seção da página lê essas variáveis, exceto este redirecionamento. Sem essa
+ * checagem, um cookie perdido de outra instância no mesmo domínio faria
+ * `createClient()` lançar `missingEnvError` e devolver 500 numa página que,
+ * de outro modo, não precisaria de banco nenhum para existir.
+ */
+function hasSupabaseEnv(): boolean {
+  return Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
 }
