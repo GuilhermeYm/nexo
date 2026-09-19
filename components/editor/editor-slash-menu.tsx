@@ -11,6 +11,8 @@ import {
   useState,
 } from "react";
 
+import { Keycaps } from "@/components/editor/shortcut-tip";
+import type { Shortcut } from "@/lib/editor/shortcuts";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,8 +31,8 @@ import { cn } from "@/lib/utils";
 
 export interface SlashItem {
   title: string;
-  /** A dica curta à direita — o atalho equivalente, quando existe. */
-  hint?: string;
+  /** O atalho equivalente, quando existe — desenhado em teclas à direita. */
+  shortcut?: Shortcut;
   keywords: string[];
   icon: LucideIcon;
   run: (editor: Editor, range: Range) => void;
@@ -83,7 +85,7 @@ export const SlashMenuList = forwardRef<SlashMenuHandle, SlashMenuListProps>(
 
     if (items.length === 0) {
       return (
-        <div className="w-64 rounded-xl border border-border bg-background p-3 text-xs text-subtle-foreground shadow-lg">
+        <div className="w-72 rounded-xl border border-border bg-background p-3 text-xs text-subtle-foreground shadow-lg">
           Nenhum bloco com esse nome.
         </div>
       );
@@ -93,7 +95,7 @@ export const SlashMenuList = forwardRef<SlashMenuHandle, SlashMenuListProps>(
       <div
         ref={listRef}
         role="listbox"
-        className="max-h-72 w-64 overflow-y-auto rounded-xl border border-border bg-background p-1 shadow-lg"
+        className="max-h-72 w-72 overflow-y-auto rounded-xl border border-border bg-background p-1 shadow-lg"
       >
         {items.map((item, index) => {
           const Icon = item.icon;
@@ -122,10 +124,9 @@ export const SlashMenuList = forwardRef<SlashMenuHandle, SlashMenuListProps>(
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1 truncate">{item.title}</span>
-              {item.hint && (
-                <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">
-                  {item.hint}
-                </span>
+              {/* Só as teclas: o nome da ação já é o título da linha. */}
+              {item.shortcut && (
+                <Keycaps shortcut={item.shortcut} className="shrink-0" />
               )}
             </button>
           );

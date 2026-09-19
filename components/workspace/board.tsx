@@ -28,14 +28,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { ErrorReport } from "@/components/errors/error-report";
@@ -56,8 +49,16 @@ import {
   connectionAt,
 } from "@/components/workspace/connection-layer";
 import { ConnectionLabels } from "@/components/workspace/connection-labels";
-import { BoardMarksLayer, type DraftMark } from "@/components/workspace/board-marks-layer";
-import { markContains, normalizeStroke, simplifyPoints, smoothStrokePoints } from "@/lib/workspace/board-marks";
+import {
+  BoardMarksLayer,
+  type DraftMark,
+} from "@/components/workspace/board-marks-layer";
+import {
+  markContains,
+  normalizeStroke,
+  simplifyPoints,
+  smoothStrokePoints,
+} from "@/lib/workspace/board-marks";
 import {
   DEFAULT_WINDOW_SIZE,
   frameHeightOf,
@@ -186,7 +187,12 @@ export function Board({
     marks,
     createMark,
     deleteNote,
-  } = useBoardWindows(workspace.id, initialWindows, initialConnections, initialMarks);
+  } = useBoardWindows(
+    workspace.id,
+    initialWindows,
+    initialConnections,
+    initialMarks
+  );
 
   const router = useRouter();
 
@@ -195,7 +201,9 @@ export function Board({
   const [focusedId, setFocusedId] = useState<string | null>(focusWindowId);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [notePendingDelete, setNotePendingDelete] = useState<string | null>(null);
+  const [notePendingDelete, setNotePendingDelete] = useState<string | null>(
+    null
+  );
   const [deleteAttachments, setDeleteAttachments] = useState(false);
   /**
    * Modo de leitura: some com tudo que edita, cria ou apaga, e deixa só o
@@ -221,10 +229,13 @@ export function Board({
    * `windowAt` e `connectionAt`, não o DOM — a camada responderia sempre por
    * ela mesma.
    */
-  const [tool, setTool] = useState<"none" | "eraser" | "link" | "pen" | "shape">("none");
+  const [tool, setTool] = useState<
+    "none" | "eraser" | "link" | "pen" | "shape"
+  >("none");
   const [markTone, setMarkTone] = useState<BoardMarkTone>("default");
   const [markWeight, setMarkWeight] = useState(3);
-  const [shapeKind, setShapeKind] = useState<Exclude<BoardMarkKind, "pen">>("rectangle");
+  const [shapeKind, setShapeKind] =
+    useState<Exclude<BoardMarkKind, "pen">>("rectangle");
   const [draftMark, setDraftMark] = useState<DraftMark | null>(null);
   const draftRef = useRef<DraftMark | null>(null);
   const draftFrame = useRef<number | null>(null);
@@ -465,7 +476,11 @@ export function Board({
       // `code` além de `key`: com Ctrl, o "+" do teclado numérico e o "="
       // da fileira de números chegam com nomes diferentes conforme o layout,
       // e um teclado ABNT2 ainda manda um terceiro.
-      if (event.key === "+" || event.key === "=" || event.code === "NumpadAdd") {
+      if (
+        event.key === "+" ||
+        event.key === "=" ||
+        event.code === "NumpadAdd"
+      ) {
         event.preventDefault();
         zoomTo((current) => current * ZOOM_STEP, x, y);
         return;
@@ -619,7 +634,10 @@ export function Board({
       if (!hit && !link) {
         for (let index = marks.length - 1; index >= 0; index -= 1) {
           const candidate = marks[index];
-          if (!sweptMarksRef.current.has(candidate.id) && markContains(candidate, at, 8 / viewport.zoom)) {
+          if (
+            !sweptMarksRef.current.has(candidate.id) &&
+            markContains(candidate, at, 8 / viewport.zoom)
+          ) {
             mark = candidate;
             break;
           }
@@ -758,73 +776,105 @@ export function Board({
     [zenMode]
   );
 
-  const boardPointFromEvent = useCallback((event: React.PointerEvent) => {
-    const point = toContainer(event.clientX, event.clientY);
-    return toBoard(point.x, point.y);
-  }, [toBoard, toContainer]);
+  const boardPointFromEvent = useCallback(
+    (event: React.PointerEvent) => {
+      const point = toContainer(event.clientX, event.clientY);
+      return toBoard(point.x, point.y);
+    },
+    [toBoard, toContainer]
+  );
 
   const paintDraft = useCallback(() => {
     if (draftFrame.current !== null) return;
     draftFrame.current = requestAnimationFrame(() => {
       draftFrame.current = null;
-      setDraftMark(draftRef.current ? { ...draftRef.current, points: [...draftRef.current.points] } : null);
+      setDraftMark(
+        draftRef.current
+          ? { ...draftRef.current, points: [...draftRef.current.points] }
+          : null
+      );
     });
   }, []);
 
-  const startDrawing = useCallback((event: React.PointerEvent) => {
-    if (tool !== "pen" && tool !== "shape") return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const point = boardPointFromEvent(event);
-    draftRef.current = {
-      kind: tool === "pen" ? "pen" : shapeKind,
-      points: tool === "pen" ? [point] : [],
-      start: point,
-      end: point,
-      tone: markTone,
-      weight: markWeight,
-    };
-    setDraftMark(draftRef.current);
-  }, [boardPointFromEvent, markTone, markWeight, shapeKind, tool]);
+  const startDrawing = useCallback(
+    (event: React.PointerEvent) => {
+      if (tool !== "pen" && tool !== "shape") return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const point = boardPointFromEvent(event);
+      draftRef.current = {
+        kind: tool === "pen" ? "pen" : shapeKind,
+        points: tool === "pen" ? [point] : [],
+        start: point,
+        end: point,
+        tone: markTone,
+        weight: markWeight,
+      };
+      setDraftMark(draftRef.current);
+    },
+    [boardPointFromEvent, markTone, markWeight, shapeKind, tool]
+  );
 
-  const moveDrawing = useCallback((event: React.PointerEvent) => {
-    const draft = draftRef.current;
-    if (!draft) return;
-    const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
-    if (draft.kind === "pen") {
-      for (const pointer of coalesced) {
-        const container = toContainer(pointer.clientX, pointer.clientY);
-        draft.points.push(toBoard(container.x, container.y));
+  const moveDrawing = useCallback(
+    (event: React.PointerEvent) => {
+      const draft = draftRef.current;
+      if (!draft) return;
+      const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [
+        event.nativeEvent,
+      ];
+      if (draft.kind === "pen") {
+        for (const pointer of coalesced) {
+          const container = toContainer(pointer.clientX, pointer.clientY);
+          draft.points.push(toBoard(container.x, container.y));
+        }
+      } else {
+        draft.end = boardPointFromEvent(event);
       }
-    } else {
-      draft.end = boardPointFromEvent(event);
-    }
-    paintDraft();
-  }, [boardPointFromEvent, paintDraft, toBoard, toContainer]);
+      paintDraft();
+    },
+    [boardPointFromEvent, paintDraft, toBoard, toContainer]
+  );
 
-  const finishDrawing = useCallback((event: React.PointerEvent) => {
-    const draft = draftRef.current;
-    draftRef.current = null;
-    setDraftMark(null);
-    if (!draft) return;
-    if (draft.kind === "pen") {
-      // O pointerup pode chegar depois do último pointermove. Guardar a
-      // posição final evita a pequena ponta reta/curta que isso produzia.
-      draft.points.push(boardPointFromEvent(event));
-      const points = simplifyPoints(
-        smoothStrokePoints(draft.points),
-        Math.max(0.8, 1.5 / viewport.zoom)
-      );
-      if (points.length < 2) return;
-      const normalized = normalizeStroke(points);
-      void createMark({ kind: "pen", ...normalized, tone: draft.tone, weight: draft.weight });
-      return;
-    }
-    draft.end = boardPointFromEvent(event);
-    const width = Math.round(Math.abs(draft.end.x - draft.start.x));
-    const height = Math.round(Math.abs(draft.end.y - draft.start.y));
-    if (width < 4 || height < 4) return;
-    void createMark({ kind: draft.kind, points: [], x: Math.round(Math.min(draft.start.x, draft.end.x)), y: Math.round(Math.min(draft.start.y, draft.end.y)), width, height, tone: draft.tone, weight: draft.weight });
-  }, [boardPointFromEvent, createMark, viewport.zoom]);
+  const finishDrawing = useCallback(
+    (event: React.PointerEvent) => {
+      const draft = draftRef.current;
+      draftRef.current = null;
+      setDraftMark(null);
+      if (!draft) return;
+      if (draft.kind === "pen") {
+        // O pointerup pode chegar depois do último pointermove. Guardar a
+        // posição final evita a pequena ponta reta/curta que isso produzia.
+        draft.points.push(boardPointFromEvent(event));
+        const points = simplifyPoints(
+          smoothStrokePoints(draft.points),
+          Math.max(0.8, 1.5 / viewport.zoom)
+        );
+        if (points.length < 2) return;
+        const normalized = normalizeStroke(points);
+        void createMark({
+          kind: "pen",
+          ...normalized,
+          tone: draft.tone,
+          weight: draft.weight,
+        });
+        return;
+      }
+      draft.end = boardPointFromEvent(event);
+      const width = Math.round(Math.abs(draft.end.x - draft.start.x));
+      const height = Math.round(Math.abs(draft.end.y - draft.start.y));
+      if (width < 4 || height < 4) return;
+      void createMark({
+        kind: draft.kind,
+        points: [],
+        x: Math.round(Math.min(draft.start.x, draft.end.x)),
+        y: Math.round(Math.min(draft.start.y, draft.end.y)),
+        width,
+        height,
+        tone: draft.tone,
+        weight: draft.weight,
+      });
+    },
+    [boardPointFromEvent, createMark, viewport.zoom]
+  );
 
   const cancelDrawing = useCallback(() => {
     draftRef.current = null;
@@ -933,9 +983,7 @@ export function Board({
    * guardar a ferramenta no meio do gesto, tudo volta.
    */
   const visibleWindows =
-    swept.size === 0
-      ? windows
-      : windows.filter((item) => !swept.has(item.id));
+    swept.size === 0 ? windows : windows.filter((item) => !swept.has(item.id));
 
   // As flechas da janela encostada somem junto com ela, aqui como no banco:
   // uma flecha apontando para o vazio seria pior do que nenhuma.
@@ -948,9 +996,10 @@ export function Board({
             !swept.has(item.fromWindowId) &&
             !swept.has(item.toWindowId)
         );
-  const visibleMarks = sweptMarks.size === 0
-    ? marks
-    : marks.filter((mark) => !sweptMarks.has(mark.id));
+  const visibleMarks =
+    sweptMarks.size === 0
+      ? marks
+      : marks.filter((mark) => !sweptMarks.has(mark.id));
 
   /** A janela que a borracha vai apagar se encostar agora. */
   const eraserTarget =
@@ -1131,21 +1180,24 @@ export function Board({
    * Um PDF é quase três vezes mais alto que um post-it; centralizado pela
    * medida de uma nota, ele nascia com metade para fora da tela.
    */
-  const spawnPoint = useCallback((kind: BoardWindow["kind"]) => {
-    const box = frameRef.current?.getBoundingClientRect();
-    const center = toBoard((box?.width ?? 800) / 2, (box?.height ?? 600) / 2);
-    const size = DEFAULT_WINDOW_SIZE[kind];
+  const spawnPoint = useCallback(
+    (kind: BoardWindow["kind"]) => {
+      const box = frameRef.current?.getBoundingClientRect();
+      const center = toBoard((box?.width ?? 800) / 2, (box?.height ?? 600) / 2);
+      const size = DEFAULT_WINDOW_SIZE[kind];
 
-    // Um leve deslocamento aleatório para criações seguidas não empilharem
-    // exatamente uma sobre a outra e sumirem umas atrás das outras — em
-    // múltiplos do grid, para a janela já nascer alinhada.
-    const jitter = () => (Math.round(Math.random() * 12) - 6) * BOARD_GRID;
+      // Um leve deslocamento aleatório para criações seguidas não empilharem
+      // exatamente uma sobre a outra e sumirem umas atrás das outras — em
+      // múltiplos do grid, para a janela já nascer alinhada.
+      const jitter = () => (Math.round(Math.random() * 12) - 6) * BOARD_GRID;
 
-    return {
-      x: snapToGrid(center.x - size.width / 2) + jitter(),
-      y: snapToGrid(center.y - size.height / 2) + jitter(),
-    };
-  }, [toBoard]);
+      return {
+        x: snapToGrid(center.x - size.width / 2) + jitter(),
+        y: snapToGrid(center.y - size.height / 2) + jitter(),
+      };
+    },
+    [toBoard]
+  );
 
   const spawn = useCallback(
     async (
@@ -1240,7 +1292,8 @@ export function Board({
         return;
       }
       if (!shortcutTool) return;
-      if (shortcutTool === "link" && tool !== "link" && windows.length < 2) return;
+      if (shortcutTool === "link" && tool !== "link" && windows.length < 2)
+        return;
       if (
         shortcutTool === "eraser" &&
         tool !== "eraser" &&
@@ -1258,7 +1311,16 @@ export function Board({
 
     window.addEventListener("keydown", handleToolShortcut);
     return () => window.removeEventListener("keydown", handleToolShortcut);
-  }, [connections.length, marks.length, pickerOpen, pickTool, stopTool, tool, windows.length, zenMode]);
+  }, [
+    connections.length,
+    marks.length,
+    pickerOpen,
+    pickTool,
+    stopTool,
+    tool,
+    windows.length,
+    zenMode,
+  ]);
 
   const handleBackgroundDoubleClick = useCallback(
     (event: React.MouseEvent) => {
@@ -1403,8 +1465,7 @@ export function Board({
   // estiver cheia — deixá-lo cobrir um erro de rede esconderia o transitório
   // atrás do constante.
   const notice: BoardNotice | null =
-    error ??
-    (workspaceError ? { message: workspaceError, code: null } : null);
+    error ?? (workspaceError ? { message: workspaceError, code: null } : null);
 
   /**
    * A recuperação é deliberadamente curta: o cartão não vira uma peça fixa
@@ -1433,7 +1494,10 @@ export function Board({
     if (undoHeld) return;
 
     const startedAt = performance.now();
-    const timeout = window.setTimeout(dismissErased, undoClock.current.remaining);
+    const timeout = window.setTimeout(
+      dismissErased,
+      undoClock.current.remaining
+    );
     return () => {
       window.clearTimeout(timeout);
       undoClock.current.remaining = Math.max(
@@ -1444,7 +1508,10 @@ export function Board({
   }, [lastErased, undoHeld, dismissErased]);
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-clip bg-background">
+    <div
+      data-app-viewport=""
+      className="flex h-[100dvh] flex-col overflow-clip overscroll-contain bg-background"
+    >
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2.5 sm:px-4">
         <Link
           href="/dashboard"
@@ -1492,8 +1559,12 @@ export function Board({
                 </h1>
               )}
               <span className="shrink-0 text-xs whitespace-nowrap text-subtle-foreground">
-                <span className="tabular-nums">{visibleWindows.length + visibleMarks.length}</span>{" "}
-                {visibleWindows.length + visibleMarks.length === 1 ? "elemento" : "elementos"}
+                <span className="tabular-nums">
+                  {visibleWindows.length + visibleMarks.length}
+                </span>{" "}
+                {visibleWindows.length + visibleMarks.length === 1
+                  ? "elemento"
+                  : "elementos"}
               </span>
             </div>
           </ContextMenuTrigger>
@@ -1553,7 +1624,11 @@ export function Board({
 
             <ToolButton
               label="Caneta"
-              hint={tool === "pen" ? "Clique de novo para guardar." : "Desenhe livremente na lousa."}
+              hint={
+                tool === "pen"
+                  ? "Clique de novo para guardar."
+                  : "Desenhe livremente na lousa."
+              }
               shortcut="P"
               expanded={tool === "pen"}
               onClick={() => (tool === "pen" ? stopTool() : pickTool("pen"))}
@@ -1563,10 +1638,16 @@ export function Board({
 
             <ToolButton
               label="Formas"
-              hint={tool === "shape" ? "Clique de novo para guardar." : "Retângulo, elipse ou losango."}
+              hint={
+                tool === "shape"
+                  ? "Clique de novo para guardar."
+                  : "Retângulo, elipse ou losango."
+              }
               shortcut="F"
               expanded={tool === "shape"}
-              onClick={() => (tool === "shape" ? stopTool() : pickTool("shape"))}
+              onClick={() =>
+                tool === "shape" ? stopTool() : pickTool("shape")
+              }
             >
               <Square className="size-4" aria-hidden="true" />
             </ToolButton>
@@ -1903,117 +1984,137 @@ export function Board({
             ligar, e a camada estaria só cobrindo os botões do estado vazio —
             que é justamente o que a pessoa precisa alcançar depois de apagar
             tudo. */}
-        {usingTool && ((tool === "pen" || tool === "shape") || visibleWindows.length > 0 || visibleMarks.length > 0) && (
-          <div
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
+        {usingTool &&
+          (tool === "pen" ||
+            tool === "shape" ||
+            visibleWindows.length > 0 ||
+            visibleMarks.length > 0) && (
+            <div
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
 
-              if (tool === "pen" || tool === "shape") {
-                startDrawing(event);
-                return;
+                if (tool === "pen" || tool === "shape") {
+                  startDrawing(event);
+                  return;
+                }
+
+                event.currentTarget.setPointerCapture(event.pointerId);
+
+                if (tool === "link") {
+                  pickForLink(event.clientX, event.clientY);
+                  return;
+                }
+
+                sweeping.current = true;
+                sweep(event.clientX, event.clientY);
+              }}
+              onPointerMove={(event) => {
+                if (tool === "pen" || tool === "shape") {
+                  moveDrawing(event);
+                  return;
+                }
+                if (tool === "link") {
+                  const hit = windowAt(event.clientX, event.clientY);
+                  setUnderEraser(hit?.id ?? null);
+                  // A ponta solta acompanha o ponteiro. Só enquanto existe uma
+                  // origem: sem ela não há o que desenhar, e guardar a posição
+                  // à toa seria um render por movimento do mouse.
+                  if (!linkingFrom) return;
+                  trackLinkPointer(event.clientX, event.clientY);
+                  return;
+                }
+
+                sweep(event.clientX, event.clientY);
+              }}
+              onPointerUp={
+                tool === "eraser"
+                  ? commitSweep
+                  : tool === "pen" || tool === "shape"
+                    ? finishDrawing
+                    : undefined
               }
-
-              event.currentTarget.setPointerCapture(event.pointerId);
-
-              if (tool === "link") {
-                pickForLink(event.clientX, event.clientY);
-                return;
+              onPointerCancel={
+                tool === "eraser"
+                  ? commitSweep
+                  : tool === "pen" || tool === "shape"
+                    ? cancelDrawing
+                    : undefined
               }
-
-              sweeping.current = true;
-              sweep(event.clientX, event.clientY);
-            }}
-            onPointerMove={(event) => {
-              if (tool === "pen" || tool === "shape") {
-                moveDrawing(event);
-                return;
-              }
-              if (tool === "link") {
-                const hit = windowAt(event.clientX, event.clientY);
-                setUnderEraser(hit?.id ?? null);
-                // A ponta solta acompanha o ponteiro. Só enquanto existe uma
-                // origem: sem ela não há o que desenhar, e guardar a posição
-                // à toa seria um render por movimento do mouse.
-                if (!linkingFrom) return;
-                trackLinkPointer(event.clientX, event.clientY);
-                return;
-              }
-
-              sweep(event.clientX, event.clientY);
-            }}
-            onPointerUp={tool === "eraser" ? commitSweep : tool === "pen" || tool === "shape" ? finishDrawing : undefined}
-            onPointerCancel={tool === "eraser" ? commitSweep : tool === "pen" || tool === "shape" ? cancelDrawing : undefined}
-            onPointerLeave={() => {
-              setUnderEraser(null);
-              setUnderEraserLink(null);
-            }}
-            style={{ touchAction: "none" }}
-            className={cn(
-              "absolute inset-0 z-20",
-              tool === "link" ? "cursor-cell" : "cursor-crosshair"
-            )}
-          >
-            {/* No primeiro passo, todas as janelas se apresentam como alvos.
+              onPointerLeave={() => {
+                setUnderEraser(null);
+                setUnderEraserLink(null);
+              }}
+              style={{ touchAction: "none" }}
+              className={cn(
+                "absolute inset-0 z-20",
+                tool === "link" ? "cursor-cell" : "cursor-crosshair"
+              )}
+            >
+              {/* No primeiro passo, todas as janelas se apresentam como alvos.
                 Depois, a origem fica marcada e as demais continuam discretas:
                 a pessoa não precisa descobrir onde é possível tocar. */}
-            {tool === "link" &&
-              visibleWindows.map((item) => {
-                const origin = item.id === linkOrigin?.id;
-                const hovered = item.id === linkTarget?.id;
-                if (origin || hovered) return null;
+              {tool === "link" &&
+                visibleWindows.map((item) => {
+                  const origin = item.id === linkOrigin?.id;
+                  const hovered = item.id === linkTarget?.id;
+                  if (origin || hovered) return null;
 
-                return (
-                  <div
-                    key={item.id}
-                    aria-hidden="true"
-                    style={frameBox(item, viewport)}
-                    className="pointer-events-none absolute rounded-lg border border-dashed border-accent/35 bg-accent/[0.025]"
-                  />
-                );
-              })}
+                  return (
+                    <div
+                      key={item.id}
+                      aria-hidden="true"
+                      style={frameBox(item, viewport)}
+                      className="pointer-events-none absolute rounded-lg border border-dashed border-accent/35 bg-accent/[0.025]"
+                    />
+                  );
+                })}
 
-            {/* O alvo, marcado antes de sumir — ou antes de ser ligado. Sem
+              {/* O alvo, marcado antes de sumir — ou antes de ser ligado. Sem
                 isto a ferramenta age sobre o que estiver embaixo sem nunca
                 ter dito o que era. */}
-            {tool === "eraser" && eraserTarget && (
-              <div
-                aria-hidden="true"
-                style={frameBox(eraserTarget, viewport)}
-                className="pointer-events-none absolute rounded-lg border-2 border-error bg-error/10"
-              />
-            )}
+              {tool === "eraser" && eraserTarget && (
+                <div
+                  aria-hidden="true"
+                  style={frameBox(eraserTarget, viewport)}
+                  className="pointer-events-none absolute rounded-lg border-2 border-error bg-error/10"
+                />
+              )}
 
-            {/* A origem escolhida continua marcada enquanto o segundo toque
+              {/* A origem escolhida continua marcada enquanto o segundo toque
                 não vem: sem isso, no meio de uma corrente de ligações, não
                 dá para saber de onde a próxima sai. */}
-            {linkOrigin && linkOrigin.id !== linkTarget?.id && (
-              <div
-                aria-hidden="true"
-                style={frameBox(linkOrigin, viewport)}
-                className="pointer-events-none absolute rounded-lg border-2 border-accent bg-accent/5 shadow-[0_8px_24px_-16px] shadow-accent"
-              >
-                <span className="absolute -top-3 left-3 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground shadow-sm">
-                  Origem
-                </span>
-              </div>
-            )}
+              {linkOrigin && linkOrigin.id !== linkTarget?.id && (
+                <div
+                  aria-hidden="true"
+                  style={frameBox(linkOrigin, viewport)}
+                  className="pointer-events-none absolute rounded-lg border-2 border-accent bg-accent/5 shadow-[0_8px_24px_-16px] shadow-accent"
+                >
+                  <span className="absolute -top-3 left-3 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground shadow-sm">
+                    Origem
+                  </span>
+                </div>
+              )}
 
-            {tool === "link" && linkTarget && (
-              <div
-                aria-hidden="true"
-                style={frameBox(linkTarget, viewport)}
-                className={cn(
-                  "pointer-events-none absolute rounded-lg border-2 border-accent bg-accent/10 transition-colors duration-150 motion-reduce:transition-none",
-                  linkingPending && "animate-pulse motion-reduce:animate-none"
-                )}
-              >
-                <span className="absolute -top-3 left-3 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground shadow-sm">
-                  {linkingPending ? "Ligando…" : linkOrigin ? "Destino" : "Começar aqui"}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+              {tool === "link" && linkTarget && (
+                <div
+                  aria-hidden="true"
+                  style={frameBox(linkTarget, viewport)}
+                  className={cn(
+                    "pointer-events-none absolute rounded-lg border-2 border-accent bg-accent/10 transition-colors duration-150 motion-reduce:transition-none",
+                    linkingPending && "animate-pulse motion-reduce:animate-none"
+                  )}
+                >
+                  <span className="absolute -top-3 left-3 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground shadow-sm">
+                    {linkingPending
+                      ? "Ligando…"
+                      : linkOrigin
+                        ? "Destino"
+                        : "Começar aqui"}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
         {/* O aviso da ferramenta. Ele diz as três coisas que a pessoa precisa
             saber para não se assustar: qual ferramenta está na mão, o que ela
@@ -2026,9 +2127,15 @@ export function Board({
                 aria-hidden="true"
               />
             ) : tool === "pen" ? (
-              <Pencil className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+              <Pencil
+                className="size-4 shrink-0 text-foreground"
+                aria-hidden="true"
+              />
             ) : tool === "shape" ? (
-              <Square className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+              <Square
+                className="size-4 shrink-0 text-foreground"
+                aria-hidden="true"
+              />
             ) : (
               <Eraser
                 className="size-4 shrink-0 text-error"
@@ -2067,26 +2174,74 @@ export function Board({
             {(tool === "pen" || tool === "shape") && (
               <>
                 {tool === "shape" && (
-                  <div className="flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="Tipo de forma">
-                    {([
-                      ["rectangle", Square, "Retângulo"],
-                      ["ellipse", Circle, "Elipse"],
-                      ["diamond", Diamond, "Losango"],
-                    ] as const).map(([kind, Icon, label]) => (
-                      <button key={kind} type="button" title={label} aria-pressed={shapeKind === kind} onClick={() => setShapeKind(kind)} className={cn("flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-tertiary hover:text-foreground", shapeKind === kind && "bg-foreground text-background hover:bg-foreground hover:text-background")}>
+                  <div
+                    className="flex items-center gap-0.5 border-l border-border pl-2"
+                    role="group"
+                    aria-label="Tipo de forma"
+                  >
+                    {(
+                      [
+                        ["rectangle", Square, "Retângulo"],
+                        ["ellipse", Circle, "Elipse"],
+                        ["diamond", Diamond, "Losango"],
+                      ] as const
+                    ).map(([kind, Icon, label]) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        title={label}
+                        aria-pressed={shapeKind === kind}
+                        onClick={() => setShapeKind(kind)}
+                        className={cn(
+                          "flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-tertiary hover:text-foreground",
+                          shapeKind === kind &&
+                            "bg-foreground text-background hover:bg-foreground hover:text-background"
+                        )}
+                      >
                         <Icon className="size-3.5" aria-hidden="true" />
                       </button>
                     ))}
                   </div>
                 )}
-                <div className="flex items-center gap-1 border-l border-border pl-2" role="group" aria-label="Cor do traço">
-                  {(["default", "1", "2", "3", "4", "5", "6"] as BoardMarkTone[]).map((tone) => (
-                    <button key={tone} type="button" title={tone === "default" ? "Cor padrão" : `Cor ${tone}`} aria-label={tone === "default" ? "Cor padrão" : `Cor ${tone}`} aria-pressed={markTone === tone} onClick={() => setMarkTone(tone)} className={cn("size-7 rounded-full border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent pointer-coarse:size-9", markTone === tone ? "border-foreground" : "border-transparent")} style={{ background: markToneColor(tone) }} />
+                <div
+                  className="flex items-center gap-1 border-l border-border pl-2"
+                  role="group"
+                  aria-label="Cor do traço"
+                >
+                  {(
+                    ["default", "1", "2", "3", "4", "5", "6"] as BoardMarkTone[]
+                  ).map((tone) => (
+                    <button
+                      key={tone}
+                      type="button"
+                      title={tone === "default" ? "Cor padrão" : `Cor ${tone}`}
+                      aria-label={
+                        tone === "default" ? "Cor padrão" : `Cor ${tone}`
+                      }
+                      aria-pressed={markTone === tone}
+                      onClick={() => setMarkTone(tone)}
+                      className={cn(
+                        "size-7 rounded-full border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent pointer-coarse:size-9",
+                        markTone === tone
+                          ? "border-foreground"
+                          : "border-transparent"
+                      )}
+                      style={{ background: markToneColor(tone) }}
+                    />
                   ))}
                 </div>
                 <label className="flex items-center gap-1 border-l border-border pl-2 text-[10px] text-muted-foreground">
                   <span className="sr-only">Espessura</span>
-                  <input type="range" min={1} max={12} value={markWeight} onChange={(event) => setMarkWeight(Number(event.target.value))} className="w-14 accent-foreground" />
+                  <input
+                    type="range"
+                    min={1}
+                    max={12}
+                    value={markWeight}
+                    onChange={(event) =>
+                      setMarkWeight(Number(event.target.value))
+                    }
+                    className="w-14 accent-foreground"
+                  />
                   <span className="w-3 tabular-nums">{markWeight}</span>
                 </label>
               </>
@@ -2095,9 +2250,13 @@ export function Board({
             {tool === "eraser" && (
               <button
                 type="button"
-                onClick={() => (armedClear ? clearBoard() : setArmedClear(true))}
+                onClick={() =>
+                  armedClear ? clearBoard() : setArmedClear(true)
+                }
                 onBlur={() => setArmedClear(false)}
-                disabled={visibleWindows.length === 0 && visibleMarks.length === 0}
+                disabled={
+                  visibleWindows.length === 0 && visibleMarks.length === 0
+                }
                 className={cn(
                   "flex h-7 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-9",
                   // Dois passos, como no menu do botão direito: o primeiro
@@ -2146,8 +2305,7 @@ export function Board({
             title="Voltar a 100% — Ctrl 0"
             className="min-w-[3.25rem] rounded-md py-1 text-center text-xs tabular-nums text-muted-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
           >
-            {zoomPercent}%
-            <span className="sr-only">Voltar a 100%</span>
+            {zoomPercent}%<span className="sr-only">Voltar a 100%</span>
           </button>
           <ZoomButton
             label="Aumentar zoom"
@@ -2328,9 +2486,12 @@ export function Board({
               className="mt-0.5 size-4 accent-error"
             />
             <span>
-              <span className="block font-medium">Apagar também os arquivos associados</span>
+              <span className="block font-medium">
+                Apagar também os arquivos associados
+              </span>
               <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                Essa escolha remove permanentemente os arquivos enviados junto com a nota.
+                Essa escolha remove permanentemente os arquivos enviados junto
+                com a nota.
               </span>
             </span>
           </label>
@@ -2863,7 +3024,11 @@ function markToneColor(tone: BoardMarkTone): string {
 
 /** O que o cartão de "apagado" diz. */
 function eraseSummary(batch: ErasedBatch): string {
-  if (batch.removed === 0 && batch.connections === 0 && batch.marks.length > 0) {
+  if (
+    batch.removed === 0 &&
+    batch.connections === 0 &&
+    batch.marks.length > 0
+  ) {
     return batch.marks.length === 1
       ? "1 desenho removido da lousa."
       : `${batch.marks.length} desenhos removidos da lousa.`;
@@ -2903,18 +3068,29 @@ function eraseSummary(batch: ErasedBatch): string {
         ? " 1 ligação caiu junto."
         : ` ${batch.connections} ligações caíram junto.`;
 
-  const drawings = batch.marks.length === 0
-    ? ""
-    : batch.marks.length === 1
-      ? " 1 desenho saiu junto."
-      : ` ${batch.marks.length} desenhos saíram junto.`;
+  const drawings =
+    batch.marks.length === 0
+      ? ""
+      : batch.marks.length === 1
+        ? " 1 desenho saiu junto."
+        : ` ${batch.marks.length} desenhos saíram junto.`;
   return `${what} da lousa. ${fate}${links}${drawings}`;
 }
 
 function boundsOfBoard(windows: BoardWindow[], marks: BoardMark[]) {
   const boxes = [
-    ...windows.map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height })),
-    ...marks.map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height })),
+    ...windows.map((item) => ({
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+    })),
+    ...marks.map((item) => ({
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+    })),
   ];
   if (boxes.length === 0) return null;
   return boxes.reduce(

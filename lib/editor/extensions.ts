@@ -11,6 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 
 import { lowlight } from "@/lib/editor/lowlight";
 import { SlashCommand } from "@/lib/editor/slash-command";
+import { TextColor } from "@/lib/editor/text-color";
 
 /**
  * As extensões do editor, montadas num lugar só.
@@ -195,6 +196,8 @@ export function buildEditorExtensions({
     // Marca-texto de cor única: uma cor só combina com os dois temas sem um
     // seletor de cores, e o realce é sobre "olha isto", não sobre categorizar.
     Highlight,
+    // Cor do texto por nome da paleta, não por valor — ver o arquivo.
+    TextColor,
     TaskList,
     TaskItem.configure({ nested: true }),
     Details.configure({

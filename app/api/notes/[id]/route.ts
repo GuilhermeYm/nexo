@@ -179,6 +179,8 @@ export async function PATCH(
         ...(input.title !== undefined && { title: input.title }),
         ...(content !== undefined && { content }),
         ...(input.contentRich !== undefined && { contentRich: input.contentRich }),
+        ...(input.references !== undefined && { referenceLinks: input.references }),
+        ...(input.font !== undefined && { font: input.font }),
         ...(tally !== null && { tasksTotal: tally.total, tasksDone: tally.done }),
         updatedAt: new Date(),
       })

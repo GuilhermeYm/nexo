@@ -2,9 +2,11 @@ import { notFound, redirect } from "next/navigation";
 
 import { NoteEditor } from "@/components/editor/note-editor";
 import { listWorkspaces } from "@/lib/dashboard/queries";
+import { listFolders } from "@/lib/folders/queries";
 import { getNoteAiView } from "@/lib/notes/ai-view";
 import { getOwnedNote } from "@/lib/notes/queries";
 import { createClient } from "@/lib/supabase/server";
+import { listTagsWithUsage } from "@/lib/tags/queries";
 
 export const metadata = {
   title: "Nota — Nexo",
@@ -34,13 +36,36 @@ export default async function NotaPage(props: PageProps<"/nota/[id]">) {
 
   // 404 e não 403 quando a nota é de outra pessoa: confirmar que ela existe
   // já seria vazar informação.
-  const [note, workspaces, ai] = await Promise.all([
+  const [note, workspaces, ai, tagRows, folderRows] = await Promise.all([
     getOwnedNote(user.id, id),
     listWorkspaces(user.id),
     getNoteAiView(user.id, id),
+    listTagsWithUsage(user.id),
+    listFolders(user.id),
   ]);
 
   if (!note) notFound();
 
-  return <NoteEditor note={note} workspaces={workspaces} ai={ai} />;
+  // Só o que as sugestões precisam — contagem e datas ficam no servidor.
+  const tagVocabulary = tagRows.map(({ id: tagId, name, color }) => ({
+    id: tagId,
+    name,
+    color,
+  }));
+
+  // As pastas, para trocar a da nota ali mesmo na ficha.
+  const folderChoices = folderRows.map(({ id: folderId, name }) => ({
+    id: folderId,
+    name,
+  }));
+
+  return (
+    <NoteEditor
+      note={note}
+      workspaces={workspaces}
+      ai={ai}
+      tagVocabulary={tagVocabulary}
+      folders={folderChoices}
+    />
+  );
 }

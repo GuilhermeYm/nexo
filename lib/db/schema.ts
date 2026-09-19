@@ -149,6 +149,20 @@ export const notes = pgTable(
     content: text("content"),
     /** Documento do editor (TipTap/ProseMirror). Ver drizzle/0008. */
     contentRich: jsonb("content_rich"),
+    /**
+     * As referências da nota: `[{ url, title }]`. Coluna própria, fora do
+     * documento, para não cair na busca e para o editor desenhá-las sempre
+     * no fim — inclusive no PDF. Ver drizzle/0032.
+     */
+    referenceLinks: jsonb("reference_links")
+      .$type<{ url: string; title: string }[]>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(),
+    /**
+     * A fonte do documento: um id da lista curada em
+     * `lib/editor/note-fonts.ts`. Vale na tela e no PDF. Ver drizzle/0033.
+     */
+    font: text("font").default("default").notNull(),
     type: noteTypeEnum("type").default("note").notNull(),
     source: noteSourceEnum("source").default("user").notNull(),
     status: noteStatusEnum("status").default("active").notNull(),
