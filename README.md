@@ -1,6 +1,7 @@
 # Nexo
 
-**Versão:** 1.0.0 · **Bun:** 1.4.0
+[![Versão do projeto](https://img.shields.io/badge/vers%C3%A3o-1.0.0-6d5dfc?style=for-the-badge)](https://github.com/GuilhermeYm/nexo)
+[![Bun](https://img.shields.io/badge/Bun-1.4.0-f9f1e1?style=for-the-badge&logo=bun&logoColor=14151a)](https://bun.sh)
 
 ![O segundo cérebro que você sempre quis, sem o trabalho que você sempre evitou. Capture em segundos. Encontre em milissegundos.](.github/assets/banner.png)
 
@@ -44,18 +45,18 @@ a seção **Como rodar** abaixo sem nenhum deles.
 
 ## O que existe hoje
 
-| Rota                    | O que faz                                                                                                                                                                                                                                                                                    |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                       | A landing pública — apresenta o projeto e leva ao repositório no GitHub, não a um cadastro.                                                                                                                                                                                                  |
-| `/login`, `/registro`    | Autenticação pelo Supabase Auth. Não é mais anunciada na landing (não há uma instância central para se cadastrar), mas continua funcionando de verdade — é o que quem sobe a própria instância para a família, os colegas de trabalho ou só um segundo usuário no mesmo computador vai usar. |
-| `/dashboard`              | Busca, envio de arquivo, o feed de tarefas da IA e as notas recentes.                                                                                                                                                                                                                        |
-| `/dashboard/entrada`      | Os avisos da Nexo: cada tarefa da IA que falhou ou terminou (com o link para o detalhe em Tarefas), o limite de leituras e os avisos da instância. Seleção para marcar como lida ou apagar em lote; o número de não lidas fica sobre o ícone no trilho.                                     |
-| `/dashboard/agenda`       | A lista de tarefas do dia — uma nota especial, com fuso horário e contadores corretos.                                                                                                                                                                                                       |
-| `/dashboard/notas`        | O acervo: inventário paginado de tudo que existe, com filtros, busca e prévia de leitura.                                                                                                                                                                                                    |
-| `/dashboard/arquivos`     | O acervo de arquivos enviados (PDF, áudio, imagem, `.docx`).                                                                                                                                                                                                                                  |
-| `/dashboard/tags`         | As tags, o que está marcado com cada uma, e o modo grafo (notas e tags como rede).                                                                                                                                                                                                           |
-| `/workspace/[id]`         | A lousa: pan, zoom, janelas, post-its, anexos, pastas e ligações.                                                                                                                                                                                                                             |
-| `/nota/[id]`              | O editor de texto rico (TipTap sobre ProseMirror), com exportação em PDF.                                                                                                                                                                                                                     |
+| Rota                  | O que faz                                                                                                                                                                                                                                                                                    |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                   | A landing pública — apresenta o projeto e leva ao repositório no GitHub, não a um cadastro.                                                                                                                                                                                                  |
+| `/login`, `/registro` | Autenticação pelo Supabase Auth. Não é mais anunciada na landing (não há uma instância central para se cadastrar), mas continua funcionando de verdade — é o que quem sobe a própria instância para a família, os colegas de trabalho ou só um segundo usuário no mesmo computador vai usar. |
+| `/dashboard`          | Busca, envio de arquivo, o feed de tarefas da IA e as notas recentes.                                                                                                                                                                                                                        |
+| `/dashboard/entrada`  | Os avisos da Nexo: cada tarefa da IA que falhou ou terminou (com o link para o detalhe em Tarefas), o limite de leituras e os avisos da instância. Seleção para marcar como lida ou apagar em lote; o número de não lidas fica sobre o ícone no trilho.                                      |
+| `/dashboard/agenda`   | A lista de tarefas do dia — uma nota especial, com fuso horário e contadores corretos.                                                                                                                                                                                                       |
+| `/dashboard/notas`    | O acervo: inventário paginado de tudo que existe, com filtros, busca e prévia de leitura.                                                                                                                                                                                                    |
+| `/dashboard/arquivos` | O acervo de arquivos enviados (PDF, áudio, imagem, `.docx`).                                                                                                                                                                                                                                 |
+| `/dashboard/tags`     | As tags, o que está marcado com cada uma, e o modo grafo (notas e tags como rede).                                                                                                                                                                                                           |
+| `/workspace/[id]`     | A lousa: pan, zoom, janelas, post-its, anexos, pastas e ligações.                                                                                                                                                                                                                            |
+| `/nota/[id]`          | O editor de texto rico (TipTap sobre ProseMirror), com exportação em PDF.                                                                                                                                                                                                                    |
 
 **Capturar** — solte um PDF, um `.docx`, um `.txt`, uma imagem ou um áudio na
 barra do dashboard. PDFs e textos têm o conteúdo extraído; imagens são lidas
@@ -118,6 +119,7 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
    ```
 
    Elas são idempotentes — rodar de novo não duplica nada.
+
 5. **(Opcional) gere uma chave da [Groq](https://console.groq.com/keys)** para
    a classificação automática, a leitura de notas e imagens, e a transcrição
    de áudio. Sem ela, e sem `OPENAI_API_KEY`, o upload continua funcionando:
@@ -153,19 +155,19 @@ uma mensagem que diz exatamente qual variável falta e onde preenchê-la.
 
 ### Variáveis de ambiente
 
-| Variável                            | Obrigatória?                          | Para quê                                                                                       |
-| ------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `NEXT_PUBLIC_SUPABASE_URL`           | Sim                                    | Endereço do seu projeto Supabase.                                                                |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`      | Sim                                    | Chave pública. O que protege os dados é a RLS, não ela.                                          |
-| `DATABASE_URL`                       | Sim                                    | Conexão Postgres do Drizzle — o mesmo projeto Supabase.                                          |
-| `SUPABASE_SERVICE_ROLE_KEY`          | Só para os roteiros `bun run shots:*`  | Ignora RLS; a aplicação em si nunca lê esta chave.                                               |
-| `GROQ_API_KEY` / `GROQ_MODEL`        | Não                                    | Classificação por IA de documentos e imagens. Tem precedência sobre a OpenAI.                    |
-| `GROQ_TRANSCRIPTION_MODEL`           | Não                                    | Modelo Groq de áudio; padrão `whisper-large-v3-turbo`. Usa a mesma chave Groq.                   |
-| `GROQ_NOTE_MODEL`                    | Não                                    | Modelo Groq para a leitura das notas escritas por você (resumo + tags). Sem ela, usa `GROQ_MODEL`.|
-| `OPENAI_API_KEY` / `OPENAI_MODEL`    | Não                                    | Classificação por IA, se não houver chave da Groq.                                               |
-| `OPENAI_TRANSCRIPTION_MODEL`         | Não                                    | Modelo OpenAI de áudio; padrão `gpt-4o-mini-transcribe`. Usa a mesma chave OpenAI.                |
-| `OPENAI_NOTE_MODEL`                  | Não                                    | Modelo OpenAI para a leitura das notas. Sem ela, usa `OPENAI_MODEL`.                              |
-| `UPSTASH_REDIS_REST_URL` / `_TOKEN`  | Não                                    | Rate limiting distribuído. Sem elas, cai num limitador em memória (ok para uma instância só).    |
+| Variável                            | Obrigatória?                          | Para quê                                                                                           |
+| ----------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`          | Sim                                   | Endereço do seu projeto Supabase.                                                                  |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`     | Sim                                   | Chave pública. O que protege os dados é a RLS, não ela.                                            |
+| `DATABASE_URL`                      | Sim                                   | Conexão Postgres do Drizzle — o mesmo projeto Supabase.                                            |
+| `SUPABASE_SERVICE_ROLE_KEY`         | Só para os roteiros `bun run shots:*` | Ignora RLS; a aplicação em si nunca lê esta chave.                                                 |
+| `GROQ_API_KEY` / `GROQ_MODEL`       | Não                                   | Classificação por IA de documentos e imagens. Tem precedência sobre a OpenAI.                      |
+| `GROQ_TRANSCRIPTION_MODEL`          | Não                                   | Modelo Groq de áudio; padrão `whisper-large-v3-turbo`. Usa a mesma chave Groq.                     |
+| `GROQ_NOTE_MODEL`                   | Não                                   | Modelo Groq para a leitura das notas escritas por você (resumo + tags). Sem ela, usa `GROQ_MODEL`. |
+| `OPENAI_API_KEY` / `OPENAI_MODEL`   | Não                                   | Classificação por IA, se não houver chave da Groq.                                                 |
+| `OPENAI_TRANSCRIPTION_MODEL`        | Não                                   | Modelo OpenAI de áudio; padrão `gpt-4o-mini-transcribe`. Usa a mesma chave OpenAI.                 |
+| `OPENAI_NOTE_MODEL`                 | Não                                   | Modelo OpenAI para a leitura das notas. Sem ela, usa `OPENAI_MODEL`.                               |
+| `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Não                                   | Rate limiting distribuído. Sem elas, cai num limitador em memória (ok para uma instância só).      |
 
 Sem nenhuma das duas chaves de IA (Groq/OpenAI), a aplicação inteira continua
 de pé — documentos usam um classificador determinístico, imagens e áudios
@@ -187,43 +189,43 @@ num deles devolve um aviso de "aguarde um pouco", nunca perda de dado.
 
 **IA — é aqui que está o custo**
 
-| O quê                                        | Teto                                | Onde mudar                         |
-| -------------------------------------------- | ----------------------------------- | ---------------------------------- |
-| Leituras automáticas da mesma nota           | 6 por dia (+3 a cada "Ler mesmo assim") | `MAX_RUNS_PER_DAY` em `lib/ai/note-reading.ts`, `EXTRA_READS_PER_RELEASE` em `lib/ai/preference-options.ts` |
-| Leituras de notas, somando todas             | 60 por hora                         | `MAX_READS_PER_HOUR` em `lib/ai/note-reading.ts` |
-| "Reler e organizar" (em Notas)               | 6 pedidos por hora, até 20 resumos por pedido | `app/api/ai/review/route.ts`, `SUMMARY_REFRESH_LIMIT` |
-| Pastas criadas pela organização              | 5 por vez, 60 pastas por conta      | `lib/ai/organize-notes.ts`, `lib/folders/types.ts` |
-| Tags que a IA põe numa nota                  | 2 novas por leitura, 5 no total (20 tags por nota, contando as suas) | `lib/ai/note-reading.ts` |
-| Texto enviado para classificar um documento  | 8.000 caracteres                    | `MAX_INPUT_CHARS` em `lib/ai/classify-document.ts` |
+| O quê                                       | Teto                                                                 | Onde mudar                                                                                                  |
+| ------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Leituras automáticas da mesma nota          | 6 por dia (+3 a cada "Ler mesmo assim")                              | `MAX_RUNS_PER_DAY` em `lib/ai/note-reading.ts`, `EXTRA_READS_PER_RELEASE` em `lib/ai/preference-options.ts` |
+| Leituras de notas, somando todas            | 60 por hora                                                          | `MAX_READS_PER_HOUR` em `lib/ai/note-reading.ts`                                                            |
+| "Reler e organizar" (em Notas)              | 6 pedidos por hora, até 20 resumos por pedido                        | `app/api/ai/review/route.ts`, `SUMMARY_REFRESH_LIMIT`                                                       |
+| Pastas criadas pela organização             | 5 por vez, 60 pastas por conta                                       | `lib/ai/organize-notes.ts`, `lib/folders/types.ts`                                                          |
+| Tags que a IA põe numa nota                 | 2 novas por leitura, 5 no total (20 tags por nota, contando as suas) | `lib/ai/note-reading.ts`                                                                                    |
+| Texto enviado para classificar um documento | 8.000 caracteres                                                     | `MAX_INPUT_CHARS` em `lib/ai/classify-document.ts`                                                          |
 
 Quando uma nota chega ao teto diário, a Nexo avisa na Entrada (na hora, num
 resumo às 23h ou nada — você escolhe em Configurações → IA).
 
 **Arquivos e conteúdo**
 
-| O quê                           | Teto                                   |
-| ------------------------------- | -------------------------------------- |
-| Envio de arquivos               | 10 por hora, 25 MB cada                |
-| Apagar arquivos em lote         | 100 por vez                            |
-| Documento do editor (uma nota)  | 200 mil caracteres, 1 MB               |
-| Notas criadas                   | 120 por hora                           |
-| Workspaces criados              | 20 por hora                            |
-| Uma lousa                       | 2.000 janelas, 2.000 ligações e 5.000 traços |
+| O quê                          | Teto                                         |
+| ------------------------------ | -------------------------------------------- |
+| Envio de arquivos              | 10 por hora, 25 MB cada                      |
+| Apagar arquivos em lote        | 100 por vez                                  |
+| Documento do editor (uma nota) | 200 mil caracteres, 1 MB                     |
+| Notas criadas                  | 120 por hora                                 |
+| Workspaces criados             | 20 por hora                                  |
+| Uma lousa                      | 2.000 janelas, 2.000 ligações e 5.000 traços |
 
 **Entrada**
 
-| O quê                                  | Teto                                   |
-| -------------------------------------- | -------------------------------------- |
-| Notificações mostradas                 | as 200 mais recentes (o resto fica no banco até você apagar) |
-| Marcar ou apagar em lote               | 200 por vez; apagar, 60 vezes por hora |
+| O quê                    | Teto                                                         |
+| ------------------------ | ------------------------------------------------------------ |
+| Notificações mostradas   | as 200 mais recentes (o resto fica no banco até você apagar) |
+| Marcar ou apagar em lote | 200 por vez; apagar, 60 vezes por hora                       |
 
 **Conta**
 
-| O quê                    | Teto                                               |
-| ------------------------ | -------------------------------------------------- |
-| Login                    | 5 tentativas a cada 15 min por IP e e-mail; 10 por e-mail |
-| Registro                 | 5 a cada 15 min por IP                             |
-| Recomeçar do zero        | 5 por hora                                         |
+| O quê             | Teto                                                      |
+| ----------------- | --------------------------------------------------------- |
+| Login             | 5 tentativas a cada 15 min por IP e e-mail; 10 por e-mail |
+| Registro          | 5 a cada 15 min por IP                                    |
+| Recomeçar do zero | 5 por hora                                                |
 
 Os demais (salvar nota, mover janela, buscar…) são tetos de ritmo altos o
 bastante para ninguém bater usando a interface — cada rota declara o seu no
