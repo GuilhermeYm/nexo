@@ -25,23 +25,26 @@ arrastam e flechas entre elas.
 > mesmo computador e cada uma quer a própria conta, sem ver o conteúdo da
 > outra.
 
-## Peça ajuda ao Claude
+## Peça ajuda ao Claude ou ao ChatGPT
 
 Subir a própria instância envolve criar um projeto no Supabase, preencher um
-`.env` e aplicar migrations — nada complicado, mas é passo a passo. Se
-preferir ser guiado em vez de seguir a seção "Como rodar" sozinho, o link
-abaixo abre uma conversa nova no Claude já com o repositório e o pedido de
-ajuda escritos:
+`.env` e aplicar migrations — nada complicado, mas é passo a passo. Se você
+preferir ser guiado em vez de seguir a seção "Como rodar" sozinho, abra uma
+conversa já com o contexto do repositório e do pedido de configuração pronto:
 
-[**💬 Configurar o Nexo com o Claude**](https://claude.ai/new?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20f[...]
+<div align="left">
 
-[**💬 Configurar o Nexo com o ChatGPT**](https://chatgpt.com/?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20f[...]
+[![Claude](https://img.shields.io/badge/Claude-💬%20Configurar%20o%20Nexo-FF9F1C?style=for-the-badge&logo=anthropic&logoColor=white)](https://claude.ai/new?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20formado%20por%20um%20banco%20de%20notas%2C%20lousa%20visual%20e%20classifica%C3%A7%C3%A3o%20por%20IA%29.%20%20Quero%20configurar%20a%20minha%20inst%C3%A2ncia%20local%2C%20criar%20o%20projeto%20no%20Supabase%2C%20preencher%20o%20.env%2C%20aplicar%20as%20migrations%20e%20rodar%20o%20projeto%20localmente.)
 
-Isso não é integração nenhuma com o produto — são apenas links para o Claude
-e o [ChatGPT](https://chatgpt.com) com a caixa de mensagem pré-preenchida
-(parâmetro `?q=`). Requer uma conta no assistente escolhido. Se preferir, o
-mesmo prompt funciona colado manualmente em qualquer assistente, ou você segue
-a seção **Como rodar** abaixo sem nenhum deles.
+[![ChatGPT](https://img.shields.io/badge/ChatGPT-💬%20Configurar%20o%20Nexo-10A37F?style=for-the-badge&logo=openai&logoColor=white)](https://chatgpt.com/?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20formado%20por%20um%20banco%20de%20notas%2C%20lousa%20visual%20e%20classifica%C3%A7%C3%A3o%20por%20IA%29.%20%20Quero%20configurar%20a%20minha%20inst%C3%A2ncia%20local%2C%20criar%20o%20projeto%20no%20Supabase%2C%20preencher%20o%20.env%2C%20aplicar%20as%20migrations%20e%20rodar%20o%20projeto%20localmente.)
+
+</div>
+
+Esses links não são integração com os produtos — são apenas atalhos para abrir
+uma conversa nova já com o prompt de configuração preenchido. Requer uma conta
+no assistente escolhido. Se preferir, o mesmo prompt funciona colado
+manualmente em qualquer IA, ou você segue a seção **Como rodar** abaixo sem
+nenhum deles.
 
 ## O que existe hoje
 
