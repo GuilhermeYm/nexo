@@ -557,7 +557,6 @@ export function DashboardShell({
               style={{ animationDelay: "90ms" }}
             >
               <CommandBar
-                onOpenNote={handleOpenNote}
                 onUploaded={handleUploaded}
                 registerPickFile={registerPickFile}
               />

@@ -96,7 +96,6 @@ type UploadState =
     };
 
 interface CommandBarProps {
-  onOpenNote: (noteId: string) => void;
   /** Chamado quando um upload conclui, para o painel de Tarefas revalidar
    *  sem esperar o evento do Realtime dar a volta. */
   onUploaded: () => void;
@@ -106,7 +105,6 @@ interface CommandBarProps {
 }
 
 export function CommandBar({
-  onOpenNote,
   onUploaded,
   registerPickFile,
 }: CommandBarProps) {
@@ -214,10 +212,11 @@ export function CommandBar({
     if (!previewNoteId) return;
 
     const controller = new AbortController();
-    setPreview(null);
-    setPreviewStatus("loading");
 
     async function loadPreview() {
+      setPreview(null);
+      setPreviewStatus("loading");
+
       try {
         const response = await fetch(`/api/notes/${previewNoteId}`, {
           signal: controller.signal,
@@ -370,13 +369,6 @@ export function CommandBar({
     if (expanded) {
       window.requestAnimationFrame(() => expandedInputRef.current?.focus());
     }
-  }
-
-  /** Abertura de uma nota também encerra a superfície temporária da busca. */
-  function openNote(noteId: string) {
-    setExpanded(false);
-    setFocused(false);
-    onOpenNote(noteId);
   }
 
   // Ctrl+K (Windows/Linux) e ⌘K (macOS) são a porta rápida para reencontrar.
@@ -796,6 +788,15 @@ export function CommandBar({
         onClose={closeNotePreview}
         onClick={(event) => {
           if (event.target === event.currentTarget) closeNotePreview();
+        }}
+        onKeyDown={(event) => {
+          // Enter na prévia repete a tecla que a abriu: um segundo Enter leva
+          // para o editor completo, não importa o que esteja focado ali dentro.
+          if (event.key !== "Enter" || !preview || previewStatus !== "idle") {
+            return;
+          }
+          event.preventDefault();
+          router.push(`/nota/${preview.id}`);
         }}
         className="m-auto w-[min(42rem,calc(100%-1.5rem))] border-0 bg-transparent p-0 text-foreground backdrop:bg-black/35 backdrop:backdrop-blur-[3px]"
       >
