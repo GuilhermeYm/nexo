@@ -10,6 +10,7 @@ import {
   Clock3,
   ExternalLink,
   FileText,
+  FolderClosed,
   LoaderCircle,
   Search,
   Sparkles,
@@ -18,12 +19,14 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
+import { AiReviewCard } from "@/components/notes/ai-review-card";
+import { FolderFilterBar, NoteFolderPicker } from "@/components/notes/folder-controls";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,6 +34,7 @@ import {
   formatRelative,
   toIsoString,
 } from "@/lib/dashboard/format";
+import type { FolderFilter, FolderItem } from "@/lib/folders/types";
 import {
   NOTE_TYPES,
   type NoteListItem,
@@ -95,7 +99,31 @@ export function NotesView({
   const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting" | "error">(
     "idle"
   );
+  const [deleteAttachments, setDeleteAttachments] = useState(false);
+  const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
+  const [folders, setFolders] = useState<FolderItem[]>([]);
+  // Muda quando pastas ou pertenças mudam: o cartão da Nexo reconta.
+  const [reviewKey, setReviewKey] = useState(0);
+  const [forceReview, setForceReview] = useState(false);
+  const [reviewVisible, setReviewVisible] = useState(false);
   const firstRequest = useRef(true);
+
+  const loadFolders = useCallback(async () => {
+    try {
+      const response = await fetch("/api/folders");
+      if (!response.ok) return;
+      const body = (await response.json()) as { folders: FolderItem[] };
+      setFolders(body.folders);
+    } catch {
+      // Sem pastas carregadas, o filtro mostra só "Todas" e "Sem pasta".
+    }
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      await loadFolders();
+    })();
+  }, [loadFolders]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -114,10 +142,10 @@ export function NotesView({
     }, query.trim() ? SEARCH_DELAY_MS : 0);
 
     return () => clearTimeout(timer);
-    // `loadPage` intentionally reads the current controls. The four values
-    // below are the only events that start a fresh inventory request.
+    // `loadPage` intentionally reads the current controls. The values below
+    // are the only events that start a fresh inventory request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, source, type, sort]);
+  }, [query, source, type, sort, folderFilter]);
 
   async function loadPage(page: number, append: boolean) {
     requestRef.current?.abort();
@@ -130,6 +158,7 @@ export function NotesView({
       source,
       type,
       sort,
+      folder: folderFilter,
       page: String(page),
     });
 
@@ -189,7 +218,29 @@ export function NotesView({
     setPreviewStatus("idle");
   }
 
-  const filtered = query.trim() || source !== "all" || type !== "all";
+  const filtered =
+    query.trim() || source !== "all" || type !== "all" || folderFilter !== "all";
+
+  // A Nexo terminou de reler/organizar, ou uma pasta mudou: tudo recarrega.
+  const refreshAfterFolders = useCallback(() => {
+    void loadFolders();
+    void loadPage(1, false);
+    setReviewKey((key) => key + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadFolders, query, source, type, sort, folderFilter]);
+
+  function noteMoved(
+    noteId: string,
+    folder: NoteListItem["folder"]
+  ) {
+    setResult((current) => ({
+      ...current,
+      notes: current.notes.map((note) => (note.id === noteId ? { ...note, folder } : note)),
+    }));
+    setPreview((current) => (current && current.id === noteId ? { ...current, folder } : current));
+    void loadFolders();
+    setReviewKey((key) => key + 1);
+  }
 
   function clearFilters() {
     resetSelection();
@@ -197,12 +248,14 @@ export function NotesView({
     setSource("all");
     setType("all");
     setSort("updated");
+    setFolderFilter("all");
     inputRef.current?.focus();
   }
 
   function resetSelection() {
     setSelectedNoteIds(new Set());
     setDeleteDialogOpen(false);
+    setDeleteAttachments(false);
   }
 
   function toggleNoteSelection(noteId: string) {
@@ -235,7 +288,7 @@ export function NotesView({
       const response = await fetch("/api/notes", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [...selectedNoteIds] }),
+        body: JSON.stringify({ ids: [...selectedNoteIds], deleteAttachments }),
       });
       if (!response.ok) throw new Error("delete request failed");
 
@@ -315,6 +368,14 @@ export function NotesView({
               </button>
             </div>
           </header>
+
+          <AiReviewCard
+            refreshKey={reviewKey}
+            forceOpen={forceReview}
+            onForceClose={() => setForceReview(false)}
+            onDone={refreshAfterFolders}
+            onVisibleChange={setReviewVisible}
+          />
 
           <section aria-label="Filtros de notas" className="mt-8">
             <div className="relative">
@@ -411,6 +472,21 @@ export function NotesView({
                 />
               </div>
             </div>
+
+            <FolderFilterBar
+              folders={folders}
+              value={folderFilter}
+              showAskNexo={!reviewVisible}
+              onChange={(value) => {
+                resetSelection();
+                setFolderFilter(value);
+              }}
+              onFoldersChanged={(removedId) => {
+                if (removedId && folderFilter === removedId) setFolderFilter("all");
+                refreshAfterFolders();
+              }}
+              onAskNexo={() => setForceReview(true)}
+            />
           </section>
 
           <section className="mt-8 flex flex-1 flex-col" aria-busy={status === "loading"}>
@@ -460,6 +536,7 @@ export function NotesView({
                         disabled={selectedNoteIds.size === 0}
                         onClick={() => {
                           setDeleteStatus("idle");
+                          setDeleteAttachments(false);
                           setDeleteDialogOpen(true);
                         }}
                         className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
@@ -500,6 +577,8 @@ export function NotesView({
                       <NotePreviewPanel
                         preview={preview}
                         status={previewStatus}
+                        folders={folders}
+                        onMoved={noteMoved}
                         now={now}
                         onClose={closePreview}
                         onRetry={() => void showPreview(selectedNoteId)}
@@ -537,7 +616,23 @@ export function NotesView({
         error={deleteStatus === "error" ? "Não foi possível apagar as notas. Tente novamente." : undefined}
         onOpenChange={setDeleteDialogOpen}
         onConfirm={() => void deleteSelectedNotes()}
-      />
+      >
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={deleteAttachments}
+            onChange={(event) => setDeleteAttachments(event.target.checked)}
+            disabled={deleteStatus === "deleting"}
+            className="mt-0.5 size-4 accent-error"
+          />
+          <span>
+            <span className="block font-medium">Apagar também os arquivos associados</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              PDFs, áudios e outros arquivos enviados junto com estas notas serão removidos permanentemente.
+            </span>
+          </span>
+        </label>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -661,7 +756,18 @@ function NoteRow({
             )}
           </span>
 
-          {note.excerpt ? (
+          {note.summary ? (
+            // O que a IA escreveu é sempre identificável: o brilho e o rótulo
+            // para leitor de tela marcam que esta linha é o resumo da Nexo.
+            <span className="mt-1.5 line-clamp-2 block max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              <Sparkles
+                className="mr-1.5 inline size-3.5 -translate-y-px text-subtle-foreground"
+                aria-hidden="true"
+              />
+              <span className="sr-only">Resumo da Nexo: </span>
+              {note.summary}
+            </span>
+          ) : note.excerpt ? (
             <span className="mt-1.5 line-clamp-2 block max-w-2xl text-sm leading-relaxed text-muted-foreground">
               {note.excerpt}
             </span>
@@ -674,6 +780,15 @@ function NoteRow({
 
           <span className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-subtle-foreground">
             <span>{NOTE_TYPE_LABEL[note.type] ?? "Nota"}</span>
+            {note.folder && (
+              <>
+                <Dot />
+                <span className="inline-flex items-center gap-1">
+                  <FolderClosed className="size-3" aria-hidden="true" />
+                  {note.folder.name}
+                </span>
+              </>
+            )}
             {note.workspaceName && <><Dot /><span>{note.workspaceName}</span></>}
             {note.tags.slice(0, 3).map((tag) => (
               <span
@@ -706,12 +821,16 @@ function NoteRow({
 function NotePreviewPanel({
   preview,
   status,
+  folders,
+  onMoved,
   now,
   onClose,
   onRetry,
 }: {
   preview: NotePreview | null;
   status: "idle" | "loading" | "error";
+  folders: FolderItem[];
+  onMoved: (noteId: string, folder: NotePreview["folder"]) => void;
   now: number;
   onClose: () => void;
   onRetry: () => void;
@@ -770,11 +889,38 @@ function NotePreviewPanel({
               )}
               {preview.workspaceName && <><Dot /><span>{preview.workspaceName}</span></>}
             </div>
+            <NoteFolderPicker
+              key={preview.id}
+              noteId={preview.id}
+              folder={preview.folder}
+              folders={folders}
+              onMoved={(folder) => onMoved(preview.id, folder)}
+            />
           </div>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        {preview.summary && (
+          <section
+            aria-label="Resumo da Nexo"
+            className="mb-5 rounded-xl bg-secondary px-4 py-3.5"
+          >
+            <p className="flex flex-wrap items-center gap-x-1.5 text-[11px] font-medium text-subtle-foreground">
+              <Sparkles className="size-3 shrink-0" aria-hidden="true" />
+              <span>Resumo da Nexo</span>
+              {preview.summaryStale && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>de uma versão anterior</span>
+                </>
+              )}
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-foreground">
+              {preview.summary}
+            </p>
+          </section>
+        )}
         {preview.content ? (
           <p className="whitespace-pre-wrap break-words text-sm leading-7 text-muted-foreground">
             {preview.content}

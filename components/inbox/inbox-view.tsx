@@ -95,6 +95,31 @@ export function InboxView({ initial, initialUnreadCount }: InboxViewProps) {
     [notifications, pendingIds]
   );
 
+  // A ação de um aviso deu certo no servidor, que já o marcou como lido e
+  // resolvido: espelha aqui, sem rebuscar a lista.
+  const handleActionTaken = useCallback(
+    (id: string) => {
+      const target = notifications.find((item) => item.id === id);
+      setNotifications((current) =>
+        current.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                read: true,
+                readAt: new Date(),
+                metadata: {
+                  ...((item.metadata as Record<string, unknown> | null) ?? {}),
+                  actionTakenAt: new Date().toISOString(),
+                },
+              }
+            : item
+        )
+      );
+      if (target && !target.read) setUnreadCount((current) => Math.max(0, current - 1));
+    },
+    [notifications]
+  );
+
   const handleMarkAllRead = useCallback(async () => {
     if (unreadCount === 0) return;
 
@@ -204,6 +229,7 @@ export function InboxView({ initial, initialUnreadCount }: InboxViewProps) {
                       notification={notification}
                       now={now}
                       onToggleRead={handleToggleRead}
+                      onActionTaken={handleActionTaken}
                       disabled={pendingIds.has(notification.id)}
                     />
                   ))}

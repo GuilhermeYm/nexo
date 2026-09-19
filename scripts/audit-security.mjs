@@ -31,7 +31,9 @@ const EXPECTED_TABLES = [
   "attachments",
   "audit_logs",
   "error_reports",
+  "folders",
   "note_ai_state",
+  "note_folders",
   "note_tag_rejections",
   "note_tags",
   "notes",
@@ -130,10 +132,15 @@ const SERVER_ONLY_WRITES = [
   { table: "note_tags", privileges: ["INSERT", "UPDATE", "DELETE"] },
   { table: "note_ai_state", privileges: ["INSERT", "UPDATE", "DELETE"] },
   { table: "note_tag_rejections", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  // Pastas (0026): a pessoa cria, renomeia e move pela rota; a IA, pelo
+  // servidor. Um cliente que escrevesse `note_folders.source = 'ai'` pelo
+  // PostgREST apagaria a fronteira entre o que a pessoa e a IA decidiram.
+  { table: "folders", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  { table: "note_folders", privileges: ["INSERT", "UPDATE", "DELETE"] },
 ];
 
 /** Funções internas que nenhuma rota chama por RPC. */
-const PRIVATE_FUNCTIONS = ["handle_new_user", "rls_auto_enable"];
+const PRIVATE_FUNCTIONS = ["handle_new_user", "rls_auto_enable", "ai_limit_digest"];
 
 async function main() {
   const sql = new pg.Client({

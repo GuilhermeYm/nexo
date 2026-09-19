@@ -73,6 +73,19 @@ export const profiles = pgTable(
     id: uuid("id").primaryKey().notNull(),
     displayName: text("display_name"),
     avatarUrl: text("avatar_url"),
+    /**
+     * Preferências de IA da conta (0025). Lidas pelo servidor na hora de
+     * chamar o modelo; escritas só por `PATCH /api/account/ai` — o GRANT de
+     * UPDATE de `profiles` não as inclui.
+     */
+    aiReasoningEffort: text("ai_reasoning_effort")
+      .$type<"low" | "medium" | "high">()
+      .default("low")
+      .notNull(),
+    aiLimitNotice: text("ai_limit_notice")
+      .$type<"immediate" | "daily" | "off">()
+      .default("immediate")
+      .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   }
@@ -936,6 +949,17 @@ export const noteAiState = pgTable(
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     runsDay: date("runs_day"),
     runsCount: integer("runs_count").default(0).notNull(),
+    /** Quando a nota bateu o teto diário — alimenta o aviso (0025). */
+    limitHitAt: timestamp("limit_hit_at", { withTimezone: true }),
+    /** Leituras extras que a pessoa liberou hoje, além do teto. */
+    extraRuns: integer("extra_runs").default(0).notNull(),
+    /** O tamanho da nota quando o resumo foi escrito — a releitura só de tags (0026). */
+    summaryChars: integer("summary_chars"),
+    summaryAt: timestamp("summary_at", { withTimezone: true }),
+    /** A pessoa pediu para reescrever o resumo ("Reler resumos"). */
+    forceSummary: boolean("force_summary").default(false).notNull(),
+    /** Hash só do corpo, sem título — o reaproveitamento entre notas (0026). */
+    bodyHash: text("body_hash"),
     enabled: boolean("enabled").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -945,6 +969,9 @@ export const noteAiState = pgTable(
     pendingIdx: index("note_ai_state_pending_idx")
       .on(table.userId, table.updatedAt)
       .where(sql`${table.state} in ('pending', 'failed', 'running', 'waiting_configuration')`),
+    bodyHashIdx: index("note_ai_state_body_hash_idx")
+      .on(table.userId, table.bodyHash)
+      .where(sql`${table.state} = 'done'`),
     noteFk: foreignKey({
       columns: [table.noteId, table.userId],
       foreignColumns: [notes.id, notes.userId],
@@ -973,6 +1000,62 @@ export const noteTagRejections = pgTable(
       columns: [table.noteId, table.userId],
       foreignColumns: [notes.id, notes.userId],
       name: "note_tag_rejections_note_fk",
+    }).onDelete("cascade"),
+  })
+);
+
+/**
+ * Pastas de notas (0026). Planas por enquanto — uma pasta não contém outra.
+ * Escrita só pelo servidor: `/api/folders` e a organização da IA.
+ */
+export const folders = pgTable(
+  "folders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    name: text("name").notNull(),
+    /** Quem criou. Renomear uma pasta da IA a torna da pessoa. */
+    source: noteSourceEnum("source").default("user").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    idUserUnique: unique("folders_id_user_unique").on(table.id, table.userId),
+    userNameIdx: uniqueIndex("folders_user_name_idx").on(
+      table.userId,
+      sql`lower(btrim(${table.name}))`
+    ),
+  })
+);
+
+/**
+ * Em que pasta cada nota está. Fora de `notes` de propósito: o trigger de
+ * `updated_at` faria a organização da IA subir tudo em Recentes.
+ *
+ * `folderId` nulo com `source = 'user'` = "sem pasta, por escolha da pessoa".
+ * A IA só move linhas com `source = 'ai'` e notas sem linha.
+ */
+export const noteFolders = pgTable(
+  "note_folders",
+  {
+    noteId: uuid("note_id").primaryKey().notNull(),
+    userId: uuid("user_id").notNull(),
+    folderId: uuid("folder_id"),
+    source: noteSourceEnum("source").default("user").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    folderIdx: index("note_folders_folder_idx").on(table.userId, table.folderId),
+    noteFk: foreignKey({
+      columns: [table.noteId, table.userId],
+      foreignColumns: [notes.id, notes.userId],
+      name: "note_folders_note_fk",
+    }).onDelete("cascade"),
+    folderFk: foreignKey({
+      columns: [table.folderId, table.userId],
+      foreignColumns: [folders.id, folders.userId],
+      name: "note_folders_folder_fk",
     }).onDelete("cascade"),
   })
 );

@@ -699,11 +699,17 @@ function SearchResults({
               <span className="block truncate text-sm text-foreground">
                 {note.title}
               </span>
-              {note.excerpt && (
+              {note.summary ? (
+                <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-subtle-foreground">
+                  <Sparkles className="size-3 shrink-0" aria-hidden="true" />
+                  <span className="sr-only">Resumo da Nexo: </span>
+                  <span className="truncate">{note.summary}</span>
+                </span>
+              ) : note.excerpt ? (
                 <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
                   {note.excerpt}
                 </span>
-              )}
+              ) : null}
             </span>
             {note.workspaceName && (
               <span className="mt-0.5 shrink-0 text-xs text-subtle-foreground">

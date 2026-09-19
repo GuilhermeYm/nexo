@@ -13,7 +13,9 @@ import {
 
 const CACHE_TTL_SECONDS = 45;
 const VERSION_TTL_SECONDS = 7 * 24 * 60 * 60;
-const CACHE_PREFIX = "notes-cache:v1";
+// v2: os itens ganharam `folder` (0026); v3: `summary`. O formato antigo não
+// serve mais.
+const CACHE_PREFIX = "notes-cache:v3";
 
 const noteListResultSchema = z.object({
   notes: z.array(
@@ -21,9 +23,17 @@ const noteListResultSchema = z.object({
       id: z.string().uuid(),
       title: z.string(),
       excerpt: z.string().nullable(),
+      summary: z.string().nullable(),
       type: z.string(),
       source: z.string(),
       workspaceName: z.string().nullable(),
+      folder: z
+        .object({
+          id: z.string().uuid(),
+          name: z.string(),
+          source: z.enum(["user", "ai"]),
+        })
+        .nullable(),
       updatedAt: z.union([z.string(), z.date()]),
       createdAt: z.union([z.string(), z.date()]),
       tags: z.array(
@@ -84,6 +94,7 @@ function resultKey(
     source: options.source ?? "all",
     type: options.type ?? "all",
     sort: options.sort ?? "updated",
+    folder: options.folder ?? "all",
     page: Math.max(1, options.page ?? 1),
     pageSize: Math.min(48, Math.max(1, options.pageSize ?? NOTE_LIST_PAGE_SIZE)),
   });

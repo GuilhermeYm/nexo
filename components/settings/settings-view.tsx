@@ -13,11 +13,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ErrorCodeChip, ErrorReport } from "@/components/errors/error-report";
+import { AiPanel, type AiModelInfo } from "@/components/settings/ai-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBoardRichEditor } from "@/hooks/use-board-rich-editor";
 import { useHideDraft } from "@/hooks/use-hide-draft";
 import { useKnownAccounts } from "@/hooks/use-known-accounts";
 import { forgetAccount, rememberAccount } from "@/lib/accounts";
+import type { AiPreferences } from "@/lib/ai/preference-options";
 import type { OwnErrorReport } from "@/lib/errors/queries";
 import { writeBoardRichEditor, writeHideDraft } from "@/lib/preferences";
 import type { UsageSnapshot } from "@/lib/usage/queries";
@@ -42,9 +44,13 @@ interface SettingsViewProps {
   usage: UsageSnapshot;
   /** Os relatórios de erro desta conta — só as colunas seguras. */
   errorReports: OwnErrorReport[];
+  aiPreferences: AiPreferences;
+  /** O provedor e o modelo desta instância; nulo sem chave de IA. */
+  aiModel: AiModelInfo | null;
+  aiDailyReads: number;
 }
 
-type TabId = "uso" | "conta" | "erros" | "preferencias";
+type TabId = "uso" | "conta" | "ia" | "erros" | "preferencias";
 
 export function SettingsView({
   userId,
@@ -53,6 +59,9 @@ export function SettingsView({
   memberSince,
   usage,
   errorReports,
+  aiPreferences,
+  aiModel,
+  aiDailyReads,
 }: SettingsViewProps) {
   // Abre em "Uso": é o que esta tela ganhou de novo, e "Conta" ainda é só
   // leitura.
@@ -83,8 +92,8 @@ export function SettingsView({
           </div>
 
           <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-            A sua conta, o que você guardou neste mês, o que falhou por aqui
-            e as preferências deste navegador.
+            A sua conta, o que você guardou neste mês, como a IA trabalha,
+            o que falhou por aqui e as preferências deste navegador.
           </p>
 
           <Tabs
@@ -95,6 +104,7 @@ export function SettingsView({
             <TabsList aria-label="Seções das configurações">
               <TabsTrigger value="uso">Uso</TabsTrigger>
               <TabsTrigger value="conta">Conta</TabsTrigger>
+              <TabsTrigger value="ia">IA</TabsTrigger>
               <TabsTrigger value="erros">Erros</TabsTrigger>
               <TabsTrigger value="preferencias">Preferências</TabsTrigger>
             </TabsList>
@@ -110,6 +120,10 @@ export function SettingsView({
                 userEmail={userEmail}
                 memberSince={memberSince}
               />
+            </TabsContent>
+
+            <TabsContent value="ia" className="mt-8">
+              <AiPanel initial={aiPreferences} model={aiModel} dailyReads={aiDailyReads} />
             </TabsContent>
 
             <TabsContent value="erros" className="mt-8">

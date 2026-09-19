@@ -99,8 +99,14 @@ export async function notifyManySystem(
   if (rows.length === 0) return 0;
 
   try {
-    await db.insert(notifications).values(rows);
-    return rows.length;
+    // `metadata.dedupeKey` + o índice único de 0025: o mesmo evento não
+    // entra duas vezes. Sem chave, nada conflita e a linha entra normalmente.
+    const inserted = await db
+      .insert(notifications)
+      .values(rows)
+      .onConflictDoNothing()
+      .returning({ id: notifications.id });
+    return inserted.length;
   } catch (error) {
     logServerError("notifyManySystem", error, { count: rows.length });
     return 0;

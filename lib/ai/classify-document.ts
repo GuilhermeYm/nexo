@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  supportsReasoningEffort,
+  type ReasoningEffort,
+} from "@/lib/ai/preference-options";
+
 /**
  * Camada de classificação de documentos do Nexo.
  *
@@ -88,6 +93,59 @@ Regras:
 - "tags": de 1 a 5 tags em português, minúsculas, sem acentos, curtas (ex.: "financas", "reuniao", "ideia-app").
 - Responda somente o JSON, sem markdown nem texto adicional.`;
 
+/**
+ * Quanto a chamada custou, como o provedor contou. `reasoning` é a parte da
+ * saída que o modelo gastou pensando — paga como saída, e nunca chega a
+ * ninguém. Ver docs/IA-LEITURA.md, "Economia de tokens".
+ */
+export interface TokenUsage {
+  prompt: number;
+  completion: number;
+  reasoning: number | null;
+  cached: number | null;
+}
+
+export function parseUsage(raw: unknown): TokenUsage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const usage = raw as {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    completion_tokens_details?: { reasoning_tokens?: number };
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
+  if (typeof usage.prompt_tokens !== "number") return null;
+  return {
+    prompt: usage.prompt_tokens,
+    completion: usage.completion_tokens ?? 0,
+    reasoning: usage.completion_tokens_details?.reasoning_tokens ?? null,
+    cached: usage.prompt_tokens_details?.cached_tokens ?? null,
+  };
+}
+
+/**
+ * Quanto o modelo pode pensar antes de responder.
+ *
+ * Medido em 18/09/2026 com `openai/gpt-oss-120b` no Groq, numa nota de 659
+ * caracteres: com o raciocínio padrão, 395 dos 508 tokens de saída eram
+ * raciocínio; com `low`, a saída caiu para 157 (−69%) e o tempo de 1,13 s
+ * para 0,35 s, com o mesmo JSON. Classificar e resumir não pede deliberação.
+ *
+ * Há também uma trava de correção: o raciocínio conta dentro do `max_tokens`.
+ * No padrão ele pode esgotar o teto e a resposta volta vazia — falha paga.
+ *
+ * Só modelos de raciocínio aceitam o parâmetro; mandá-lo a um `gpt-4o-mini`
+ * é erro 400. Quem escolhe é a pessoa, em Configurações → IA
+ * (`profiles.ai_reasoning_effort`, padrão `low`). Sem pessoa no caminho,
+ * vale `AI_REASONING_EFFORT` da instância, e depois `low`.
+ */
+export function reasoningParams(
+  provider: Provider,
+  effort?: ReasoningEffort
+): { reasoning_effort?: string } {
+  if (!supportsReasoningEffort(provider.model)) return {};
+  return { reasoning_effort: effort ?? process.env.AI_REASONING_EFFORT ?? "low" };
+}
+
 export interface Provider {
   name: string;
   endpoint: string;
@@ -129,7 +187,8 @@ export function resolveProvider(): Provider | null {
 }
 
 export async function classifyDocument(
-  input: ClassifyInput
+  input: ClassifyInput,
+  options: { reasoningEffort?: ReasoningEffort } = {}
 ): Promise<ClassifyOutput> {
   const provider = resolveProvider();
 
@@ -145,7 +204,7 @@ export async function classifyDocument(
   }
 
   try {
-    const result = await classifyWithProvider(input, provider);
+    const result = await classifyWithProvider(input, provider, options.reasoningEffort);
     return {
       result,
       usedAi: true,
@@ -177,7 +236,8 @@ export async function classifyDocument(
 
 async function classifyWithProvider(
   input: ClassifyInput,
-  provider: Provider
+  provider: Provider,
+  reasoningEffort?: ReasoningEffort
 ): Promise<DocumentClassification> {
   const content = input.text.slice(0, MAX_INPUT_CHARS);
 
@@ -204,6 +264,7 @@ async function classifyWithProvider(
       response_format: { type: "json_object" },
       max_tokens: 600,
       temperature: 0.2,
+      ...reasoningParams(provider, reasoningEffort),
     }),
   });
 

@@ -7,7 +7,7 @@ import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
-import { notes, workspaceWindows } from "@/lib/db/schema";
+import { attachments, notes, workspaceWindows } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { getOwnedNotePreview } from "@/lib/notes/queries";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
@@ -15,6 +15,28 @@ import { createClient } from "@/lib/supabase/server";
 import { updateNoteSchema } from "@/lib/validations/workspace";
 
 const noteIdSchema = z.string().uuid();
+const deleteNoteSchema = z.object({
+  /** Arquivos associados só são removidos após escolha explícita no diálogo. */
+  deleteAttachments: z.boolean().default(false),
+});
+const BUCKET = "files";
+
+async function removeStorageObjects(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  paths: string[],
+  userId: string
+): Promise<void> {
+  for (let index = 0; index < paths.length; index += 100) {
+    const { error } = await supabase.storage.from(BUCKET).remove(paths.slice(index, index + 100));
+    if (error) {
+      await logServerError("DELETE /api/notes/[id] (storage)", error, {
+        userId,
+        pending: paths.length - index,
+      });
+      return;
+    }
+  }
+}
 
 /**
  * Conteúdo de leitura rápida para o acervo.
@@ -229,40 +251,89 @@ export async function DELETE(
     userId = user.id;
 
     const { id } = await ctx.params;
+    const parsedId = noteIdSchema.safeParse(id);
+    if (!parsedId.success) return errorResponse(400, "Nota inválida.");
+    const parsed = deleteNoteSchema.safeParse(
+      await request.json().catch(() => ({}))
+    );
+    if (!parsed.success) return errorResponse(400, "Opção de exclusão inválida.");
 
-    const [removed] = await db
-      .update(notes)
-      .set({ status: "deleted", updatedAt: new Date() })
-      .where(
-        and(eq(notes.id, id), eq(notes.userId, user.id), ne(notes.status, "deleted"))
-      )
-      .returning({ id: notes.id, title: notes.title });
+    const limit = await rateLimit({
+      key: `notes:delete:${user.id}`,
+      limit: 60,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas exclusões seguidas. Aguarde um pouco.");
+    }
 
-    if (!removed) return errorResponse(404, "Nota não encontrada.");
-
-    await db
-      .delete(workspaceWindows)
-      .where(
-        and(
-          eq(workspaceWindows.noteId, id),
-          eq(workspaceWindows.userId, user.id)
+    const result = await db.transaction(async (tx) => {
+      const [removed] = await tx
+        .update(notes)
+        .set({ status: "deleted", updatedAt: new Date() })
+        .where(
+          and(eq(notes.id, parsedId.data), eq(notes.userId, user.id), ne(notes.status, "deleted"))
         )
-      );
+        .returning({ id: notes.id, title: notes.title });
+      if (!removed) return null;
+
+      const removedAttachments = parsed.data.deleteAttachments
+        ? await tx
+            .delete(attachments)
+            .where(
+              and(eq(attachments.noteId, removed.id), eq(attachments.userId, user.id))
+            )
+            .returning({
+              id: attachments.id,
+              filename: attachments.filename,
+              storagePath: attachments.storagePath,
+            })
+        : [];
+
+      await tx
+        .delete(workspaceWindows)
+        .where(
+          and(
+            eq(workspaceWindows.noteId, removed.id),
+            eq(workspaceWindows.userId, user.id)
+          )
+        );
+      return { note: removed, attachments: removedAttachments };
+    });
+
+    if (!result) return errorResponse(404, "Nota não encontrada.");
 
     // Exclusão de conteúdo é exatamente o que a trilha de auditoria existe
     // para registrar — ao contrário do autosave, que ela não registra.
     await writeAuditLog({
       action: "DELETE",
       tableName: "notes",
-      recordId: removed.id,
+      recordId: result.note.id,
       userId: user.id,
-      oldData: { title: removed.title },
+      oldData: { title: result.note.title },
       request,
     });
+    await Promise.all(
+      result.attachments.map((attachment) =>
+        writeAuditLog({
+          action: "DELETE",
+          tableName: "attachments",
+          recordId: attachment.id,
+          userId: user.id,
+          oldData: { filename: attachment.filename },
+          request,
+        })
+      )
+    );
+    await removeStorageObjects(
+      supabase,
+      result.attachments.map((attachment) => attachment.storagePath),
+      user.id
+    );
 
     await invalidateNoteListCache(user.id);
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deletedAttachments: result.attachments.length });
   } catch (error) {
     const code = await logServerError("DELETE /api/notes/[id]", error, { userId }, request);
     return errorResponse(500, "Erro ao excluir a nota.", code);

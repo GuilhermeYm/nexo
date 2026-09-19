@@ -6,7 +6,7 @@ import { markNoteForReading } from "@/lib/ai/note-reading";
 import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { notes, workspaceWindows } from "@/lib/db/schema";
+import { attachments, notes, workspaceWindows } from "@/lib/db/schema";
 import {
   countTaskItems,
   richDocumentSchema,
@@ -47,6 +47,7 @@ const listNotesSchema = z.object({
   source: z.enum(["all", "user", "ai"]).default("all"),
   type: z.enum(["all", ...NOTE_TYPES]).default("all"),
   sort: z.enum(["updated", "created", "title"]).default("updated"),
+  folder: z.union([z.enum(["all", "none"]), z.string().uuid()]).default("all"),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
 });
 
@@ -55,7 +56,34 @@ const deleteNotesSchema = z.object({
     (ids) => new Set(ids).size === ids.length,
     "As notas selecionadas são inválidas."
   ),
+  /** Arquivos são independentes por padrão; só somem com escolha explícita. */
+  deleteAttachments: z.boolean().default(false),
 });
+
+const BUCKET = "files";
+
+/**
+ * O Storage não participa da transação do Postgres. Os metadados saem
+ * primeiro, e uma falha aqui só deixa objetos órfãos privados — nunca uma
+ * nota apontando para arquivo que já não existe. Mesmo contrato do reset da
+ * conta, com lotes para não estourar o limite da API do Storage.
+ */
+async function removeStorageObjects(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  paths: string[],
+  userId: string
+): Promise<void> {
+  for (let index = 0; index < paths.length; index += 100) {
+    const { error } = await supabase.storage.from(BUCKET).remove(paths.slice(index, index + 100));
+    if (error) {
+      await logServerError("DELETE /api/notes (storage)", error, {
+        userId,
+        pending: paths.length - index,
+      });
+      return;
+    }
+  }
+}
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -74,6 +102,7 @@ export async function GET(request: Request) {
       source: params.get("source") ?? "all",
       type: params.get("type") ?? "all",
       sort: params.get("sort") ?? "updated",
+      folder: params.get("folder") ?? "all",
       page: params.get("page") ?? "1",
     });
     if (!parsed.success) return errorResponse(400, "Filtros inválidos.");
@@ -92,6 +121,7 @@ export async function GET(request: Request) {
       source: parsed.data.source,
       type: parsed.data.type,
       sort: parsed.data.sort,
+      folder: parsed.data.folder,
       page: parsed.data.page,
     } as const;
     const cached = await readNoteListCache(user.id, options);
@@ -253,7 +283,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const ids = parsed.data.ids;
+    const { ids, deleteAttachments } = parsed.data;
     const removed = await db.transaction(async (tx) => {
       const removed = await tx
         .update(notes)
@@ -267,6 +297,23 @@ export async function DELETE(request: Request) {
           )
         )
         .returning({ id: notes.id, title: notes.title });
+      const removedIds = removed.map((note) => note.id);
+      const removedAttachments =
+        deleteAttachments && removedIds.length > 0
+          ? await tx
+              .delete(attachments)
+              .where(
+                and(
+                  inArray(attachments.noteId, removedIds),
+                  eq(attachments.userId, user.id)
+                )
+              )
+              .returning({
+                id: attachments.id,
+                filename: attachments.filename,
+                storagePath: attachments.storagePath,
+              })
+          : [];
       // Janelas são apenas a apresentação da nota; deixá-las abertas para
       // conteúdo apagado produziria uma lousa inconsistente.
       await tx
@@ -277,13 +324,13 @@ export async function DELETE(request: Request) {
             eq(workspaceWindows.userId, user.id)
           )
         );
-      return removed;
+      return { notes: removed, attachments: removedAttachments };
     });
 
-    if (removed.length === 0) return errorResponse(404, "Nenhuma nota encontrada.");
+    if (removed.notes.length === 0) return errorResponse(404, "Nenhuma nota encontrada.");
 
     await Promise.all(
-      removed.map((note) =>
+      removed.notes.map((note) =>
         writeAuditLog({
           action: "DELETE",
           tableName: "notes",
@@ -294,9 +341,30 @@ export async function DELETE(request: Request) {
         })
       )
     );
+    await Promise.all(
+      removed.attachments.map((attachment) =>
+        writeAuditLog({
+          action: "DELETE",
+          tableName: "attachments",
+          recordId: attachment.id,
+          userId: user.id,
+          oldData: { filename: attachment.filename },
+          request,
+        })
+      )
+    );
+    await removeStorageObjects(
+      supabase,
+      removed.attachments.map((attachment) => attachment.storagePath),
+      user.id
+    );
     await invalidateNoteListCache(user.id);
 
-    return NextResponse.json({ ok: true, deleted: removed.length });
+    return NextResponse.json({
+      ok: true,
+      deleted: removed.notes.length,
+      deletedAttachments: removed.attachments.length,
+    });
   } catch (error) {
     const code = await logServerError("DELETE /api/notes", error, { userId }, request);
     return errorResponse(500, "Erro ao excluir as notas.", code);

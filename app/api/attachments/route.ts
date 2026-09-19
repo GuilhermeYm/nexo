@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { after, NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
@@ -17,6 +18,7 @@ import {
   MAX_INPUT_CHARS,
   type ClassifyFailure,
 } from "@/lib/ai/classify-document";
+import { getAiPreferences } from "@/lib/ai/preferences";
 import { hasAudioTranscriptionProvider } from "@/lib/ai/transcribe-audio";
 import { processAudioTranscription } from "@/lib/ai/process-audio-transcription";
 import { redactAndTrim } from "@/lib/errors/redact";
@@ -25,11 +27,23 @@ import { rateLimit } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit";
 import { errorResponse, logServerError } from "@/lib/api";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
+import {
+  ATTACHMENT_TYPES,
+  type AttachmentListSort,
+} from "@/lib/attachments/list";
+import { listOwnedAttachments } from "@/lib/attachments/queries";
 import { matchesSignature, readSignature } from "@/lib/validations/file-signature";
 
 const BUCKET = "files";
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — igual ao limite do bucket
 const PDF_PARSE_TIMEOUT_MS = 15_000;
+
+const listAttachmentsSchema = z.object({
+  q: z.string().trim().max(120).default(""),
+  type: z.enum(["all", ...ATTACHMENT_TYPES]).default("all"),
+  sort: z.enum(["newest", "name", "size"]).default("newest"),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+});
 
 // O callback de `after()` da transcrição precisa de tempo depois do 201. Em
 // VPS/Node o Next termina callbacks pendentes num shutdown gracioso; plataformas
@@ -50,6 +64,57 @@ const MIME_TO_TYPE: Record<string, AttachmentType> = {
   "audio/mp4": "audio",
   "audio/x-m4a": "audio",
 };
+
+/**
+ * Acervo de metadados dos arquivos da conta.
+ *
+ * Diferente de `GET /api/attachments/[id]`, esta rota não emite URL assinada
+ * nem revela `storage_path`. A URL é um segredo portátil e só é criada no
+ * instante em que a pessoa abre ou baixa um arquivo específico.
+ */
+export async function GET(request: Request) {
+  const supabase = await createClient();
+  let userId: string | null = null;
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
+
+    const limit = await rateLimit({
+      key: `attachments:list:${user.id}`,
+      limit: 180,
+      windowMs: 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas consultas seguidas. Aguarde um instante.");
+    }
+
+    const params = new URL(request.url).searchParams;
+    const parsed = listAttachmentsSchema.safeParse({
+      q: params.get("q") ?? "",
+      type: params.get("type") ?? "all",
+      sort: params.get("sort") ?? "newest",
+      page: params.get("page") ?? "1",
+    });
+    if (!parsed.success) return errorResponse(400, "Filtros inválidos.");
+
+    return NextResponse.json(
+      await listOwnedAttachments(user.id, {
+        query: parsed.data.q,
+        type: parsed.data.type,
+        sort: parsed.data.sort as AttachmentListSort,
+        page: parsed.data.page,
+      }),
+      { headers: { "Cache-Control": "private, no-store" } }
+    );
+  } catch (error) {
+    const code = await logServerError("GET /api/attachments", error, { userId }, request);
+    return errorResponse(500, "Erro ao carregar os arquivos.", code);
+  }
+}
 
 /** Nome seguro para o storage: minúsculas, sem acento/espaço, extensão preservada. */
 function sanitizeFilename(name: string): string {
@@ -263,7 +328,10 @@ export async function POST(request: Request) {
 
     // 2) Extrai texto e classifica (Groq ou OpenAI se houver chave; stub
     //    caso contrário — ver lib/ai/classify-document.ts).
-    const text = await extractText(file);
+    const [text, { reasoningEffort }] = await Promise.all([
+      extractText(file),
+      getAiPreferences(user.id),
+    ]);
     const classifyStartedAt = new Date();
     const {
       result: classification,
@@ -271,11 +339,10 @@ export async function POST(request: Request) {
       failure: classifyFailure,
       provider: classifyProvider,
       model: classifyModel,
-    } = await classifyDocument({
-      text,
-      filename: file.name,
-      mimeType: file.type,
-    });
+    } = await classifyDocument(
+      { text, filename: file.name, mimeType: file.type },
+      { reasoningEffort }
+    );
     const classifyFinishedAt = new Date();
 
     // A classificação falhou, o upload seguiu — e agora o motivo sobrevive.

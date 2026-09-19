@@ -4,6 +4,7 @@ import {
   CircleAlert,
   CircleCheck,
   Coins,
+  FolderTree,
   LoaderCircle,
   Maximize2,
   Pin,
@@ -44,7 +45,7 @@ const KIND_ICON: Record<string, LucideIcon> = {
   tag: Tags,
   transcribe: Sparkles,
   extract: Sparkles,
-  organize: WandSparkles,
+  organize: FolderTree,
 };
 
 interface StatusStyle {

@@ -3,6 +3,7 @@ import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { classifyDocument } from "@/lib/ai/classify-document";
+import { getAiPreferences } from "@/lib/ai/preferences";
 import { transcribeAudio } from "@/lib/ai/transcribe-audio";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -37,11 +38,15 @@ export async function processAudioTranscription(
       .where(and(eq(aiJobs.id, input.jobId), eq(aiJobs.userId, input.userId)));
 
     const transcription = await transcribeAudio(input.file);
-    const classification = await classifyDocument({
-      text: transcription.text,
-      filename: input.filename,
-      mimeType: input.mimeType,
-    });
+    const { reasoningEffort } = await getAiPreferences(input.userId);
+    const classification = await classifyDocument(
+      {
+        text: transcription.text,
+        filename: input.filename,
+        mimeType: input.mimeType,
+      },
+      { reasoningEffort }
+    );
 
     const transcriptContent = [
       classification.result.summary,

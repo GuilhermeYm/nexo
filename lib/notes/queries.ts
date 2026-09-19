@@ -16,7 +16,16 @@ import {
 } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { attachments, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
+import {
+  attachments,
+  folders,
+  noteAiState,
+  noteFolders,
+  noteTags,
+  notes,
+  tags,
+  workspaces,
+} from "@/lib/db/schema";
 import {
   NOTE_LIST_PAGE_SIZE,
   type NoteListItem,
@@ -74,6 +83,13 @@ export async function listOwnedNotes(
   if (options.type && options.type !== "all") {
     conditions.push(eq(notes.type, options.type));
   }
+  // A pasta mora em `note_folders` (0026). "Sem pasta" cobre as duas formas:
+  // nota sem linha e nota que a pessoa tirou de todas (`folder_id` nulo).
+  if (options.folder === "none") {
+    conditions.push(isNull(noteFolders.folderId));
+  } else if (options.folder && options.folder !== "all") {
+    conditions.push(eq(noteFolders.folderId, options.folder));
+  }
   if (query) {
     const tsQuery = sql`websearch_to_tsquery('portuguese', ${query})`;
     conditions.push(
@@ -98,19 +114,30 @@ export async function listOwnedNotes(
         id: notes.id,
         title: notes.title,
         content: notes.content,
+        ...SUMMARY_COLUMNS,
         type: notes.type,
         source: notes.source,
         workspaceName: workspaces.name,
+        folderId: folders.id,
+        folderName: folders.name,
+        folderSource: noteFolders.source,
         updatedAt: notes.updatedAt,
         createdAt: notes.createdAt,
       })
       .from(notes)
       .leftJoin(workspaces, eq(notes.workspaceId, workspaces.id))
+      .leftJoin(noteFolders, folderJoin(userId))
+      .leftJoin(folders, and(eq(folders.id, noteFolders.folderId), eq(folders.userId, userId)))
+      .leftJoin(noteAiState, aiStateJoin(userId))
       .where(where)
       .orderBy(...orderBy)
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ value: count() }).from(notes).where(where),
+    db
+      .select({ value: count() })
+      .from(notes)
+      .leftJoin(noteFolders, folderJoin(userId))
+      .where(where),
   ]);
 
   const noteIds = rows.map((row) => row.id);
@@ -143,11 +170,18 @@ export async function listOwnedNotes(
 
   const total = totalRow?.value ?? 0;
   return {
-    notes: rows.map(({ content, ...row }) => ({
+    notes: rows.map(
+      ({ content, folderId, folderName, folderSource, summary, summaryHash, dirtyHash, ...row }) => ({
       ...row,
+      summary: isSummaryStale({ summary, summaryHash, dirtyHash }) ? null : summary,
+      folder:
+        folderId && folderName
+          ? { id: folderId, name: folderName, source: folderSource ?? "user" }
+          : null,
       excerpt: noteExcerpt(content),
       tags: tagsByNote.get(row.id) ?? [],
-    })),
+    })
+    ),
     total,
     page,
     pageSize,
@@ -172,13 +206,20 @@ export async function getOwnedNotePreview(
       id: notes.id,
       title: notes.title,
       content: notes.content,
+      ...SUMMARY_COLUMNS,
       type: notes.type,
       source: notes.source,
       workspaceName: workspaces.name,
+      folderId: folders.id,
+      folderName: folders.name,
+      folderSource: noteFolders.source,
       updatedAt: notes.updatedAt,
     })
     .from(notes)
     .leftJoin(workspaces, eq(notes.workspaceId, workspaces.id))
+    .leftJoin(noteFolders, folderJoin(userId))
+    .leftJoin(folders, and(eq(folders.id, noteFolders.folderId), eq(folders.userId, userId)))
+    .leftJoin(noteAiState, aiStateJoin(userId))
     .where(
       and(
         eq(notes.id, noteId),
@@ -189,7 +230,45 @@ export async function getOwnedNotePreview(
     )
     .limit(1);
 
-  return note ?? null;
+  if (!note) return null;
+  const { folderId, folderName, folderSource, summaryHash, dirtyHash, ...rest } = note;
+  return {
+    ...rest,
+    summaryStale: isSummaryStale({ summary: rest.summary, summaryHash, dirtyHash }),
+    folder:
+      folderId && folderName
+        ? { id: folderId, name: folderName, source: folderSource ?? "user" }
+        : null,
+  };
+}
+
+/**
+ * O resumo da Nexo e o que decide se ele ainda vale. Os hashes ficam no
+ * servidor (GRANT por coluna em 0024): o cliente recebe só o veredito.
+ */
+export const SUMMARY_COLUMNS = {
+  summary: noteAiState.summary,
+  summaryHash: noteAiState.summaryHash,
+  dirtyHash: noteAiState.dirtyHash,
+} as const;
+
+/** A linha de `note_ai_state` da nota, cruzando o dono também ali. */
+export function aiStateJoin(userId: string) {
+  return and(eq(noteAiState.noteId, notes.id), eq(noteAiState.userId, userId));
+}
+
+/** Mesma regra de `getNoteAiView`: o texto salvo mudou depois do resumo. */
+export function isSummaryStale(row: {
+  summary: string | null;
+  summaryHash: string | null;
+  dirtyHash: string | null;
+}): boolean {
+  return row.summary !== null && row.dirtyHash !== null && row.summaryHash !== row.dirtyHash;
+}
+
+/** A linha de `note_folders` da nota, cruzando o dono também ali. */
+function folderJoin(userId: string) {
+  return and(eq(noteFolders.noteId, notes.id), eq(noteFolders.userId, userId));
 }
 
 function noteExcerpt(content: string | null): string | null {

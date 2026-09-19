@@ -3,7 +3,8 @@ import "server-only";
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { aiJobs, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
+import { aiJobs, noteAiState, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
+import { aiStateJoin, isSummaryStale, SUMMARY_COLUMNS } from "@/lib/notes/queries";
 
 /**
  * Leituras do dashboard.
@@ -66,6 +67,8 @@ export interface RecentNote {
   id: string;
   title: string;
   excerpt: string | null;
+  /** O resumo da Nexo, na busca, quando ainda descreve o texto atual. */
+  summary?: string | null;
   type: string;
   source: string;
   workspaceId: string | null;
@@ -276,10 +279,13 @@ export async function searchNotes(
       workspaceName: workspaces.name,
       updatedAt: notes.updatedAt,
       createdAt: notes.createdAt,
-      rank: sql<number>`ts_rank(${notes.searchVector}, ${tsQuery})`,
+      ...SUMMARY_COLUMNS,
     })
     .from(notes)
     .leftJoin(workspaces, eq(notes.workspaceId, workspaces.id))
+    // O resumo entra só como linha de contexto: a busca continua achando o
+    // que a pessoa escreveu (`search_vector`), não o que a IA disse.
+    .leftJoin(noteAiState, aiStateJoin(userId))
     .where(
       and(
         eq(notes.userId, userId),
@@ -296,7 +302,12 @@ export async function searchNotes(
     )
     .limit(limit);
 
-  return attachTags(rows);
+  return attachTags(
+    rows.map(({ summary, summaryHash, dirtyHash, ...row }) => ({
+      ...row,
+      summary: isSummaryStale({ summary, summaryHash, dirtyHash }) ? null : summary,
+    }))
+  );
 }
 
 /* ---------------------------------------------------------------------- */
@@ -311,6 +322,7 @@ type NoteRow = {
   workspaceName: string | null;
   updatedAt: Date;
   createdAt: Date;
+  summary?: string | null;
 };
 
 /**

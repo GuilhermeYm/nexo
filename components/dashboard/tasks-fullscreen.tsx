@@ -7,6 +7,7 @@ import {
   CircleCheck,
   Coins,
   FileText,
+  FolderTree,
   LoaderCircle,
   Pin,
   Sparkles,
@@ -89,7 +90,7 @@ const KIND: Record<string, { icon: LucideIcon; label: string }> = {
   transcribe: { icon: Sparkles, label: "Transcrição" },
   tag: { icon: Tags, label: "Marcação" },
   extract: { icon: FileText, label: "Extração" },
-  organize: { icon: WandSparkles, label: "Organização" },
+  organize: { icon: FolderTree, label: "Organização em pastas" },
 };
 
 const STATUS_FILTERS: { value: JobStatusFilter; label: string }[] = [
@@ -102,6 +103,7 @@ const STATUS_FILTERS: { value: JobStatusFilter; label: string }[] = [
 const KIND_FILTERS: { value: JobKindFilter; label: string }[] = [
   { value: "all", label: "Todos" },
   { value: "summarize", label: "Leitura de nota" },
+  { value: "organize", label: "Organização em pastas" },
   { value: "classify", label: "Upload" },
   { value: "transcribe", label: "Transcrição" },
 ];
@@ -816,6 +818,25 @@ function DetailPane({
   if (job.transcriptChars !== null) {
     facts.push({ term: "Transcrito", value: chars(job.transcriptChars) });
   }
+  if (job.reused) {
+    facts.push({ term: "Tokens", value: "Nenhum — leitura reaproveitada de outra nota" });
+  } else if (job.tokens) {
+    const { prompt, completion, reasoning } = job.tokens;
+    facts.push({
+      term: "Tokens",
+      value: `${job.batchSize ? "~" : ""}${numberFormat.format(prompt)} de entrada · ${numberFormat.format(completion)} de saída${
+        reasoning ? ` (${numberFormat.format(reasoning)} pensando)` : ""
+      }`,
+    });
+  }
+  if (job.batchSize) {
+    facts.push({
+      term: "Lote",
+      value: `Lida junto com mais ${job.batchSize - 1} ${
+        job.batchSize === 2 ? "nota" : "notas"
+      } numa chamada só; os tokens são a parte desta`,
+    });
+  }
   if (job.attempt !== null) {
     facts.push({ term: "Tentativa", value: `${job.attempt}ª` });
   }
@@ -897,12 +918,19 @@ function DetailPane({
               <p className="rounded-xl bg-secondary/60 px-4 py-3 text-sm leading-relaxed text-pretty text-foreground">
                 {job.summary.text}
               </p>
+              {job.summaryKept && (
+                <p className="mt-2 max-w-[62ch] text-xs leading-relaxed text-pretty text-subtle-foreground">
+                  Esta leitura só marcou: a nota mudou pouco desde o resumo para
+                  valer reescrevê-lo. Para reescrever agora, use “Reler e
+                  organizar” em Notas.
+                </p>
+              )}
             </DetailBlock>
           ) : job.summarized ? (
             <DetailBlock title="Resumo">
               <p className="text-sm text-muted-foreground">
                 {job.summaryChars ? `${chars(job.summaryChars)}, ` : ""}
-                guardado no começo da nota.
+                guardado embaixo da nota.
               </p>
             </DetailBlock>
           ) : isReading && job.status === "succeeded" ? (
@@ -913,7 +941,7 @@ function DetailPane({
             </DetailBlock>
           ) : null}
 
-          {job.status === "succeeded" && (
+          {job.status === "succeeded" && job.kind !== "organize" && (
             <DetailBlock title="Tags">
               {job.tags.length > 0 ? (
                 <ul className="flex flex-wrap gap-1.5">
@@ -963,6 +991,8 @@ function DetailPane({
         </div>
       )}
 
+      {job.organize && <OrganizeResult result={job.organize} />}
+
       <DetailBlock title="A requisição" className="mt-8">
         <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-6 gap-y-2 text-sm">
           {facts.map((fact) => (
@@ -990,6 +1020,49 @@ function DetailPane({
         </div>
       )}
     </article>
+  );
+}
+
+function OrganizeResult({ result }: { result: NonNullable<JobDetail["organize"]> }) {
+  const created = new Set(result.created);
+  const folders = [...new Set([...result.created, ...result.used])];
+  return (
+    <div className="mt-8 space-y-7">
+      <DetailBlock title="Pastas" aside={`${result.considered} ${result.considered === 1 ? "nota considerada" : "notas consideradas"}`}>
+        {folders.length > 0 ? (
+          <ul className="flex flex-wrap gap-1.5">
+            {folders.map((name) => (
+              <li
+                key={name}
+                className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground"
+              >
+                <FolderTree className="size-3.5 text-subtle-foreground" aria-hidden="true" />
+                {name}
+                {created.has(name) && (
+                  <span className="rounded-full bg-background/70 px-1.5 text-[10px] font-semibold">
+                    nova
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nenhuma nota combinou com uma pasta.</p>
+        )}
+        <p className="mt-2 text-xs text-subtle-foreground">
+          {result.placed} {result.placed === 1 ? "posta" : "postas"} numa pasta
+          {result.moved ? ` · ${result.moved} ${result.moved === 1 ? "mudou" : "mudaram"} de pasta` : ""}.
+          As notas que você pôs numa pasta ficam onde estão.
+        </p>
+      </DetailBlock>
+      <Link
+        href="/dashboard/notas"
+        className="inline-flex h-9 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-secondary pointer-coarse:h-11"
+      >
+        Ver as pastas em Notas
+        <ArrowUpRight className="size-4" aria-hidden="true" />
+      </Link>
+    </div>
   );
 }
 

@@ -35,6 +35,7 @@ import {
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { ErrorReport } from "@/components/errors/error-report";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AttachmentWindowBody } from "@/components/workspace/attachment-window-body";
 import { NotePicker } from "@/components/workspace/note-picker";
 import { ToolPropertiesPanel } from "@/components/workspace/tool-properties-panel";
@@ -180,6 +181,8 @@ export function Board({
   const [focusedId, setFocusedId] = useState<string | null>(focusWindowId);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [notePendingDelete, setNotePendingDelete] = useState<string | null>(null);
+  const [deleteAttachments, setDeleteAttachments] = useState(false);
   /**
    * Modo de leitura: some com tudo que edita, cria ou apaga, e deixa só o
    * zoom. Não é um `tool` — as ferramentas guardam um gesto em curso e saem
@@ -1427,7 +1430,10 @@ export function Board({
                     onRaise={bringToFront}
                     onOpenAttachment={openAttachmentWindow}
                     onOpenEditor={openNoteEditor}
-                    onDeleteNote={deleteNote}
+                    onDeleteNote={(noteId) => {
+                      setDeleteAttachments(false);
+                      setNotePendingDelete(noteId);
+                    }}
                   />
                 ))}
               </div>
@@ -1876,6 +1882,37 @@ export function Board({
           onPick={handlePick}
           onPickAttachment={handlePickAttachment}
         />
+        <ConfirmDialog
+          open={notePendingDelete !== null}
+          title="Excluir esta nota?"
+          description="Ela sairá da sua conta, da busca e de todas as lousas em que estiver aberta."
+          confirmLabel="Excluir nota"
+          busyLabel="Excluindo nota…"
+          onOpenChange={(open) => {
+            if (!open) setNotePendingDelete(null);
+          }}
+          onConfirm={() => {
+            if (notePendingDelete) {
+              void deleteNote(notePendingDelete, deleteAttachments);
+              setNotePendingDelete(null);
+            }
+          }}
+        >
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={deleteAttachments}
+              onChange={(event) => setDeleteAttachments(event.target.checked)}
+              className="mt-0.5 size-4 accent-error"
+            />
+            <span>
+              <span className="block font-medium">Apagar também os arquivos associados</span>
+              <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                Essa escolha remove permanentemente os arquivos enviados junto com a nota.
+              </span>
+            </span>
+          </label>
+        </ConfirmDialog>
       </div>
     </div>
   );

@@ -9,7 +9,9 @@ import {
   aiJobs,
   attachments,
   errorReports,
+  folders,
   noteAiState,
+  noteFolders,
   noteTagRejections,
   notes,
   notifications,
@@ -149,6 +151,11 @@ export async function POST(request: Request) {
       await tx
         .delete(noteTagRejections)
         .where(eq(noteTagRejections.userId, user.id));
+
+      // Pastas (0026): a pertença antes, e as pastas — que não são de nota
+      // nenhuma e não cairiam por cascata de `notes`.
+      await tx.delete(noteFolders).where(eq(noteFolders.userId, user.id));
+      await tx.delete(folders).where(eq(folders.userId, user.id));
 
       // `note_tags` cai por cascata daqui e de `tags`.
       const removedAttachments = await tx

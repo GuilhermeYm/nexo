@@ -13,6 +13,7 @@ import {
 import { NoteAiSummary } from "@/components/editor/note-ai-summary";
 import { NoteTags } from "@/components/editor/note-tags";
 import { EditorZoomControls } from "@/components/editor/editor-zoom-controls";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -73,6 +74,10 @@ interface NoteEditorProps {
 
 export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
   const router = useRouter();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteAttachments, setDeleteAttachments] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [title, setTitle] = useState(note.title);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
@@ -256,12 +261,22 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
   const deleteNote = useCallback(async () => {
     queued.current = {};
     if (timer.current) clearTimeout(timer.current);
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      await fetch(`/api/notes/${note.id}`, { method: "DELETE" });
-    } finally {
+      const response = await fetch(`/api/notes/${note.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteAttachments }),
+      });
+      if (!response.ok) throw new Error("delete request failed");
       router.push("/dashboard");
+    } catch {
+      setDeleteError("Não foi possível excluir a nota. Tente novamente.");
+    } finally {
+      setDeleting(false);
     }
-  }, [note.id, router]);
+  }, [deleteAttachments, note.id, router]);
 
   // Abre o arquivo de onde a nota nasceu. A URL assinada é pedida na hora e
   // aberta em outra aba — o bucket é privado, não há endereço público para
@@ -369,7 +384,11 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
               <ContextMenuItem
                 destructive
                 confirmLabel="Excluir para valer"
-                onSelect={deleteNote}
+                onSelect={() => {
+                  setDeleteAttachments(false);
+                  setDeleteError(null);
+                  setDeleteDialogOpen(true);
+                }}
               >
                 <Trash2 className="mt-0.5 size-4 shrink-0" />
                 <ContextMenuItemLabel
@@ -387,6 +406,35 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
         className="print:hidden"
       />
       <EditorBubbleMenu editor={editor} />
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Excluir esta nota?"
+        description="Ela sairá da sua conta, da busca e de todas as lousas em que estiver aberta."
+        subject={note.title || "Sem título"}
+        confirmLabel="Excluir nota"
+        busyLabel="Excluindo nota…"
+        busy={deleting}
+        error={deleteError ?? undefined}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={() => void deleteNote()}
+      >
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={deleteAttachments}
+            onChange={(event) => setDeleteAttachments(event.target.checked)}
+            disabled={deleting}
+            className="mt-0.5 size-4 accent-error"
+          />
+          <span>
+            <span className="block font-medium">Apagar também os arquivos associados</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              Essa escolha remove permanentemente os arquivos enviados junto com a nota.
+            </span>
+          </span>
+        </label>
+      </ConfirmDialog>
 
       <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
         <div className="mx-auto w-full max-w-2xl px-6 pt-10 pb-12">

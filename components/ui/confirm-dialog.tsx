@@ -12,6 +12,8 @@ interface ConfirmDialogProps {
   busyLabel: string;
   busy?: boolean;
   error?: ReactNode;
+  /** Conteúdo opcional entre o resumo e os botões, como uma escolha extra. */
+  children?: ReactNode;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }
@@ -32,6 +34,7 @@ export function ConfirmDialog({
   busyLabel,
   busy = false,
   error,
+  children,
   onOpenChange,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -92,6 +95,8 @@ export function ConfirmDialog({
             {subject}
           </p>
         )}
+
+        {children && <div className="mt-4">{children}</div>}
 
         {error && (
           <div

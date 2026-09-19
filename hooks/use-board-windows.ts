@@ -1135,7 +1135,7 @@ export function useBoardWindows(
    * remoção local abaixo cobre todas — não só a que a pessoa clicou.
    */
   const deleteNote = useCallback(
-    async (noteId: string) => {
+    async (noteId: string, deleteAttachments = false) => {
       queuedNote.current.delete(noteId);
       pendingNotes.current.delete(noteId);
       const timer = noteTimers.current.get(noteId);
@@ -1152,6 +1152,8 @@ export function useBoardWindows(
       try {
         const response = await fetch(`/api/notes/${noteId}`, {
           method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deleteAttachments }),
         });
         if (!response.ok) {
           setError(plainNotice("Não foi possível excluir a nota."));

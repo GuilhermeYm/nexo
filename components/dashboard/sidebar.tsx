@@ -49,7 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Agenda", href: "/dashboard/agenda", icon: CalendarDays, ready: true },
   { label: "Notas", href: "/dashboard/notas", icon: FileText, ready: true },
   { label: "Tags", href: "/dashboard/tags", icon: Tags, ready: true },
-  { label: "Arquivos", href: "/dashboard/arquivos", icon: Paperclip },
+  { label: "Arquivos", href: "/dashboard/arquivos", icon: Paperclip, ready: true },
 ];
 
 /** Os seis matizes de tag do tema, endereçados pela posição gravada no banco. */

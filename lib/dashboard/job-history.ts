@@ -19,7 +19,13 @@ import type { AiJobItem } from "@/lib/dashboard/queries";
 export const HISTORY_PAGE_SIZE = 30;
 
 export const JOB_STATUS_FILTERS = ["all", "succeeded", "failed", "active"] as const;
-export const JOB_KIND_FILTERS = ["all", "summarize", "classify", "transcribe"] as const;
+export const JOB_KIND_FILTERS = [
+  "all",
+  "summarize",
+  "organize",
+  "classify",
+  "transcribe",
+] as const;
 
 export type JobStatusFilter = (typeof JOB_STATUS_FILTERS)[number];
 export type JobKindFilter = (typeof JOB_KIND_FILTERS)[number];
@@ -134,6 +140,20 @@ const resultSchema = z
     model: z.string().nullable().optional(),
     classifyProvider: z.string().nullable().optional(),
     classifyModel: z.string().nullable().optional(),
+    promptTokens: z.number().optional(),
+    completionTokens: z.number().optional(),
+    reasoningTokens: z.number().nullable().optional(),
+    cachedTokens: z.number().nullable().optional(),
+    // As economias (docs/IA-LEITURA.md §6): gêmea, lote, releitura só de tags.
+    reused: z.boolean().optional(),
+    batchSize: z.number().optional(),
+    summaryKept: z.boolean().optional(),
+    // A organização em pastas.
+    notesConsidered: z.number().optional(),
+    placed: z.number().optional(),
+    moved: z.number().optional(),
+    foldersCreated: z.array(z.string()).optional(),
+    foldersUsed: z.array(z.string()).optional(),
   })
   .partial();
 
@@ -172,6 +192,26 @@ export interface JobDetail {
   /** Na transcrição, a classificação do texto é outra chamada, outro modelo. */
   classifyProvider: string | null;
   classifyModel: string | null;
+  tokens: {
+    prompt: number;
+    completion: number;
+    reasoning: number | null;
+    cached: number | null;
+  } | null;
+  /** Copiada de outra nota com o mesmo texto: zero tokens. */
+  reused: boolean;
+  /** Lida junto com outras numa chamada só; `tokens` é a parte desta nota. */
+  batchSize: number | null;
+  /** Releitura só de tags: o resumo ficou o da versão anterior. */
+  summaryKept: boolean;
+  /** Só na organização em pastas. */
+  organize: {
+    considered: number;
+    placed: number;
+    moved: number;
+    created: string[];
+    used: string[];
+  } | null;
 }
 
 export async function getJobDetail(
@@ -284,5 +324,27 @@ export async function getJobDetail(
     model: result.model ?? null,
     classifyProvider: result.classifyProvider ?? null,
     classifyModel: result.classifyModel ?? null,
+    tokens:
+      result.promptTokens !== undefined
+        ? {
+            prompt: result.promptTokens,
+            completion: result.completionTokens ?? 0,
+            reasoning: result.reasoningTokens ?? null,
+            cached: result.cachedTokens ?? null,
+          }
+        : null,
+    reused: result.reused ?? false,
+    batchSize: result.batchSize ?? null,
+    summaryKept: result.summaryKept ?? false,
+    organize:
+      job.kind === "organize" && result.notesConsidered !== undefined
+        ? {
+            considered: result.notesConsidered,
+            placed: result.placed ?? 0,
+            moved: result.moved ?? 0,
+            created: result.foldersCreated ?? [],
+            used: result.foldersUsed ?? [],
+          }
+        : null,
   };
 }

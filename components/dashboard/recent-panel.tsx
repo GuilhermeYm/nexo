@@ -9,6 +9,7 @@ import {
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { EmptyState, Panel, QuietFooter } from "@/components/dashboard/panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -88,6 +89,9 @@ export function RecentPanel({
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [notePendingDelete, setNotePendingDelete] = useState<RecentNote | null>(null);
+  const [deleteAttachments, setDeleteAttachments] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { items, status, isRefreshing, refresh } = useLiveResource<RecentNote>({
     endpoint: "/api/notes/recent",
     field: "notes",
@@ -139,21 +143,26 @@ export function RecentPanel({
 
   const deleteNote = useCallback(
     async (noteId: string) => {
+      setDeleting(true);
       try {
         const response = await fetch(`/api/notes/${noteId}`, {
           method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deleteAttachments }),
         });
         if (!response.ok) {
           setError("Não foi possível excluir a nota.");
           return;
         }
+        setNotePendingDelete(null);
       } catch {
         setError("Sem conexão. A nota não foi excluída.");
       } finally {
+        setDeleting(false);
         refresh();
       }
     },
-    [refresh]
+    [deleteAttachments, refresh]
   );
 
   return (
@@ -184,7 +193,10 @@ export function RecentPanel({
                 onOpenInWorkspace={(workspaceId) =>
                   openInWorkspace(note.id, workspaceId)
                 }
-                onDelete={() => deleteNote(note.id)}
+                onDelete={() => {
+                  setDeleteAttachments(false);
+                  setNotePendingDelete(note);
+                }}
               />
             ))}
           </ul>
@@ -207,6 +219,38 @@ export function RecentPanel({
           {error}
         </p>
       )}
+      <ConfirmDialog
+        open={notePendingDelete !== null}
+        title="Excluir esta nota?"
+        description="Ela sairá da sua conta, da busca e de todas as lousas em que estiver aberta."
+        subject={notePendingDelete?.title || "Sem título"}
+        confirmLabel="Excluir nota"
+        busyLabel="Excluindo nota…"
+        busy={deleting}
+        error={error ?? undefined}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setNotePendingDelete(null);
+        }}
+        onConfirm={() => {
+          if (notePendingDelete) void deleteNote(notePendingDelete.id);
+        }}
+      >
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={deleteAttachments}
+            onChange={(event) => setDeleteAttachments(event.target.checked)}
+            disabled={deleting}
+            className="mt-0.5 size-4 accent-error"
+          />
+          <span>
+            <span className="block font-medium">Apagar também os arquivos associados</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              Essa escolha remove permanentemente os arquivos enviados junto com a nota.
+            </span>
+          </span>
+        </label>
+      </ConfirmDialog>
     </Panel>
   );
 }
