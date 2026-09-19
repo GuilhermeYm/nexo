@@ -3,13 +3,13 @@
 [![Versão do projeto](https://img.shields.io/badge/vers%C3%A3o-1.0.0-6d5dfc?style=for-the-badge)](https://github.com/GuilhermeYm/nexo)
 [![Bun](https://img.shields.io/badge/Bun-1.4.0-f9f1e1?style=for-the-badge&logo=bun&logoColor=14151a)](https://bun.sh)
 
-![O segundo cérebro que você sempre quis, sem o trabalho que você sempre evitou. Capture em segundos. Encontre em milissegundos.](.github/assets/banner.png)
+![Social preview do Nexo](https://opengraph.githubassets.com/1/GuilhermeYm/nexo)
 
 Um organizador pessoal que aceita o material como ele chega — um PDF, um
-áudio, uma imagem, uma ideia meio formada às duas da manhã — e devolve
+aúdio, uma imagem, uma ideia meio formada às duas da manhã — e devolve
 organizado. A IA faz a primeira classificação, lê o que você escreve e sugere
-tags e pastas; a lousa é onde você reorganiza do seu jeito, com janelas que
-se arrastam e flechas entre elas.
+tags e pastas; a lousa é onde você reorganiza do seu jeito, com janelas que se
+arrastam e flechas entre elas.
 
 > Aplicação em desenvolvimento. Este README descreve o que já está de pé.
 
@@ -33,9 +33,9 @@ preferir ser guiado em vez de seguir a seção "Como rodar" sozinho, o link
 abaixo abre uma conversa nova no Claude já com o repositório e o pedido de
 ajuda escritos:
 
-[**💬 Configurar o Nexo com o Claude**](https://claude.ai/new?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20feito%20com%20Next.js%2C%20Supabase%20e%20Drizzle.%20Me%20ajude%20a%3A%201%29%20criar%20e%20configurar%20o%20projeto%20no%20Supabase%2C%202%29%20preencher%20o%20.env%20com%20as%20chaves%20certas%2C%203%29%20aplicar%20as%20migrations%20do%20Drizzle%2C%204%29%20rodar%20o%20projeto%20localmente%20com%20Bun%2C%20e%205%29%20entender%20as%20funcionalidades%20principais%20%28captura%20de%20arquivos%2C%20a%20lousa%2C%20tags%2C%20agenda%20e%20busca%29.%20Pode%20me%20guiar%3F)
+[**💬 Configurar o Nexo com o Claude**](https://claude.ai/new?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20f[...]
 
-[**💬 Configurar o Nexo com o ChatGPT**](https://chatgpt.com/?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20feito%20com%20Next.js%2C%20Supabase%20e%20Drizzle.%20Me%20ajude%20a%3A%201%29%20criar%20e%20configurar%20o%20projeto%20no%20Supabase%2C%202%29%20preencher%20o%20.env%20com%20as%20chaves%20certas%2C%203%29%20aplicar%20as%20migrations%20do%20Drizzle%2C%204%29%20rodar%20o%20projeto%20localmente%20com%20Bun%20ou%20com%20Docker%2C%20e%205%29%20entender%20as%20funcionalidades%20principais%20%28captura%20de%20arquivos%2C%20a%20lousa%2C%20tags%2C%20agenda%20e%20busca%29.%20Pode%20me%20guiar%3F)
+[**💬 Configurar o Nexo com o ChatGPT**](https://chatgpt.com/?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20f[...]
 
 Isso não é integração nenhuma com o produto — são apenas links para o Claude
 e o [ChatGPT](https://chatgpt.com) com a caixa de mensagem pré-preenchida
@@ -45,18 +45,18 @@ a seção **Como rodar** abaixo sem nenhum deles.
 
 ## O que existe hoje
 
-| Rota                  | O que faz                                                                                                                                                                                                                                                                                    |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                   | A landing pública — apresenta o projeto e leva ao repositório no GitHub, não a um cadastro.                                                                                                                                                                                                  |
-| `/login`, `/registro` | Autenticação pelo Supabase Auth. Não é mais anunciada na landing (não há uma instância central para se cadastrar), mas continua funcionando de verdade — é o que quem sobe a própria instância para a família, os colegas de trabalho ou só um segundo usuário no mesmo computador vai usar. |
-| `/dashboard`          | Busca, envio de arquivo, o feed de tarefas da IA e as notas recentes.                                                                                                                                                                                                                        |
-| `/dashboard/entrada`  | Os avisos da Nexo: cada tarefa da IA que falhou ou terminou (com o link para o detalhe em Tarefas), o limite de leituras e os avisos da instância. Seleção para marcar como lida ou apagar em lote; o número de não lidas fica sobre o ícone no trilho.                                      |
-| `/dashboard/agenda`   | A lista de tarefas do dia — uma nota especial, com fuso horário e contadores corretos.                                                                                                                                                                                                       |
-| `/dashboard/notas`    | O acervo: inventário paginado de tudo que existe, com filtros, busca e prévia de leitura.                                                                                                                                                                                                    |
-| `/dashboard/arquivos` | O acervo de arquivos enviados (PDF, áudio, imagem, `.docx`).                                                                                                                                                                                                                                 |
-| `/dashboard/tags`     | As tags, o que está marcado com cada uma, e o modo grafo (notas e tags como rede).                                                                                                                                                                                                           |
-| `/workspace/[id]`     | A lousa: pan, zoom, janelas, post-its, anexos, pastas e ligações.                                                                                                                                                                                                                            |
-| `/nota/[id]`          | O editor de texto rico (TipTap sobre ProseMirror), com exportação em PDF.                                                                                                                                                                                                                    |
+| Rota                  | O que faz                                                                                                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                   | A landing pública — apresenta o projeto e leva ao repositório no GitHub, não a um cadastro.                                                                          |
+| `/login`, `/registro` | Autenticação pelo Supabase Auth. Não é mais anunciada na landing (não há uma instância central para se cadastrar), mas continua funcionando de verdade — é o que|
+| `/dashboard`          | Busca, envio de arquivo, o feed de tarefas da IA e as notas recentes.                                                                                                     |
+| `/dashboard/entrada`  | Os avisos da Nexo: cada tarefa da IA que falhou ou terminou (com o link para o detalhe em Tarefas), o limite de leituras e os avisos da instância. Seleção para marcar |
+| `/dashboard/agenda`   | A lista de tarefas do dia — uma nota especial, com fuso horário e contadores corretos.                                                                                 |
+| `/dashboard/notas`    | O acervo: inventário paginado de tudo que existe, com filtros, busca e prévia de leitura.                                                                               |
+| `/dashboard/arquivos` | O acervo de arquivos enviados (PDF, áudio, imagem, `.docx`).                                                                                                             |
+| `/dashboard/tags`     | As tags, o que está marcado com cada uma, e o modo grafo (notas e tags como rede).                                                                                       |
+| `/workspace/[id]`     | A lousa: pan, zoom, janelas, post-its, anexos, pastas e ligações.                                                                                                       |
+| `/nota/[id]`          | O editor de texto rico (TipTap sobre ProseMirror), com exportação em PDF.                                                                                               |
 
 **Capturar** — solte um PDF, um `.docx`, um `.txt`, uma imagem ou um áudio na
 barra do dashboard. PDFs e textos têm o conteúdo extraído; imagens são lidas
@@ -99,7 +99,6 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
    git clone https://github.com/GuilhermeYm/nexo.git
    cd nexo
    ```
-
 2. **Crie um projeto no Supabase** — anote a URL, a `anon key` e a
    `service_role key` (Project Settings → API), e a connection string do
    Postgres (Project Settings → Database → Connection string → modo
@@ -109,7 +108,6 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
    ```bash
    cp .env.example .env      # e edite com os valores do passo anterior
    ```
-
 4. **Aplique as migrations**, na ordem, contra o seu próprio banco:
 
    ```bash
@@ -119,7 +117,6 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
    ```
 
    Elas são idempotentes — rodar de novo não duplica nada.
-
 5. **(Opcional) gere uma chave da [Groq](https://console.groq.com/keys)** para
    a classificação automática, a leitura de notas e imagens, e a transcrição
    de áudio. Sem ela, e sem `OPENAI_API_KEY`, o upload continua funcionando:
@@ -132,7 +129,6 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
    bun install
    bun dev
    ```
-
 7. Acesse `http://localhost:3000`, crie sua conta em `/registro` e comece a
    usar.
 
@@ -149,9 +145,7 @@ Depois, acesse `http://localhost:3000`. O container usa Bun `1.4.0` e recebe
 as variáveis do `.env` somente em tempo de execução; o arquivo `.env` não é
 copiado para a imagem.
 
-Faltar uma variável obrigatória (as do Supabase e a `DATABASE_URL`) não
-quebra em algum lugar fundo e sem explicação — a aplicação recusa lançando
-uma mensagem que diz exatamente qual variável falta e onde preenchê-la.
+Faltar uma variável obrigatória (as do Supabase e a `DATABASE_URL`) não quebra em algum lugar fundo e sem explicação — a aplicação recusa lançando uma mensagem que diz exatamente qual variável falta e onde preenchê-la.
 
 ### Variáveis de ambiente
 
@@ -165,7 +159,7 @@ uma mensagem que diz exatamente qual variável falta e onde preenchê-la.
 | `GROQ_TRANSCRIPTION_MODEL`          | Não                                   | Modelo Groq de áudio; padrão `whisper-large-v3-turbo`. Usa a mesma chave Groq.                     |
 | `GROQ_NOTE_MODEL`                   | Não                                   | Modelo Groq para a leitura das notas escritas por você (resumo + tags). Sem ela, usa `GROQ_MODEL`. |
 | `OPENAI_API_KEY` / `OPENAI_MODEL`   | Não                                   | Classificação por IA, se não houver chave da Groq.                                                 |
-| `OPENAI_TRANSCRIPTION_MODEL`        | Não                                   | Modelo OpenAI de áudio; padrão `gpt-4o-mini-transcribe`. Usa a mesma chave OpenAI.                 |
+| `OPENAI_TRANSCRIPTION_MODEL`         | Não                                   | Modelo OpenAI de áudio; padrão `gpt-4o-mini-transcribe`. Usa a mesma chave OpenAI.                 |
 | `OPENAI_NOTE_MODEL`                 | Não                                   | Modelo OpenAI para a leitura das notas. Sem ela, usa `OPENAI_MODEL`.                               |
 | `UPSTASH_REDIS_REST_URL` / `_TOKEN` | Não                                   | Rate limiting distribuído. Sem elas, cai num limitador em memória (ok para uma instância só).      |
 
@@ -177,26 +171,20 @@ escritas por você simplesmente não são lidas automaticamente.
 ## Tetos por usuário
 
 Não existe plano, cobrança nem cota de armazenamento: o acervo é limitado
-pela sua conta do Supabase, não por uma regra do código. Os tetos abaixo
-existem por outros dois motivos — **gastar pouco com a IA** (a chave e a
-conta são suas) e **não deixar um cliente adulterado virar abuso** contra a
-sua própria instância. Todos valem **por conta**, então numa instância
-compartilhada (família, colegas) cada pessoa tem os seus.
+pela sua conta do Supabase, não por uma regra do código. Os tetos abaixo existem por outros dois motivos — **gastar pouco com a IA** (a chave e a conta são suas) e **não deixar um cliente adulterado virar abuso** contra a sua própria instância. Todos valem **por conta**, então numa instância compartilhada (família, colegas) cada pessoa tem os seus.
 
-Os de "por hora" usam o Redis da Upstash quando `UPSTASH_REDIS_REST_*` está
-definida; sem ela, ficam em memória e zeram quando o servidor reinicia. Bater
-num deles devolve um aviso de "aguarde um pouco", nunca perda de dado.
+Os de "por hora" usam o Redis da Upstash quando `UPSTASH_REDIS_REST_*` está definida; sem ela, ficam em memória e zeram quando o servidor reinicia. Bater num deles devolve um aviso de "aguarde um pouco", nunca perda de dado.
 
 **IA — é aqui que está o custo**
 
-| O quê                                       | Teto                                                                 | Onde mudar                                                                                                  |
-| ------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Leituras automáticas da mesma nota          | 6 por dia (+3 a cada "Ler mesmo assim")                              | `MAX_RUNS_PER_DAY` em `lib/ai/note-reading.ts`, `EXTRA_READS_PER_RELEASE` em `lib/ai/preference-options.ts` |
-| Leituras de notas, somando todas            | 60 por hora                                                          | `MAX_READS_PER_HOUR` em `lib/ai/note-reading.ts`                                                            |
-| "Reler e organizar" (em Notas)              | 6 pedidos por hora, até 20 resumos por pedido                        | `app/api/ai/review/route.ts`, `SUMMARY_REFRESH_LIMIT`                                                       |
-| Pastas criadas pela organização             | 5 por vez, 60 pastas por conta                                       | `lib/ai/organize-notes.ts`, `lib/folders/types.ts`                                                          |
-| Tags que a IA põe numa nota                 | 2 novas por leitura, 5 no total (20 tags por nota, contando as suas) | `lib/ai/note-reading.ts`                                                                                    |
-| Texto enviado para classificar um documento | 8.000 caracteres                                                     | `MAX_INPUT_CHARS` em `lib/ai/classify-document.ts`                                                          |
+| O quê                                       | Teto                                                                 | Onde mudar                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Leituras automáticas da mesma nota          | 6 por dia (+3 a cada "Ler mesmo assim")                              | `MAX_RUNS_PER_DAY` em `lib/ai/note-reading.ts`, `EXTRA_READS_PER_RELEASE` e |
+| Leituras de notas, somando todas            | 60 por hora                                                          | `MAX_READS_PER_HOUR` em `lib/ai/note-reading.ts`                            |
+| "Reler e organizar" (em Notas)              | 6 pedidos por hora, até 20 resumos por pedido                        | `app/api/ai/review/route.ts`, `SUMMARY_REFRESH_LIMIT`                      |
+| Pastas criadas pela organização             | 5 por vez, 60 pastas por conta                                       | `lib/ai/organize-notes.ts`, `lib/folders/types.ts`                        |
+| Tags que a IA põe numa nota                 | 2 novas por leitura, 5 no total (20 tags por nota, contando as suas) | `lib/ai/note-reading.ts`                                                   |
+| Texto enviado para classificar um documento | 8.000 caracteres                                                     | `MAX_INPUT_CHARS` em `lib/ai/classify-document.ts`                          |
 
 Quando uma nota chega ao teto diário, a Nexo avisa na Entrada (na hora, num
 resumo às 23h ou nada — você escolhe em Configurações → IA).
@@ -257,42 +245,24 @@ As imagens vão para `.impeccable/review/`, fora do git.
 
 ## Como isto está construído
 
-Next.js 16 (App Router), TypeScript estrito, Tailwind v4 com OriginUI,
-Drizzle sobre Postgres, Supabase para autenticação, storage e Realtime, Bun
-como gerenciador de pacotes.
+Next.js 16 (App Router), TypeScript estrito, Tailwind v4 com OriginUI, Drizzle sobre Postgres, Supabase para autenticação, storage e Realtime, Bun como gerenciador de pacotes.
 
 Três decisões explicam quase todo o resto:
 
-- **A separação entre contas mora no banco, não na aplicação.** Toda tabela
-  tem Row Level Security; as chaves estrangeiras são compostas com o
-  `user_id`, então uma linha que aponte para o conteúdo de outra pessoa é
-  recusada pelo Postgres, não por um `if`.
-- **Postgres é a fonte da verdade; o Realtime é só o sino.** Quando algo muda
-  em qualquer dispositivo, o cliente rebusca a rota em vez de aplicar o
-  payload do evento — cada resposta é um retrato inteiro, não um remendo.
-- **Nada é escrito durante um gesto.** Arrastar uma janela roda em estado
-  local a 60fps; meio segundo depois de soltar, sai uma escrita só.
+- **A separação entre contas mora no banco, não na aplicação.** Toda tabela tem Row Level Security; as chaves estrangeiras são compostas com o `user_id`, então uma linha que aponte para o conteúdo de outra pessoa é recusada pelo Postgres, não por um `if`.
+- **Postgres é a fonte da verdade; o Realtime é só o sino.** Quando algo muda em qualquer dispositivo, o cliente rebusca a rota em vez de aplicar o payload do evento — cada resposta é um retrato inteiro, não um remendo.
+- **Nada é escrito durante um gesto.** Arrastar uma janela roda em estado local a 60fps; meio segundo depois de soltar, sai uma escrita só.
 
-O `AGENTS.md` guarda o porquê de cada decisão não óbvia, incluindo as
-alternativas descartadas. Vale ler antes de assumir que algo é bug — pode ser
-escolha documentada.
+O `AGENTS.md` guarda o porquê de cada decisão não óbvia, incluindo as alternativas descartadas. Vale ler antes de assumir que algo é bug — pode ser escolha documentada.
 
 ## Privacidade
 
-O conteúdo é seu, e fica na sua própria instância — no seu projeto Supabase,
-com as suas chaves. Ninguém além de você opera um servidor central que veja
-os seus dados. Quando a IA está configurada, o texto extraído de documentos,
-o conteúdo enviado para transcrição de áudio e as imagens enviadas para
-leitura vão ao provedor que **você** escolheu (Groq ou OpenAI), sob os termos
-dele; nenhum identificador de conta é enviado junto.
+O conteúdo é seu, e fica na sua própria instância — no seu projeto Supabase, com as suas chaves. Ninguém além de você opera um servidor central que veja os seus dados. Quando a IA está configurada, o texto extraído de documentos, o conteúdo enviado para transcrição de áudio e as imagens enviadas para leitura vão ao provedor que **você** escolheu (Groq ou OpenAI), sob os termos dele; nenhum identificador de conta é enviado junto.
 
-> A página `/privacidade` do produto já reflete o modelo auto-hospedado: quem
-> sobe uma instância para outras pessoas usarem é quem responde pelos dados
-> delas, não quem mantém este código. O e-mail de contato ali é um exemplo —
-> troque pelo seu antes de publicar a sua instância para terceiros.
+> A página `/privacidade` do produto já reflete o modelo auto-hospedado: quem sobe uma instância para outras pessoas usarem é quem responde pelos dados delas, não quem mantém este código. O e-mail de contato ali é um exemplo — troque pelo seu antes de publicar a sua instância para terceiros.
 
 ## Licença
 
 Uso pessoal — não é uma licença open source padrão (tipo MIT ou Apache). Ver
-[LICENSE](LICENSE) para o texto completo antes de redistribuir ou de subir
-uma instância para terceiros.
+[LICENSE](LICENSE) para o texto completo antes de redistribuir ou de subir uma
+instância para terceiros.
