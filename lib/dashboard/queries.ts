@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { aiJobs, noteAiState, noteTags, notes, tags, workspaces } from "@/lib/db/schema";
 import { aiStateJoin, isSummaryStale, SUMMARY_COLUMNS } from "@/lib/notes/queries";
+import { likeContains } from "@/lib/utils";
 
 /**
  * Leituras do dashboard.
@@ -266,7 +267,7 @@ export async function searchNotes(
 
   const tsQuery = sql`websearch_to_tsquery('portuguese', ${trimmed})`;
   // Prefixo para a busca responder enquanto a pessoa ainda digita a palavra.
-  const prefixPattern = `%${trimmed}%`;
+  const prefixPattern = likeContains(trimmed);
 
   const rows = await db
     .select({

@@ -7,6 +7,10 @@
  *   audio/mpeg       -> ID3 ou frame sync FF FB/FA/F3
  *   audio/wav        -> RIFF....WAVE
  *   audio/mp4, x-m4a -> ....ftyp.... (ISO base media)
+ *   image/jpeg       -> FF D8 FF
+ *   image/png        -> \x89PNG\r\n\x1a\n
+ *   image/webp       -> RIFF....WEBP
+ *   image/gif        -> GIF87a / GIF89a
  *   text/plain, text/markdown -> sem assinatura, sempre passam
  */
 
@@ -52,6 +56,14 @@ export function matchesSignature(
     case "audio/mp4":
     case "audio/x-m4a":
       return asciiAt(bytes, 4, "ftyp");
+    case "image/jpeg":
+      return startsWith(bytes, [0xff, 0xd8, 0xff]);
+    case "image/png":
+      return startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    case "image/webp":
+      return startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && asciiAt(bytes, 8, "WEBP");
+    case "image/gif":
+      return asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a");
     case "text/plain":
     case "text/markdown":
       // Texto puro não tem assinatura — nada a conferir.

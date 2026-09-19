@@ -11,6 +11,8 @@ import {
   ExternalLink,
   FileText,
   FolderClosed,
+  FolderPlus,
+  Folders,
   LoaderCircle,
   Search,
   Sparkles,
@@ -26,15 +28,20 @@ import {
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { AiReviewCard } from "@/components/notes/ai-review-card";
+import { NoteContextMenu, useNoteDeletion } from "@/components/dashboard/note-context-menu";
+import { CreateFolderDialog } from "@/components/notes/create-folder-dialog";
+import { DeleteTagsChoice } from "@/components/notes/delete-tags-choice";
 import { FolderFilterBar, NoteFolderPicker } from "@/components/notes/folder-controls";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   formatAbsolute,
   formatRelative,
   toIsoString,
 } from "@/lib/dashboard/format";
 import type { FolderFilter, FolderItem } from "@/lib/folders/types";
+import type { NoteDeletionImpact } from "@/lib/notes/deletion-impact";
 import {
   NOTE_TYPES,
   type NoteListItem,
@@ -68,9 +75,12 @@ const SORT_OPTIONS: { value: NoteListSort; label: string }[] = [
 export function NotesView({
   initial,
   renderedAt,
+  initialFolder = "all",
 }: {
   initial: NoteListResult | null;
   renderedAt: number;
+  /** A pasta pedida na URL (`?folder=`), vinda da barra lateral. */
+  initialFolder?: FolderFilter;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -100,13 +110,29 @@ export function NotesView({
     "idle"
   );
   const [deleteAttachments, setDeleteAttachments] = useState(false);
-  const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
+  const [deleteTags, setDeleteTags] = useState(false);
+  const [deletionImpact, setDeletionImpact] = useState<NoteDeletionImpact | null>(null);
+  const [impactStatus, setImpactStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [folderFilter, setFolderFilter] = useState<FolderFilter>(initialFolder);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   // Muda quando pastas ou pertenças mudam: o cartão da Nexo reconta.
   const [reviewKey, setReviewKey] = useState(0);
   const [forceReview, setForceReview] = useState(false);
   const [reviewVisible, setReviewVisible] = useState(false);
+  const [section, setSection] = useState<"notes" | "folders">("notes");
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [noteWaitingForFolder, setNoteWaitingForFolder] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const firstRequest = useRef(true);
+
+  const singleDeletion = useNoteDeletion({
+    onDeleted: (note) => {
+      if (selectedNoteId === note.id) closePreview();
+      void loadPage(1, false);
+      void loadFolders();
+    },
+    onError: setNotice,
+  });
 
   const loadFolders = useCallback(async () => {
     try {
@@ -242,6 +268,22 @@ export function NotesView({
     setReviewKey((key) => key + 1);
   }
 
+  async function moveNoteFromMenu(noteId: string, folderId: string | null) {
+    setNotice(null);
+    const response = await fetch(`/api/notes/${noteId}/folder`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    }).catch(() => null);
+    if (!response?.ok) {
+      setNotice(response ? "Não deu para organizar a nota." : "Sem conexão.");
+      return;
+    }
+    const body = (await response.json()) as { folder: NoteListItem["folder"] };
+    noteMoved(noteId, body.folder);
+    if (folderFilter !== "all") void loadPage(1, false);
+  }
+
   function clearFilters() {
     resetSelection();
     setQuery("");
@@ -256,6 +298,38 @@ export function NotesView({
     setSelectedNoteIds(new Set());
     setDeleteDialogOpen(false);
     setDeleteAttachments(false);
+    setDeleteTags(false);
+    setDeletionImpact(null);
+    setImpactStatus("idle");
+  }
+
+  async function openDeleteDialog() {
+    setDeleteStatus("idle");
+    setDeleteAttachments(false);
+    setDeleteTags(false);
+    setDeletionImpact(null);
+    setImpactStatus("loading");
+    setDeleteDialogOpen(true);
+
+    await loadDeletionImpact();
+  }
+
+  async function loadDeletionImpact() {
+    setImpactStatus("loading");
+    try {
+      const response = await fetch("/api/notes/deletion-impact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selectedNoteIds] }),
+      });
+      if (!response.ok) throw new Error("impact request failed");
+      const nextImpact = (await response.json()) as NoteDeletionImpact;
+      setDeletionImpact(nextImpact);
+      if (nextImpact.attachmentCount === 0) setDeleteAttachments(false);
+      setImpactStatus("idle");
+    } catch {
+      setImpactStatus("error");
+    }
   }
 
   function toggleNoteSelection(noteId: string) {
@@ -288,7 +362,11 @@ export function NotesView({
       const response = await fetch("/api/notes", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [...selectedNoteIds], deleteAttachments }),
+        body: JSON.stringify({
+          ids: [...selectedNoteIds],
+          deleteAttachments,
+          deleteTags,
+        }),
       });
       if (!response.ok) throw new Error("delete request failed");
 
@@ -325,12 +403,12 @@ export function NotesView({
                   <FileText className="size-5" aria-hidden="true" />
                 </span>
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[30px]">
-                  Suas notas
+                  Notas e pastas
                 </h1>
               </div>
               <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-                Tudo o que você escreveu e o que a Nexo criou para você, no
-                mesmo lugar.
+                Encontre o que você guardou e organize do seu jeito, sem perder
+                a ajuda da Nexo.
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -369,6 +447,22 @@ export function NotesView({
             </div>
           </header>
 
+          <Tabs value={section} onValueChange={(value) => setSection(value as "notes" | "folders")} className="mt-8">
+            <TabsList aria-label="Conteúdo do acervo">
+              <TabsTrigger value="notes">
+                <FileText className="size-4" aria-hidden="true" />
+                Notas
+              </TabsTrigger>
+              <TabsTrigger value="folders">
+                <Folders className="size-4" aria-hidden="true" />
+                Pastas
+                <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[11px] tabular-nums text-subtle-foreground">
+                  {folders.length}
+                </span>
+              </TabsTrigger>
+            </TabsList>
+
+          <TabsContent value="notes">
           <AiReviewCard
             refreshKey={reviewKey}
             forceOpen={forceReview}
@@ -376,6 +470,12 @@ export function NotesView({
             onDone={refreshAfterFolders}
             onVisibleChange={setReviewVisible}
           />
+
+          {notice && (
+            <p role="alert" className="mt-4 rounded-xl bg-error/10 px-3.5 py-3 text-sm text-error">
+              {notice}
+            </p>
+          )}
 
           <section aria-label="Filtros de notas" className="mt-8">
             <div className="relative">
@@ -534,11 +634,7 @@ export function NotesView({
                       <button
                         type="button"
                         disabled={selectedNoteIds.size === 0}
-                        onClick={() => {
-                          setDeleteStatus("idle");
-                          setDeleteAttachments(false);
-                          setDeleteDialogOpen(true);
-                        }}
+                        onClick={() => void openDeleteDialog()}
                         className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
                       >
                         <Trash2 className="size-4" aria-hidden="true" />
@@ -555,16 +651,33 @@ export function NotesView({
                 >
                   <ul className="divide-y divide-border border-y border-border">
                     {result.notes.map((note) => (
-                      <NoteRow
+                      <NoteContextMenu
                         key={note.id}
                         note={note}
-                        now={now}
-                        selected={note.id === selectedNoteId}
-                        selectionMode={selectionMode}
-                        checked={selectedNoteIds.has(note.id)}
-                        onCheckedChange={() => toggleNoteSelection(note.id)}
-                        onSelect={() => void showPreview(note.id)}
-                      />
+                        workspaces={[]}
+                        hideWorkspace
+                        openLabel="Abrir prévia"
+                        folders={folders}
+                        currentFolderId={note.folder?.id ?? null}
+                        onOpen={() => void showPreview(note.id)}
+                        onMoveToFolder={(folderId) => void moveNoteFromMenu(note.id, folderId)}
+                        onCreateFolder={() => {
+                          setNoteWaitingForFolder(note.id);
+                          setCreateFolderOpen(true);
+                        }}
+                        onDelete={singleDeletion.request}
+                        onError={setNotice}
+                      >
+                        <NoteRow
+                          note={note}
+                          now={now}
+                          selected={note.id === selectedNoteId}
+                          selectionMode={selectionMode}
+                          checked={selectedNoteIds.has(note.id)}
+                          onCheckedChange={() => toggleNoteSelection(note.id)}
+                          onSelect={() => void showPreview(note.id)}
+                        />
+                      </NoteContextMenu>
                     ))}
                   </ul>
 
@@ -603,8 +716,38 @@ export function NotesView({
               </>
             )}
           </section>
+          </TabsContent>
+
+          <TabsContent value="folders" className="mt-8">
+              <FolderGallery
+                folders={folders}
+                onCreate={() => {
+                  setNoteWaitingForFolder(null);
+                  setCreateFolderOpen(true);
+                }}
+                onOpen={(folderId) => {
+                  resetSelection();
+                  setFolderFilter(folderId);
+                  setSection("notes");
+                }}
+              />
+          </TabsContent>
+          </Tabs>
         </div>
       </main>
+      {singleDeletion.dialog}
+      <CreateFolderDialog
+        open={createFolderOpen}
+        onOpenChange={(open) => {
+          setCreateFolderOpen(open);
+          if (!open) setNoteWaitingForFolder(null);
+        }}
+        onCreated={(folder) => {
+          setFolders((current) => [...current, folder].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")));
+          if (noteWaitingForFolder) void moveNoteFromMenu(noteWaitingForFolder, folder.id);
+          setReviewKey((key) => key + 1);
+        }}
+      />
       <ConfirmDialog
         open={deleteDialogOpen}
         title="Apagar notas selecionadas?"
@@ -617,23 +760,121 @@ export function NotesView({
         onOpenChange={setDeleteDialogOpen}
         onConfirm={() => void deleteSelectedNotes()}
       >
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm text-foreground">
+        <label
+          className={cn(
+            "flex items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm transition-opacity",
+            deletionImpact?.attachmentCount
+              ? "cursor-pointer text-foreground"
+              : "cursor-default text-muted-foreground opacity-70"
+          )}
+        >
           <input
             type="checkbox"
             checked={deleteAttachments}
             onChange={(event) => setDeleteAttachments(event.target.checked)}
-            disabled={deleteStatus === "deleting"}
+            disabled={
+              deleteStatus === "deleting" ||
+              impactStatus !== "idle" ||
+              !deletionImpact?.attachmentCount
+            }
             className="mt-0.5 size-4 accent-error"
           />
           <span>
             <span className="block font-medium">Apagar também os arquivos associados</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              PDFs, áudios e outros arquivos enviados junto com estas notas serão removidos permanentemente.
+              {impactStatus === "loading"
+                ? "Verificando os arquivos destas notas…"
+                : deletionImpact?.attachmentCount
+                  ? `${deletionImpact.attachmentCount} ${deletionImpact.attachmentCount === 1 ? "arquivo associado será removido" : "arquivos associados serão removidos"} permanentemente.`
+                  : impactStatus === "error"
+                    ? "Não foi possível verificar os arquivos; esta opção permanece indisponível."
+                    : "As notas selecionadas não têm arquivos associados."}
             </span>
           </span>
+          {impactStatus === "loading" && (
+            <LoaderCircle
+              className="mt-0.5 ml-auto size-4 shrink-0 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          )}
         </label>
+        <DeleteTagsChoice
+          impact={deletionImpact}
+          status={impactStatus}
+          checked={deleteTags}
+          disabled={deleteStatus === "deleting"}
+          onCheckedChange={setDeleteTags}
+          onRetry={() => void loadDeletionImpact()}
+        />
       </ConfirmDialog>
     </div>
+  );
+}
+
+function FolderGallery({
+  folders,
+  onCreate,
+  onOpen,
+}: {
+  folders: FolderItem[];
+  onCreate: () => void;
+  onOpen: (folderId: string) => void;
+}) {
+  return (
+    <section aria-labelledby="folders-heading">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 id="folders-heading" className="text-lg font-semibold text-foreground">Suas pastas</h2>
+          <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted-foreground">
+            Pastas são formas de reunir notas sem mudar o conteúdo delas. As criadas pela Nexo continuam sob seu controle.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCreate}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 self-start rounded-xl bg-accent px-4 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        >
+          <FolderPlus className="size-4" aria-hidden="true" />
+          Nova pasta
+        </button>
+      </div>
+
+      {folders.length === 0 ? (
+        <div className="mt-8 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-secondary/30 px-6 text-center">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-secondary text-subtle-foreground">
+            <Folders className="size-5" aria-hidden="true" />
+          </span>
+          <h3 className="mt-4 font-semibold text-foreground">Nenhuma pasta ainda</h3>
+          <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
+            Crie a primeira agora ou deixe a Nexo sugerir uma organização para o seu acervo.
+          </p>
+          <button type="button" onClick={onCreate} className="mt-5 rounded-xl border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary">
+            Criar primeira pasta
+          </button>
+        </div>
+      ) : (
+        <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {folders.map((folder) => (
+            <li key={folder.id}>
+              <button
+                type="button"
+                onClick={() => onOpen(folder.id)}
+                className="group flex min-h-36 w-full flex-col rounded-2xl border border-border bg-background p-4 text-left transition-[border-color,background-color,transform] duration-150 hover:-translate-y-0.5 hover:border-accent/45 hover:bg-secondary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transform-none"
+              >
+                <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-colors group-hover:bg-accent/10 group-hover:text-accent">
+                  <FolderClosed className="size-5" aria-hidden="true" />
+                </span>
+                <span className="mt-4 line-clamp-2 font-semibold text-foreground">{folder.name}</span>
+                <span className="mt-auto flex w-full items-center justify-between gap-3 pt-3 text-xs text-subtle-foreground">
+                  <span>{folder.noteCount} {folder.noteCount === 1 ? "nota" : "notas"}</span>
+                  <span>{folder.source === "ai" ? "pela Nexo" : "criada por você"}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -818,10 +1059,10 @@ function NoteRow({
   );
 }
 
-function NotePreviewPanel({
+export function NotePreviewPanel({
   preview,
   status,
-  folders,
+  folders = [],
   onMoved,
   now,
   onClose,
@@ -829,8 +1070,9 @@ function NotePreviewPanel({
 }: {
   preview: NotePreview | null;
   status: "idle" | "loading" | "error";
-  folders: FolderItem[];
-  onMoved: (noteId: string, folder: NotePreview["folder"]) => void;
+  /** A busca global só lê; em Notas, a prévia também permite mover de pasta. */
+  folders?: FolderItem[];
+  onMoved?: (noteId: string, folder: NotePreview["folder"]) => void;
   now: number;
   onClose: () => void;
   onRetry: () => void;
@@ -889,13 +1131,15 @@ function NotePreviewPanel({
               )}
               {preview.workspaceName && <><Dot /><span>{preview.workspaceName}</span></>}
             </div>
-            <NoteFolderPicker
-              key={preview.id}
-              noteId={preview.id}
-              folder={preview.folder}
-              folders={folders}
-              onMoved={(folder) => onMoved(preview.id, folder)}
-            />
+            {onMoved && (
+              <NoteFolderPicker
+                key={preview.id}
+                noteId={preview.id}
+                folder={preview.folder}
+                folders={folders}
+                onMoved={(folder) => onMoved(preview.id, folder)}
+              />
+            )}
           </div>
         </div>
       </div>

@@ -14,6 +14,7 @@ import { TodayTasks } from "@/components/dashboard/today-tasks";
 import { TopTags } from "@/components/dashboard/top-tags";
 import { HOME_TAB, useOpenTabs } from "@/hooks/use-open-tabs";
 import { usePersistedFlag } from "@/hooks/use-persisted-flag";
+import { useUnreadCount } from "@/hooks/use-unread-count";
 import { firstName, greetingFor } from "@/lib/dashboard/format";
 import { ErrorReport } from "@/components/errors/error-report";
 import { isErrorCode } from "@/lib/errors/code";
@@ -40,6 +41,8 @@ interface DashboardShellProps {
   serverHour: number;
   /** Notificações não lidas para o badge da Entrada no trilho. */
   unreadCount: number;
+  /** `?tarefa=` — a notificação que trouxe a pessoa até aqui. Já validado. */
+  focusJobId?: string | null;
 }
 
 const SIDEBAR_STORAGE_KEY = "nexo-sidebar-open";
@@ -53,8 +56,10 @@ export function DashboardShell({
   topTags,
   renderedAt,
   serverHour,
-  unreadCount,
+  unreadCount: initialUnreadCount,
+  focusJobId = null,
 }: DashboardShellProps) {
+  const unreadCount = useUnreadCount(initialUnreadCount);
   // A preferência do trilho é local do dispositivo, não da conta: o mesmo
   // usuário quer o trilho aberto no monitor e recolhido no laptop.
   const [sidebarOpen, setSidebarOpen] = usePersistedFlag(
@@ -63,6 +68,13 @@ export function DashboardShell({
   );
   const router = useRouter();
   const [workspaces, setWorkspaces] = useState(initialWorkspaces);
+
+  // O `?tarefa=` já cumpriu o papel (o painel montou aberto nele). Sai da
+  // URL para recarregar a página não reabrir a tela cheia — pelo History
+  // nativo, que o App Router acompanha sem rodar o Server Component de novo.
+  useEffect(() => {
+    if (focusJobId) window.history.replaceState(null, "", "/dashboard");
+  }, [focusJobId]);
 
   // Quais lugares estão à mão na barra de cima. É escolha deste dispositivo,
   // não da conta — ver o comentário do próprio hook.
@@ -92,14 +104,14 @@ export function DashboardShell({
   // depois da hidratação.
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  function toggleSidebar() {
+  const toggleSidebar = useCallback(() => {
     if (!window.matchMedia("(min-width: 768px)").matches) {
       setDrawerOpen((current) => !current);
       return;
     }
 
     setSidebarOpen(!sidebarOpen);
-  }
+  }, [sidebarOpen, setSidebarOpen]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
@@ -115,6 +127,30 @@ export function DashboardShell({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [drawerOpen]);
+
+  // Ctrl + Shift + B alterna o trilho no desktop e a gaveta no celular, pelo
+  // mesmo caminho do botão. Um diálogo aberto já controla o próprio foco e
+  // não deve deixar esse atalho alcançar o dashboard por baixo.
+  useEffect(() => {
+    function handleSidebarShortcut(event: KeyboardEvent) {
+      if (
+        event.code !== "KeyB" ||
+        !event.ctrlKey ||
+        !event.shiftKey ||
+        event.altKey ||
+        event.metaKey ||
+        document.querySelector("dialog[open]")
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      toggleSidebar();
+    }
+
+    window.addEventListener("keydown", handleSidebarShortcut);
+    return () => window.removeEventListener("keydown", handleSidebarShortcut);
+  }, [toggleSidebar]);
 
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -322,6 +358,28 @@ export function DashboardShell({
     pickFile.current = pick;
   }, []);
   const handlePickFile = useCallback(() => pickFile.current?.(), []);
+  const reopenDashboard = useCallback(() => openTab(HOME_TAB), [openTab]);
+
+  const revealSidebar = useCallback(() => {
+    if (window.matchMedia("(min-width: 768px)").matches) {
+      setSidebarOpen(true);
+      return;
+    }
+
+    setDrawerOpen(true);
+  }, [setSidebarOpen]);
+
+  function closeHomeTab() {
+    // Fechar o Início enquanto há uma lousa aberta leva direto ao último
+    // lugar que a pessoa deixou à mão. Assim a aba fechada não continua
+    // ocupando a janela principal por trás da barra.
+    const lastWorkspaceId = [...tabs]
+      .reverse()
+      .find((tab) => tab !== HOME_TAB);
+
+    closeTab(HOME_TAB);
+    if (lastWorkspaceId) router.push(`/workspace/${lastWorkspaceId}`);
+  }
 
   const greeting = greetingFor(hour);
   const name = firstName(userName);
@@ -405,7 +463,7 @@ export function DashboardShell({
                     active
                     label="Início"
                     closeHint="O dashboard continua em /dashboard e no trilho."
-                    onClose={() => closeTab(HOME_TAB)}
+                    onClose={closeHomeTab}
                   />
                 );
               }
@@ -461,6 +519,12 @@ export function DashboardShell({
 
         {/* A janela */}
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl border border-border bg-background">
+          {tabs.length === 0 ? (
+            <EmptyOpenTabsState
+              onOpenDashboard={reopenDashboard}
+              onOpenSidebar={revealSidebar}
+            />
+          ) : (
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-14 sm:py-20">
             <div
               data-dashboard-enter=""
@@ -529,6 +593,7 @@ export function DashboardShell({
                   now={now}
                   registerRefresh={registerRefresh}
                   onUpload={handlePickFile}
+                  focusJobId={focusJobId}
                 />
               </div>
               <div
@@ -547,6 +612,7 @@ export function DashboardShell({
               </div>
             </div>
           </div>
+          )}
         </main>
       </div>
 
@@ -597,6 +663,46 @@ export function DashboardShell({
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyOpenTabsState({
+  onOpenDashboard,
+  onOpenSidebar,
+}: {
+  onOpenDashboard: () => void;
+  onOpenSidebar: () => void;
+}) {
+  return (
+    <div className="flex min-h-full flex-col items-center justify-center px-6 py-16 text-center">
+      <span className="flex size-12 items-center justify-center rounded-xl bg-secondary text-subtle-foreground">
+        <PanelLeft className="size-5" aria-hidden="true" />
+      </span>
+      <h1 className="mt-5 text-lg font-semibold text-foreground">
+        Nenhuma aba está aberta
+      </h1>
+      <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+        Reabra o Dashboard ou escolha um workspace pelo trilho para continuar.
+      </p>
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenDashboard}
+          className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 pointer-coarse:h-11"
+        >
+          <House className="size-4" aria-hidden="true" />
+          Abrir Dashboard
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          className="inline-flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-semibold text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 pointer-coarse:h-11"
+        >
+          <PanelLeft className="size-4" aria-hidden="true" />
+          Ver workspaces
+        </button>
       </div>
     </div>
   );

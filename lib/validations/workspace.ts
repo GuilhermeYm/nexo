@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { richDocumentSchema } from "@/lib/editor/document";
 import {
+  ABSOLUTE_BOARD_MARKS_PER_BOARD,
   ABSOLUTE_CONNECTIONS_PER_BOARD,
   ABSOLUTE_WINDOWS_PER_BOARD,
 } from "@/lib/limits";
@@ -257,6 +258,43 @@ export const connectionPatchSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: "Nada para mudar.",
   });
+
+/* ---------------------------------------------------------------------- */
+/* Caneta e formas                                                        */
+/* ---------------------------------------------------------------------- */
+
+const markPoint = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
+
+export const createBoardMarkSchema = z
+  .object({
+    kind: z.enum(["pen", "rectangle", "ellipse", "diamond"]),
+    points: z.array(markPoint).max(2048),
+    x: coordinate,
+    y: coordinate,
+    width: z.number().int().min(1).max(400_000),
+    height: z.number().int().min(1).max(400_000),
+    tone: z.enum(["default", "1", "2", "3", "4", "5", "6"]),
+    weight: z.number().int().min(1).max(12),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.kind === "pen" && value.points.length < 2) {
+      ctx.addIssue({ code: "custom", message: "Um traço precisa de ao menos dois pontos." });
+    }
+    if (value.kind !== "pen" && value.points.length !== 0) {
+      ctx.addIssue({ code: "custom", message: "Formas não recebem pontos livres." });
+    }
+    for (const point of value.points) {
+      if (point.x < 0 || point.y < 0 || point.x > value.width || point.y > value.height) {
+        ctx.addIssue({ code: "custom", message: "Ponto fora dos limites do traço." });
+        break;
+      }
+    }
+  });
+
+export const deleteBoardMarksSchema = z.object({
+  ids: z.array(z.uuid()).min(1).max(ABSOLUTE_BOARD_MARKS_PER_BOARD),
+}).strict();
 
 export type ConnectionPatch = z.infer<typeof connectionPatchSchema>;
 

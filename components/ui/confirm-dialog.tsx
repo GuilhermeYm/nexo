@@ -69,7 +69,7 @@ export function ConfirmDialog({
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
       }}
-      className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-background p-0 text-foreground shadow-2xl backdrop:bg-black/45"
+      className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-2xl bg-background p-0 text-foreground shadow-2xl backdrop:bg-black/45"
     >
       <div className="p-5 sm:p-6">
         <div className="flex items-start gap-3.5">

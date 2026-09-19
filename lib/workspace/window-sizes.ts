@@ -60,3 +60,29 @@ export function frameWidthOf(window: {
 }): number {
   return window.state === "minimized" ? COLLAPSED_WINDOW_WIDTH : window.width;
 }
+
+/**
+ * O tamanho da janela de uma imagem: a proporção dela, cabendo numa caixa
+ * de ~480×560, mais a barra de título.
+ *
+ * O tamanho padrão de anexo tem forma de página A4 — certo para PDF, errado
+ * para um print de tela deitado, que nasceria espremido numa faixa com duas
+ * sobras cinzas. Sem as medidas (sharp ausente ou imagem que ele não leu), a
+ * janela usa o padrão e a imagem se ajusta dentro dela.
+ *
+ * Nunca amplia: um ícone de 64 px continua pequeno, só respeita o mínimo de
+ * largura que a validação aceita (160).
+ */
+export function imageWindowSize(image: {
+  width: number;
+  height: number;
+}): { width: number; height: number } {
+  const maxWidth = 480;
+  const maxBodyHeight = 560 - COLLAPSED_WINDOW_HEIGHT;
+  const scale = Math.min(maxWidth / image.width, maxBodyHeight / image.height, 1);
+  const snap = (value: number) => Math.round(value / 8) * 8;
+  return {
+    width: Math.max(160, snap(image.width * scale)),
+    height: Math.max(96, snap(image.height * scale + COLLAPSED_WINDOW_HEIGHT)),
+  };
+}

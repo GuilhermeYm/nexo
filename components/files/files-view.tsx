@@ -3,25 +3,20 @@
 import {
   ArrowDownAZ,
   ArrowLeft,
+  Check,
   ChevronDown,
   Download,
-  File,
-  FileAudio,
-  FileText,
-  FileType2,
-  ImageIcon,
   LoaderCircle,
-  Music2,
   Paperclip,
   Search,
   Trash2,
-  Video,
   X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+import { AttachmentIcon } from "@/components/files/attachment-icon";
 import { FileViewerDialog } from "@/components/files/file-viewer-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -78,7 +73,10 @@ export function FilesView() {
   // React) e avançado a cada minuto.
   const [now, setNow] = useState(() => Date.now());
   const [opened, setOpened] = useState<AttachmentListItem | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<AttachmentListItem | null>(null);
+  /** O que o diálogo de confirmação vai apagar: um cartão ou a seleção. */
+  const [pendingDelete, setPendingDelete] = useState<AttachmentListItem[] | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -131,6 +129,16 @@ export function FilesView() {
           ? [...current.attachments, ...next.attachments]
           : next.attachments,
       }));
+      // Um filtro novo esconde cartões: a seleção fica só com o que ainda
+      // está na tela. Apagar o que a pessoa não vê seria uma surpresa.
+      if (!append) {
+        const visible = new Set(next.attachments.map((item) => item.id));
+        setSelectedIds((current) =>
+          current.size === 0
+            ? current
+            : new Set([...current].filter((id) => visible.has(id)))
+        );
+      }
       setHasLoadedInitial(true);
       setStatus("idle");
     } catch (error) {
@@ -140,43 +148,94 @@ export function FilesView() {
 
   const filtered = query.trim() || type !== "all";
 
-  async function confirmDelete() {
-    const target = pendingDelete;
-    if (!target || deleting) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      const response = await fetch(`/api/attachments/${target.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok && response.status !== 404) {
-        const failure = await readApiFailure(response, "Não foi possível apagar o arquivo.");
-        setDeleteError(
-          failure.code ? `${failure.message} (${failure.code})` : failure.message
-        );
-        return;
-      }
-      // 404 também tira da lista: outro aparelho já tinha apagado.
-      setResult((current) => ({
-        ...current,
-        attachments: current.attachments.filter((item) => item.id !== target.id),
-        total: Math.max(0, current.total - 1),
-      }));
-      setPendingDelete(null);
-      setAnnouncement(`${target.filename} foi apagado.`);
-    } catch {
-      setDeleteError("Sem conexão. O arquivo continua guardado — tente de novo.");
-    } finally {
-      setDeleting(false);
-    }
-  }
-
   function clearFilters() {
     setQuery("");
     setType("all");
     setSort("newest");
     inputRef.current?.focus();
   }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const everyVisibleSelected =
+    result.attachments.length > 0 &&
+    result.attachments.every((item) => selectedIds.has(item.id));
+
+  function toggleVisible() {
+    setSelectedIds(
+      everyVisibleSelected
+        ? new Set()
+        : new Set(result.attachments.map((item) => item.id))
+    );
+  }
+
+  function leaveSelection() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function askDelete(targets: AttachmentListItem[]) {
+    if (targets.length === 0) return;
+    setDeleteError(null);
+    setPendingDelete(targets);
+  }
+
+  async function confirmDelete() {
+    const targets = pendingDelete;
+    if (!targets || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch("/api/attachments", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: targets.map((item) => item.id) }),
+      });
+      if (!response.ok) {
+        const failure = await readApiFailure(
+          response,
+          targets.length === 1
+            ? "Não foi possível apagar o arquivo."
+            : "Não foi possível apagar os arquivos."
+        );
+        setDeleteError(
+          failure.code ? `${failure.message} (${failure.code})` : failure.message
+        );
+        return;
+      }
+      // Todos os pedidos saem da tela, inclusive os que o servidor não achou:
+      // outro aparelho já os tinha apagado.
+      const gone = new Set(targets.map((item) => item.id));
+      setResult((current) => ({
+        ...current,
+        attachments: current.attachments.filter((item) => !gone.has(item.id)),
+        total: Math.max(0, current.total - gone.size),
+      }));
+      setSelectedIds((current) => new Set([...current].filter((id) => !gone.has(id))));
+      if (targets.length > 1) setSelectionMode(false);
+      setPendingDelete(null);
+      setAnnouncement(
+        targets.length === 1
+          ? `${targets[0].filename} foi apagado.`
+          : `${targets.length} arquivos foram apagados.`
+      );
+    } catch {
+      setDeleteError("Sem conexão. Os arquivos continuam guardados — tente de novo.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const selectedItems = result.attachments.filter((item) => selectedIds.has(item.id));
+  const pendingCount = pendingDelete?.length ?? 0;
+  const pendingWithNotes = pendingDelete?.filter((item) => item.note).length ?? 0;
 
   return (
     <div className="flex min-h-dvh bg-secondary p-2 sm:p-3">
@@ -271,13 +330,29 @@ export function FilesView() {
                 ))}
               </div>
 
-              <SelectControl
-                label="Ordenar arquivos"
-                value={sort}
-                onChange={(value) => setSort(value as AttachmentListSort)}
-                options={SORT_OPTIONS}
-                icon={sort === "name" ? ArrowDownAZ : undefined}
-              />
+              <div className="flex items-center gap-2">
+                <SelectControl
+                  label="Ordenar arquivos"
+                  value={sort}
+                  onChange={(value) => setSort(value as AttachmentListSort)}
+                  options={SORT_OPTIONS}
+                  icon={sort === "name" ? ArrowDownAZ : undefined}
+                />
+                <button
+                  type="button"
+                  aria-pressed={selectionMode}
+                  disabled={!selectionMode && result.attachments.length === 0}
+                  onClick={() => (selectionMode ? leaveSelection() : setSelectionMode(true))}
+                  className={cn(
+                    "h-9 shrink-0 rounded-xl border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-50 pointer-coarse:h-11",
+                    selectionMode
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border text-foreground hover:bg-secondary"
+                  )}
+                >
+                  {selectionMode ? "Concluir" : "Selecionar"}
+                </button>
+              </div>
             </div>
           </section>
 
@@ -305,17 +380,46 @@ export function FilesView() {
               />
             ) : (
               <>
+                {selectionMode && (
+                  // Presa ao topo enquanto rola: com 24 cartões por página, a
+                  // ação não pode ficar lá em cima, fora de vista.
+                  <div className="sticky top-2 z-10 mb-4 flex flex-col gap-3 rounded-xl border border-border bg-background/95 px-3 py-3 shadow-[0_12px_24px_-20px_color-mix(in_oklab,var(--foreground)_45%,transparent)] backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                    <p className="text-sm font-medium text-foreground" aria-live="polite">
+                      {selectedIds.size === 0
+                        ? "Escolha os arquivos"
+                        : `${selectedIds.size} ${selectedIds.size === 1 ? "arquivo selecionado" : "arquivos selecionados"}`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={toggleVisible}
+                        className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 pointer-coarse:h-11"
+                      >
+                        {everyVisibleSelected ? "Limpar seleção" : "Selecionar visíveis"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={selectedIds.size === 0}
+                        onClick={() => askDelete(selectedItems)}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background pointer-coarse:h-11"
+                      >
+                        <Trash2 className="size-4" aria-hidden="true" />
+                        Apagar
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {result.attachments.map((attachment) => (
                     <li key={attachment.id}>
                       <AttachmentCard
                         attachment={attachment}
                         now={now}
+                        selectionMode={selectionMode}
+                        selected={selectedIds.has(attachment.id)}
+                        onToggleSelected={() => toggleSelected(attachment.id)}
                         onOpen={() => setOpened(attachment)}
-                        onDelete={() => {
-                          setDeleteError(null);
-                          setPendingDelete(attachment);
-                        }}
+                        onDelete={() => askDelete([attachment])}
                       />
                     </li>
                   ))}
@@ -351,14 +455,26 @@ export function FilesView() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="Apagar este arquivo?"
+        title={pendingCount > 1 ? `Apagar ${pendingCount} arquivos?` : "Apagar este arquivo?"}
         description={
-          pendingDelete?.note
-            ? "O arquivo sai da conta e de todas as lousas. A nota que a Nexo escreveu sobre ele continua nas suas notas."
-            : "O arquivo sai da conta e de todas as lousas. Não dá para desfazer."
+          pendingCount > 1
+            ? pendingWithNotes > 0
+              ? "Eles saem da conta e de todas as lousas. As notas que a Nexo escreveu sobre eles continuam nas suas notas."
+              : "Eles saem da conta e de todas as lousas. Não dá para desfazer."
+            : pendingWithNotes > 0
+              ? "O arquivo sai da conta e de todas as lousas. A nota que a Nexo escreveu sobre ele continua nas suas notas."
+              : "O arquivo sai da conta e de todas as lousas. Não dá para desfazer."
         }
-        subject={pendingDelete?.filename}
-        confirmLabel="Apagar arquivo"
+        subject={
+          pendingCount === 1
+            ? pendingDelete?.[0].filename
+            : pendingDelete
+                ?.slice(0, 3)
+                .map((item) => item.filename)
+                .join(", ")
+                .concat(pendingCount > 3 ? ` e mais ${pendingCount - 3}` : "")
+        }
+        confirmLabel={pendingCount > 1 ? "Apagar arquivos" : "Apagar arquivo"}
         busyLabel="Apagando…"
         busy={deleting}
         error={deleteError}
@@ -444,11 +560,17 @@ function SelectControl({
 function AttachmentCard({
   attachment,
   now,
+  selectionMode,
+  selected,
+  onToggleSelected,
   onOpen,
   onDelete,
 }: {
   attachment: AttachmentListItem;
   now: number;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelected: () => void;
   onOpen: () => void;
   onDelete: () => void;
 }) {
@@ -464,11 +586,42 @@ function AttachmentCard({
   }
 
   return (
-    <article className="group flex min-h-44 flex-col rounded-xl bg-secondary p-4 transition-[background-color,box-shadow] duration-200 hover:bg-tertiary hover:shadow-[0_12px_24px_-20px_color-mix(in_oklab,var(--foreground)_38%,transparent)]">
+    <article
+      className={cn(
+        "group relative flex min-h-44 flex-col rounded-xl bg-secondary p-4 transition-[background-color,box-shadow] duration-200 hover:bg-tertiary hover:shadow-[0_12px_24px_-20px_color-mix(in_oklab,var(--foreground)_38%,transparent)]",
+        selected && "bg-tertiary ring-2 ring-foreground/70"
+      )}
+    >
       <div className="flex items-start justify-between gap-4">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-background text-subtle-foreground transition-colors group-hover:text-accent-foreground">
-          <AttachmentIcon type={attachment.type} className="size-5" />
-        </span>
+        {selectionMode ? (
+          // Selecionando, o cartão inteiro vira o alvo: a caixa é o controle
+          // de verdade (teclado e leitor de tela), e o rótulo se estica por
+          // cima do cartão para o toque em qualquer lugar marcar.
+          <label className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-background after:absolute after:inset-0 after:rounded-xl">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelected}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className={cn(
+                "flex size-5 items-center justify-center rounded-md border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent/40",
+                selected
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-subtle-foreground/60 bg-background"
+              )}
+            >
+              {selected && <Check className="size-3.5" strokeWidth={3} />}
+            </span>
+            <span className="sr-only">Selecionar {attachment.filename}</span>
+          </label>
+        ) : (
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-background text-subtle-foreground transition-colors group-hover:text-foreground">
+            <AttachmentIcon type={attachment.type} className="size-5" />
+          </span>
+        )}
         <span className="pt-1 text-xs tabular-nums text-subtle-foreground">
           {formatBytes(attachment.sizeBytes)}
         </span>
@@ -503,7 +656,10 @@ function AttachmentCard({
         )}
       </div>
 
-      <div className="mt-auto flex items-center gap-1 pt-4">
+      <div
+        className={cn("mt-auto flex items-center gap-1 pt-4", selectionMode && "invisible")}
+        aria-hidden={selectionMode || undefined}
+      >
         <button
           type="button"
           onClick={onOpen}
@@ -532,34 +688,6 @@ function AttachmentCard({
       </div>
     </article>
   );
-}
-
-/** Um componente, e não uma função que devolve o ícone: o React exige que
- *  componentes existam fora do render. */
-function AttachmentIcon({
-  type,
-  className,
-}: {
-  type: AttachmentListType;
-  className?: string;
-}) {
-  const props = { className, "aria-hidden": true } as const;
-  switch (type) {
-    case "audio":
-      return <Music2 {...props} />;
-    case "document":
-      return <FileText {...props} />;
-    case "image":
-      return <ImageIcon {...props} />;
-    case "pdf":
-      return <FileType2 {...props} />;
-    case "video":
-      return <Video {...props} />;
-    case "other":
-      return <File {...props} />;
-    default:
-      return <FileAudio {...props} />;
-  }
 }
 
 function FilesSkeleton() {

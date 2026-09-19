@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { Board } from "@/components/workspace/board";
 import { ABSOLUTE_WINDOWS_PER_BOARD } from "@/lib/limits";
 import { createClient } from "@/lib/supabase/server";
-import { getOwnedWorkspace, readBoard } from "@/lib/workspace/queries";
+import { getOwnedWorkspace, listBoardMarks, readBoard } from "@/lib/workspace/queries";
 
 export const metadata = {
   title: "Workspace — Nexo",
@@ -48,13 +48,17 @@ export default async function WorkspacePage(
   const workspace = await getOwnedWorkspace(user.id, id);
   if (!workspace) notFound();
 
-  const board = await readBoard(user.id, id);
+  const [board, marks] = await Promise.all([
+    readBoard(user.id, id),
+    listBoardMarks(user.id, id),
+  ]);
 
   return (
     <Board
       workspace={workspace}
       initialWindows={board.windows}
       initialConnections={board.connections}
+      initialMarks={marks}
       focusWindowId={focusWindowId}
       windowCap={ABSOLUTE_WINDOWS_PER_BOARD}
     />

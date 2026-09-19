@@ -19,6 +19,7 @@ import {
   notes,
   tags,
   workspaceConnections,
+  workspaceBoardMarks,
   workspaceWindows,
   workspaces,
 } from "@/lib/db/schema";
@@ -329,6 +330,42 @@ export interface BoardConnection extends ConnectionStyle {
   toWindowId: string;
   /** O que a flecha diz. Nulo quando ninguém escreveu nada nela. */
   label: string | null;
+}
+
+export type BoardMarkKind = "pen" | "rectangle" | "ellipse" | "diamond";
+export type BoardMarkTone = "default" | "1" | "2" | "3" | "4" | "5" | "6";
+
+export interface BoardMark {
+  id: string;
+  kind: BoardMarkKind;
+  points: Array<{ x: number; y: number }>;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  tone: BoardMarkTone;
+  weight: number;
+}
+
+export async function listBoardMarks(
+  userId: string,
+  workspaceId: string
+): Promise<BoardMark[]> {
+  return db
+    .select({
+      id: workspaceBoardMarks.id,
+      kind: workspaceBoardMarks.kind,
+      points: workspaceBoardMarks.points,
+      x: workspaceBoardMarks.x,
+      y: workspaceBoardMarks.y,
+      width: workspaceBoardMarks.width,
+      height: workspaceBoardMarks.height,
+      tone: workspaceBoardMarks.tone,
+      weight: workspaceBoardMarks.weight,
+    })
+    .from(workspaceBoardMarks)
+    .where(and(eq(workspaceBoardMarks.userId, userId), eq(workspaceBoardMarks.workspaceId, workspaceId)))
+    .orderBy(asc(workspaceBoardMarks.createdAt));
 }
 
 /**

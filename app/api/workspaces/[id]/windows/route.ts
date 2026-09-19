@@ -25,6 +25,7 @@ import {
   clearWindowsSchema,
   createWindowSchema,
 } from "@/lib/validations/workspace";
+import { imageWindowSize } from "@/lib/workspace/window-sizes";
 
 /**
  * As janelas de uma lousa.
@@ -112,7 +113,7 @@ export async function POST(
       );
     }
 
-    const size = DEFAULT_WINDOW_SIZE[input.kind];
+    let size = DEFAULT_WINDOW_SIZE[input.kind];
 
     const noteId =
       input.kind === "note"
@@ -129,7 +130,11 @@ export async function POST(
     let attachmentId: string | null = null;
     if (input.kind === "attachment") {
       const [owned] = await db
-        .select({ id: attachments.id })
+        .select({
+          id: attachments.id,
+          type: attachments.type,
+          metadata: attachments.metadata,
+        })
         .from(attachments)
         .where(
           and(
@@ -141,6 +146,10 @@ export async function POST(
 
       if (!owned) return errorResponse(404, "Arquivo não encontrado.");
       attachmentId = owned.id;
+
+      // Imagem nasce na proporção dela — as medidas foram lidas no upload.
+      const measured = imageDimensions(owned.type, owned.metadata);
+      if (measured) size = imageWindowSize(measured);
     }
 
     const [created] = await db
@@ -430,4 +439,22 @@ function isUniqueViolation(error: unknown): boolean {
     "code" in error &&
     (error as { code?: string }).code === "23505"
   );
+}
+
+/** As medidas que o upload gravou em `attachments.metadata`, se forem de imagem. */
+function imageDimensions(
+  type: string,
+  metadata: unknown
+): { width: number; height: number } | null {
+  if (type !== "image" || !metadata || typeof metadata !== "object") return null;
+  const { width, height } = metadata as { width?: unknown; height?: unknown };
+  if (
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !(width > 0) ||
+    !(height > 0)
+  ) {
+    return null;
+  }
+  return { width, height };
 }

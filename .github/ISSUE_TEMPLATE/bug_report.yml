@@ -1,0 +1,86 @@
+name: Relato de bug
+description: Algo não funcionou como deveria na sua instância do Nexo.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes de abrir: se a dúvida é sobre **configurar** a sua instância
+        (Supabase, chaves de IA, `.env`), use as
+        [Discussions](../discussions) em vez de um Issue — isso aqui é só
+        para comportamento errado no código.
+
+  - type: input
+    id: error-code
+    attributes:
+      label: Código do erro (se apareceu um)
+      description: >
+        Formato NX-XXXX-XXX. Ele existe pra você mesmo se organizar e achar
+        o erro de novo na sua aba "Meus erros" — **não chega até nós**: cada
+        instância tem o próprio banco, então o código sozinho não diz nada
+        pra quem lê este Issue. Cole também abaixo a mensagem/detalhe que
+        aparece quando você abre esse relato em "Meus erros" (Configurações
+        → Erros). Deixe em branco se não apareceu nenhum código.
+      placeholder: "NX-7F3A-2K9"
+    validations:
+      required: false
+
+  - type: textarea
+    id: error-detail
+    attributes:
+      label: Detalhe do erro (de "Meus erros", se o código acima existir)
+      description: >
+        Configurações → Erros, clique no código → cole aqui a mensagem e o
+        contexto que aparecem. Isso é o que dá pra investigar de fato; o
+        código sozinho, como explicado acima, não abre nada do nosso lado.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: O que aconteceu
+      description: Descreva o problema. O que você esperava que acontecesse?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Fui em '...'
+        2. Cliquei em '...'
+        3. O erro apareceu
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ai-provider
+    attributes:
+      label: Chave de IA configurada
+      description: Relevante porque o comportamento muda sem nenhuma delas.
+      options:
+        - Groq
+        - OpenAI
+        - Nenhuma
+        - Não sei
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: Onde está rodando
+      placeholder: "ex.: bun dev local, build própria em VPS, Vercel"
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Console do navegador / logs do servidor (se tiver)
+      render: shell
+    validations:
+      required: false

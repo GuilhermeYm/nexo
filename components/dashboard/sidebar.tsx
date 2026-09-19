@@ -4,7 +4,9 @@ import {
   CalendarDays,
   ExternalLink,
   FileText,
+  FolderClosed,
   House,
+  LayoutGrid,
   Inbox,
   LogOut,
   MoreHorizontal,
@@ -18,8 +20,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
+import { SidebarFolders } from "@/components/dashboard/sidebar-folders";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import {
   ContextMenu,
@@ -30,6 +33,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import type { WorkspaceSummary } from "@/lib/dashboard/queries";
+import {
+  PREFERENCES_EVENT,
+  readSidebarView,
+  writeSidebarView,
+  type SidebarView,
+} from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -47,10 +56,38 @@ const NAV_ITEMS: NavItem[] = [
   // Logo abaixo de Entrada: é sala de uso diário, e não pode ficar depois de
   // dois links que ainda não existem.
   { label: "Agenda", href: "/dashboard/agenda", icon: CalendarDays, ready: true },
-  { label: "Notas", href: "/dashboard/notas", icon: FileText, ready: true },
+  { label: "Notas e pastas", href: "/dashboard/notas", icon: FileText, ready: true },
   { label: "Tags", href: "/dashboard/tags", icon: Tags, ready: true },
   { label: "Arquivos", href: "/dashboard/arquivos", icon: Paperclip, ready: true },
 ];
+
+/**
+ * O seletor do que a barra lista.
+ *
+ * São dois interruptores, não três opções: "Ambos" não tem ícone que se
+ * adivinhe, mas os dois ligados ao mesmo tempo dizem a mesma coisa sem
+ * precisar de nome. Cada um liga e desliga a sua lista; o último aceso não
+ * apaga, senão a barra ficaria vazia sem que ninguém tivesse pedido isso.
+ */
+const VIEW_TOGGLES: {
+  key: "workspaces" | "folders";
+  label: string;
+  icon: LucideIcon;
+  /** Para onde a escolha vai quando este interruptor apaga. */
+  off: SidebarView;
+}[] = [
+  { key: "workspaces", label: "Workspaces", icon: LayoutGrid, off: "folders" },
+  { key: "folders", label: "Pastas", icon: FolderClosed, off: "workspaces" },
+];
+
+function subscribePreferences(onChange: () => void) {
+  window.addEventListener(PREFERENCES_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(PREFERENCES_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
 
 /** Os seis matizes de tag do tema, endereçados pela posição gravada no banco. */
 const WORKSPACE_DOT: Record<string, string> = {
@@ -116,6 +153,23 @@ export function Sidebar({
 }: SidebarProps) {
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
+  // A escolha mora no navegador (por aparelho, como as abas). No servidor e
+  // na hidratação vale o padrão; o valor guardado entra logo depois. Sem
+  // localStorage, `picked` segura a escolha durante a sessão.
+  const storedView = useSyncExternalStore(
+    subscribePreferences,
+    readSidebarView,
+    () => "workspaces" as const
+  );
+  const [picked, setPicked] = useState<SidebarView | null>(null);
+  const view = picked ?? storedView;
+  const showWorkspaces = view !== "folders";
+  const showFolders = view !== "workspaces";
+
+  function chooseView(next: SidebarView) {
+    setPicked(next);
+    writeSidebarView(next);
+  }
 
   // Na gaveta os rótulos sempre aparecem: ela é larga por definição, e um
   // trilho de ícones sobreposto seria o pior dos dois formatos.
@@ -195,42 +249,138 @@ export function Sidebar({
           </ul>
         </nav>
 
-        {/* Workspaces */}
-        <div className="mt-7 flex min-h-0 flex-1 flex-col px-3">
-          <div className="flex h-6 items-center justify-between pr-1 pl-[9px]">
-            <SideLabel open={labelsVisible}>
-              <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
-                Workspaces
-              </span>
-            </SideLabel>
-            <button
-              type="button"
-              onClick={onCreateWorkspace}
-              title="Novo workspace"
-              className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+        {/* O que a barra lista: workspaces (lousas), pastas (notas), ou os
+            dois. Recolhido, o seletor some — o trilho mostra o que foi
+            escolhido, em ícones. */}
+        <div className="mt-6 flex min-h-0 flex-1 flex-col px-3">
+          {labelsVisible && (
+            <div
+              role="group"
+              aria-label="Mostrar na barra lateral"
+              className="mb-3 flex gap-0.5 self-end rounded-lg bg-tertiary/70 p-0.5"
             >
-              <Plus className="size-4" aria-hidden="true" />
-              <span className="sr-only">Novo workspace</span>
-            </button>
-          </div>
+              {VIEW_TOGGLES.map((toggle) => {
+                const on = view !== toggle.off;
+                const Icon = toggle.icon;
+                return (
+                  <button
+                    key={toggle.key}
+                    type="button"
+                    aria-pressed={on}
+                    title={toggle.label}
+                    onClick={() => chooseView(on ? toggle.off : "both")}
+                    className={cn(
+                      "relative isolate flex size-7 items-center justify-center rounded-md transition-[color,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 active:scale-90 motion-reduce:transition-none motion-reduce:active:scale-100 pointer-coarse:size-9",
+                      on ? "text-foreground" : "text-subtle-foreground hover:text-foreground"
+                    )}
+                  >
+                    {/* A pastilha é uma camada própria, não o fundo do botão:
+                        cor de fundo não interpola bem a partir do transparente,
+                        e uma camada dá para crescer e sumir de verdade. */}
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute inset-0 -z-10 rounded-md bg-background shadow-sm",
+                        "transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                        on ? "scale-100 opacity-100" : "scale-75 opacity-0"
+                      )}
+                    />
+                    <Icon
+                      className={cn(
+                        "size-4 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                        on ? "scale-100" : "scale-90"
+                      )}
+                      aria-hidden="true"
+                    />
+                    <span className="sr-only">{toggle.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-          <ul className="mt-1.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain">
-            {workspaces.map((workspace) => (
-              <WorkspaceRow
-                key={workspace.id}
-                workspace={workspace}
-                isActive={workspace.id === activeWorkspaceId}
-                labelsVisible={labelsVisible}
-                // Zero workspaces é um estado sem tela: a rota recusa, e a
-                // interface diz isso antes de a pessoa tentar.
-                canDelete={workspaces.length > 1}
-                onCloseDrawer={onCloseDrawer}
-                onOpen={() => onOpenWorkspace(workspace.id)}
-                onRename={(name) => onRenameWorkspace(workspace, name)}
-                onDelete={() => onDeleteWorkspace(workspace)}
-              />
-            ))}
-          </ul>
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain">
+            {showWorkspaces && (
+              <section aria-label="Workspaces">
+                <div
+                  className={cn(
+                    "flex h-6 items-center",
+                    labelsVisible ? "justify-between pr-1 pl-[9px]" : "justify-center"
+                  )}
+                >
+                  {labelsVisible && (
+                    <SideLabel open>
+                      <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
+                        Workspaces
+                      </span>
+                    </SideLabel>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onCreateWorkspace}
+                    title="Novo workspace"
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+                  >
+                    <Plus className="size-4" aria-hidden="true" />
+                    <span className="sr-only">Novo workspace</span>
+                  </button>
+                </div>
+
+                <ul className="mt-1.5 flex flex-col gap-0.5">
+                  {workspaces.map((workspace) => (
+                    <WorkspaceRow
+                      key={workspace.id}
+                      workspace={workspace}
+                      isActive={workspace.id === activeWorkspaceId}
+                      labelsVisible={labelsVisible}
+                      // Zero workspaces é um estado sem tela: a rota recusa, e a
+                      // interface diz isso antes de a pessoa tentar.
+                      canDelete={workspaces.length > 1}
+                      onCloseDrawer={onCloseDrawer}
+                      onOpen={() => onOpenWorkspace(workspace.id)}
+                      onRename={(name) => onRenameWorkspace(workspace, name)}
+                      onDelete={() => onDeleteWorkspace(workspace)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {showFolders && (
+              <section aria-label="Pastas de notas">
+                <div
+                  className={cn(
+                    "flex h-6 items-center",
+                    labelsVisible ? "justify-between pr-1 pl-[9px]" : "justify-center"
+                  )}
+                >
+                  {labelsVisible && (
+                    <SideLabel open>
+                      <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
+                        Pastas
+                      </span>
+                    </SideLabel>
+                  )}
+                  <Link
+                    href="/dashboard/notas"
+                    onClick={onCloseDrawer}
+                    title="Todas as notas"
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground"
+                  >
+                    <FileText className="size-3.5" aria-hidden="true" />
+                    <span className="sr-only">Todas as notas</span>
+                  </Link>
+                </div>
+                <div className="mt-1.5">
+                  <SidebarFolders
+                    labelsVisible={labelsVisible}
+                    onCloseDrawer={onCloseDrawer}
+                    workspaces={workspaces}
+                  />
+                </div>
+              </section>
+            )}
+          </div>
         </div>
 
         {/* Rodapé: conta */}
@@ -329,28 +479,44 @@ function NavRow({
   const isReady = item.ready ?? false;
 
   const shared = cn(
-    "flex h-9 items-center gap-3 rounded-lg px-[9px] transition-colors duration-150",
+    "flex h-9 items-center rounded-lg transition-colors duration-150",
+    open ? "gap-3 px-[9px]" : "justify-center px-0",
     isReady
       ? "text-foreground hover:bg-tertiary"
       : "cursor-not-allowed text-subtle-foreground"
   );
 
+  const count = isReady && badge !== undefined && badge > 0 ? badge : 0;
+
   const body = (
     <>
-      <Icon className="size-[18px] shrink-0" aria-hidden="true" />
-      <SideLabel open={open} className="flex-1">
+      {/* O número fica sobre o ícone, não no fim do rótulo: recolhido, o
+          trilho só tem o ícone, e é justamente aí que ele mais precisa
+          dizer que há algo novo. */}
+      <span className="relative flex shrink-0">
+        <Icon className="size-[18px]" aria-hidden="true" />
+        {count > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] leading-none font-semibold tabular-nums text-accent-foreground ring-2 ring-secondary"
+          >
+            {count > 99 ? "99+" : count}
+          </span>
+        )}
+      </span>
+      <SideLabel open={open} className={open ? "flex-1" : "w-0 flex-none"}>
         <span className="flex items-center justify-between gap-2">
           <span className="text-sm">{item.label}</span>
           {!isReady && (
             <span className="text-[11px] text-subtle-foreground">em breve</span>
           )}
-          {isReady && badge !== undefined && badge > 0 && (
-            <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
-              {badge}
-            </span>
-          )}
         </span>
       </SideLabel>
+      {count > 0 && (
+        <span className="sr-only">
+          {count === 1 ? "1 não lida" : `${count} não lidas`}
+        </span>
+      )}
     </>
   );
 
@@ -369,7 +535,13 @@ function NavRow({
   return (
     <Link
       href={item.href}
-      title={!open ? item.label : undefined}
+      title={
+        !open
+          ? count > 0
+            ? `${item.label} — ${count === 1 ? "1 não lida" : `${count} não lidas`}`
+            : item.label
+          : undefined
+      }
       className={shared}
     >
       {body}
@@ -466,7 +638,8 @@ function WorkspaceRow({
             aria-current={isActive ? "page" : undefined}
             title={!labelsVisible ? workspace.name : undefined}
             className={cn(
-              "flex h-9 w-full items-center gap-3 rounded-lg px-[9px] text-left transition-colors duration-150",
+              "flex h-9 w-full items-center rounded-lg text-left transition-colors duration-150",
+              labelsVisible ? "gap-3 px-[9px]" : "justify-center px-0",
               isActive
                 ? "bg-tertiary text-foreground"
                 : "text-muted-foreground hover:bg-tertiary/60 hover:text-foreground"
@@ -479,7 +652,10 @@ function WorkspaceRow({
                   (isActive ? "bg-foreground" : "bg-subtle-foreground")
               )}
             />
-            <SideLabel open={labelsVisible} className="flex-1">
+            <SideLabel
+              open={labelsVisible}
+              className={labelsVisible ? "flex-1" : "w-0 flex-none"}
+            >
               <span className="flex items-baseline justify-between gap-2">
                 <span className="truncate text-sm">{workspace.name}</span>
                 {/* A contagem cede o lugar ao botão de opções quando o

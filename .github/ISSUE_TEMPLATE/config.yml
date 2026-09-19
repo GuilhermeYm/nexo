@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Dúvidas e ajuda com a própria instância
+    url: https://github.com/GuilhermeYm/nexo/discussions
+    about: >-
+      Configurar Supabase, chaves de IA, dúvidas de uso — Issues ficam só
+      para bugs reais no código.
+  - name: Encontrou uma vulnerabilidade de segurança?
+    url: https://github.com/GuilhermeYm/nexo/security/advisories/new
+    about: >-
+      Não abra Issue público pra isso — use o relato privado (ver
+      SECURITY.md) pra não expor a falha antes de existir correção.

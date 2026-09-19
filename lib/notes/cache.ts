@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Redis } from "@upstash/redis";
 import { z } from "zod";
 
+import type { FolderItem } from "@/lib/folders/types";
 import {
   NOTE_LIST_PAGE_SIZE,
   type NoteListOptions,
@@ -149,6 +150,64 @@ export async function writeNoteListCache(
     });
   } catch (error) {
     logCacheFailure("write", error);
+  }
+}
+
+const folderListSchema = z.array(
+  z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    source: z.enum(["user", "ai"]),
+    noteCount: z.number().int().nonnegative(),
+  })
+);
+
+function folderListKey(userId: string, version: string): string {
+  return `${CACHE_PREFIX}:folders:${userScope(userId)}:${version}`;
+}
+
+/**
+ * As pastas com as contagens, no mesmo namespace das listas de notas.
+ *
+ * Não tem invalidação própria, e é de propósito: toda escrita que muda uma
+ * pasta ou a contagem dela — criar, renomear, apagar pasta, mover nota,
+ * excluir nota, a organização da IA — já chama `invalidateNoteListCache`,
+ * porque a lista de notas também mostra a pasta de cada uma. Uma versão só
+ * para as duas coisas significa que elas nunca discordam entre si: não existe
+ * uma janela em que o trilho conta 3 notas numa pasta e Notas lista 2.
+ */
+export async function readFolderListCache(userId: string): Promise<{
+  value: FolderItem[] | null;
+  version: string | null;
+}> {
+  const client = getRedis();
+  if (!client) return { value: null, version: null };
+
+  try {
+    const version = (await client.get<string>(versionKey(userId))) ?? "0";
+    const cached = await client.get<unknown>(folderListKey(userId, version));
+    if (cached === null) return { value: null, version };
+
+    const parsed = folderListSchema.safeParse(cached);
+    return { value: parsed.success ? parsed.data : null, version };
+  } catch (error) {
+    logCacheFailure("read-folders", error);
+    return { value: null, version: null };
+  }
+}
+
+export async function writeFolderListCache(
+  userId: string,
+  version: string | null,
+  value: FolderItem[]
+): Promise<void> {
+  const client = getRedis();
+  if (!client || version === null) return;
+
+  try {
+    await client.set(folderListKey(userId, version), value, { ex: CACHE_TTL_SECONDS });
+  } catch (error) {
+    logCacheFailure("write-folders", error);
   }
 }
 

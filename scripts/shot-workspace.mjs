@@ -100,15 +100,26 @@ async function setTheme(page, theme) {
   await page.waitForTimeout(350);
 }
 
-/** Geometria de cada janela, lida do DOM. É com ela que a conferência é feita. */
+/**
+ * Geometria de cada janela, lida do DOM. É com ela que a conferência é feita.
+ *
+ * A posição sai do `transform`, não de `left`/`top`: a janela é posicionada
+ * por `translate3d` para o arraste não recalcular o layout do plano inteiro
+ * (ver o comentário em `window-frame.tsx`). Lendo `style.left`, toda janela
+ * parecia estar em (0, 0) — e a conferência do arraste passava a comparar
+ * zero com zero.
+ */
 async function readLayout(page) {
   return page.$$eval("article[class*='group/window']", (nodes) =>
-    nodes.map((node) => ({
-      title: node.querySelector("header span")?.textContent?.trim() ?? "",
-      left: Math.round(parseFloat(node.style.left) || 0),
-      top: Math.round(parseFloat(node.style.top) || 0),
-      width: Math.round(parseFloat(node.style.width) || 0),
-    }))
+    nodes.map((node) => {
+      const [x, y] = (node.style.transform.match(/-?[\d.]+px/g) ?? []).map(parseFloat);
+      return {
+        title: node.querySelector("header span")?.textContent?.trim() ?? "",
+        left: Math.round(x || 0),
+        top: Math.round(y || 0),
+        width: Math.round(parseFloat(node.style.width) || 0),
+      };
+    })
   );
 }
 
@@ -238,7 +249,7 @@ async function main() {
     check("três janelas criadas", (await readLayout(page)).length === 3);
 
     // ---- propriedades da ferramenta de texto ----
-    const properties = "aside[aria-label='Propriedades da caixa de texto']";
+    const properties = "aside[aria-label='Propriedades — Caixa de texto']";
     await page.waitForSelector(properties);
     check(
       "selecionar a caixa abre as propriedades da ferramenta",
@@ -387,6 +398,9 @@ async function main() {
       (await readLayout(page)).length === beforeDelete
     );
     await page.click("[role='menu'] [role='menuitem']:has-text('Excluir para valer')");
+    // O menu entrega a decisão final ao diálogo, que pergunta também sobre
+    // os arquivos da nota.
+    await page.click("dialog[open] button:has-text('Excluir nota')");
     await page.waitForTimeout(1200);
     check(
       "o segundo clique exclui a nota",
@@ -632,6 +646,46 @@ async function main() {
     await page.waitForTimeout(500);
     check("clicar fora fecha o painel", (await pickerOpen()) === false);
 
+    // ---- caneta e formas ----
+    // Um gesto inteiro gera uma linha; movimentos intermediários nunca
+    // geram requisição. Desenha numa faixa livre da parte inferior.
+    await page.click('button[title^="Caneta"]');
+    await page.mouse.move(920, 650);
+    await page.mouse.down();
+    for (let step = 1; step <= 20; step++) {
+      await page.mouse.move(920 + step * 8, 650 + Math.sin(step / 2) * 25);
+    }
+    await page.mouse.up();
+    await page.click('button[title^="Caneta"]');
+
+    await page.click('button[title^="Formas"]');
+    await page.mouse.move(980, 710);
+    await page.mouse.down();
+    await page.mouse.move(1120, 800, { steps: 10 });
+    await page.mouse.up();
+    await page.click('button[title^="Formas"]');
+
+    // O primeiro POST de /marks pode levar segundos no dev (compila a rota):
+    // espera as duas linhas em vez de um tempo fixo.
+    let drawnBeforeReload = [];
+    for (let attempt = 0; attempt < 40; attempt++) {
+      ({ rows: drawnBeforeReload } = await sql.query(
+        "select kind, jsonb_array_length(points) as points from workspace_board_marks where user_id = $1 order by created_at",
+        [userId]
+      ));
+      if (drawnBeforeReload.length >= 2) break;
+      await page.waitForTimeout(250);
+    }
+    check(
+      "caneta e forma viram duas linhas compactas",
+      drawnBeforeReload.length === 2 &&
+        drawnBeforeReload[0]?.kind === "pen" &&
+        Number(drawnBeforeReload[0]?.points) >= 2 &&
+        drawnBeforeReload[1]?.kind === "rectangle" &&
+        Number(drawnBeforeReload[1]?.points) === 0,
+      JSON.stringify(drawnBeforeReload)
+    );
+
 
     // ---- a prova: recarregar e conferir que o arranjo voltou ----
     const layoutBeforeReload = await readLayout(page);
@@ -651,6 +705,10 @@ async function main() {
       JSON.stringify([...layoutBeforeReload].sort(byLeft)) ===
       JSON.stringify([...layoutAfterReload].sort(byLeft));
     check("posições e tamanhos voltam iguais (persistiu no Postgres)", samePositions);
+    check(
+      "desenhos voltam depois do recarregamento",
+      (await page.$$("svg path, svg rect, svg ellipse, svg polygon")).length >= 2
+    );
 
     const persisted = await sql.query(
       "select kind, count(*)::int as total from workspace_windows where user_id = $1 group by kind order by kind",
@@ -865,9 +923,8 @@ async function main() {
     await page.waitForTimeout(600);
 
     // ---- exclusão de workspace ----
-    // O plano Gratuito tem um workspace só, e apagar o único é recusado de
-    // propósito. Para exercitar a exclusão é preciso ter dois.
-    await sql.query("update profiles set plan = 'pro' where id = $1", [userId]);
+    // Apagar o único workspace é recusado de propósito. Para exercitar a
+    // exclusão é preciso ter dois. (Não há mais plano desde 0022.)
     await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
     await page.evaluate(() =>
       fetch("/api/workspaces", {

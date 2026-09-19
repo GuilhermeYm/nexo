@@ -1,14 +1,16 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, ilike, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, ne, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { attachments, notes } from "@/lib/db/schema";
 import {
   ATTACHMENT_LIST_PAGE_SIZE,
+  type AttachmentListItem,
   type AttachmentListOptions,
   type AttachmentListResult,
 } from "@/lib/attachments/list";
+import { likeContains } from "@/lib/utils";
 
 /**
  * Inventário paginado dos arquivos da conta.
@@ -34,7 +36,7 @@ export async function listOwnedAttachments(
     conditions.push(eq(attachments.type, options.type));
   }
   if (query) {
-    conditions.push(ilike(attachments.filename, `%${query}%`));
+    conditions.push(ilike(attachments.filename, likeContains(query)));
   }
 
   const where = and(...conditions)!;
@@ -81,4 +83,65 @@ export async function listOwnedAttachments(
     pageSize,
     hasMore: page * pageSize < total,
   };
+}
+
+/**
+ * Os arquivos que a barra de busca mostra ao lado das notas.
+ *
+ * Um arquivo é achado pelo nome ou pelo que a Nexo escreveu sobre ele: a
+ * transcrição do áudio, o texto do PDF e a descrição da imagem moram na nota
+ * associada (`note_id`), então a mesma `search_vector` das notas serve aqui.
+ * Nome vem antes de conteúdo — quem digita o nome do arquivo quer ele.
+ */
+export async function searchOwnedAttachments(
+  userId: string,
+  query: string,
+  limit = 6
+): Promise<AttachmentListItem[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const tsQuery = sql`websearch_to_tsquery('portuguese', ${trimmed})`;
+  const byName = ilike(attachments.filename, likeContains(trimmed));
+
+  const rows = await db
+    .select({
+      id: attachments.id,
+      filename: attachments.filename,
+      mimeType: attachments.mimeType,
+      type: attachments.type,
+      sizeBytes: attachments.sizeBytes,
+      durationSeconds: attachments.durationSeconds,
+      createdAt: attachments.createdAt,
+      noteId: notes.id,
+      noteTitle: notes.title,
+    })
+    .from(attachments)
+    // A posse e o "não apagada" ficam no join: uma nota na lixeira não
+    // empresta o conteúdo, mas o arquivo continua achável pelo nome.
+    .leftJoin(
+      notes,
+      and(
+        eq(attachments.noteId, notes.id),
+        eq(notes.userId, userId),
+        ne(notes.status, "deleted")
+      )
+    )
+    .where(
+      and(
+        eq(attachments.userId, userId),
+        or(byName, sql`${notes.searchVector} @@ ${tsQuery}`)
+      )
+    )
+    .orderBy(
+      sql`case when ${byName} then 0 else 1 end`,
+      sql`ts_rank(coalesce(${notes.searchVector}, ''::tsvector), ${tsQuery}) desc`,
+      desc(attachments.createdAt)
+    )
+    .limit(limit);
+
+  return rows.map(({ noteId, noteTitle, ...attachment }) => ({
+    ...attachment,
+    note: noteId && noteTitle ? { id: noteId, title: noteTitle } : null,
+  }));
 }

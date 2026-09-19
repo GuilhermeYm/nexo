@@ -738,18 +738,63 @@ export const workspaceConnectionsRelations = relations(
   })
 );
 
+/** Traços livres e formas geométricas desenhados diretamente na lousa. */
+export const workspaceBoardMarks = pgTable(
+  "workspace_board_marks",
+  {
+    id: uuid("id").primaryKey().defaultRandom().notNull(),
+    userId: uuid("user_id").notNull(),
+    workspaceId: uuid("workspace_id").notNull(),
+    kind: text("kind")
+      .$type<"pen" | "rectangle" | "ellipse" | "diamond">()
+      .notNull(),
+    /** Pontos relativos ao canto superior esquerdo; formas guardam só []. */
+    points: jsonb("points").$type<Array<{ x: number; y: number }>>().notNull(),
+    x: integer("x").notNull(),
+    y: integer("y").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    tone: text("tone").$type<"default" | "1" | "2" | "3" | "4" | "5" | "6">().notNull().default("default"),
+    weight: integer("weight").notNull().default(3),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index("workspace_board_marks_workspace_id_idx").on(table.workspaceId),
+    userIdx: index("workspace_board_marks_user_id_idx").on(table.userId),
+    workspaceFk: foreignKey({
+      columns: [table.workspaceId, table.userId],
+      foreignColumns: [workspaces.id, workspaces.userId],
+      name: "workspace_board_marks_workspace_fk",
+    }).onDelete("cascade"),
+    sane: check(
+      "workspace_board_marks_sane",
+      sql`kind IN ('pen', 'rectangle', 'ellipse', 'diamond')
+        AND tone IN ('default', '1', '2', '3', '4', '5', '6')
+        AND weight BETWEEN 1 AND 12
+        AND x BETWEEN -200000 AND 200000
+        AND y BETWEEN -200000 AND 200000
+        AND width BETWEEN 1 AND 400000
+        AND height BETWEEN 1 AND 400000
+        AND jsonb_typeof(points) = 'array'
+        AND jsonb_array_length(points) <= 2048`
+    ),
+  })
+);
+
 /* -------------------------------------------------------------------------
- * Entrada — notificações do sistema e de outros usuários
+ * Entrada — os avisos da Nexo
  * ---------------------------------------------------------------------- */
 
 /**
  * Tipo da notificação.
  *
- * - `system`: mensagens da Nexo (boas-vindas, atualizações,
- *   avisos de segurança). Quem escreve é o servidor.
- * - `user`: mensagens vindas de outros usuários (compartilhamentos,
- *   convites, menções). Ainda não implementado; a coluna existe para a
- *   classificação não precisar mudar no futuro.
+ * - `system`: tudo o que existe — o fim das tarefas da IA (0031), o limite
+ *   de leituras, o reset da conta, as boas-vindas e os anúncios de quem
+ *   administra a instância. Quem escreve é sempre o servidor.
+ * - `user`: sobra do plano de mensagens entre contas (convites,
+ *   compartilhamentos), abandonado com o modelo auto-hospedado. Nada grava
+ *   nem desenha este valor; ele fica no enum só porque tirar um valor de um
+ *   enum do Postgres é recriar o tipo, e não há ganho nisso.
  */
 export const notificationTypeEnum = pgEnum("notification_type", [
   "system",

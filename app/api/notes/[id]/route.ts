@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -7,7 +7,7 @@ import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { countTaskItems, richTextToPlain } from "@/lib/editor/document";
-import { attachments, notes, workspaceWindows } from "@/lib/db/schema";
+import { attachments, noteTags, notes, tags, workspaceWindows } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { getOwnedNotePreview } from "@/lib/notes/queries";
 import { invalidateNoteListCache } from "@/lib/notes/cache";
@@ -18,6 +18,9 @@ const noteIdSchema = z.string().uuid();
 const deleteNoteSchema = z.object({
   /** Arquivos associados só são removidos após escolha explícita no diálogo. */
   deleteAttachments: z.boolean().default(false),
+  /** Tags são globais e só somem com escolha explícita depois de ver o
+   *  impacto (`POST /api/notes/deletion-impact`). */
+  deleteTags: z.boolean().default(false),
 });
 const BUCKET = "files";
 
@@ -277,6 +280,26 @@ export async function DELETE(
         .returning({ id: notes.id, title: notes.title });
       if (!removed) return null;
 
+      // As tags saem antes dos vínculos: depois de apagar a nota a relação
+      // ainda existe, e é dela que sai a lista do que apagar.
+      const removedTags = parsed.data.deleteTags
+        ? await tx
+            .delete(tags)
+            .where(
+              and(
+                eq(tags.userId, user.id),
+                inArray(
+                  tags.id,
+                  tx
+                    .select({ id: noteTags.tagId })
+                    .from(noteTags)
+                    .where(eq(noteTags.noteId, removed.id))
+                )
+              )
+            )
+            .returning({ id: tags.id, name: tags.name })
+        : [];
+
       const removedAttachments = parsed.data.deleteAttachments
         ? await tx
             .delete(attachments)
@@ -298,7 +321,7 @@ export async function DELETE(
             eq(workspaceWindows.userId, user.id)
           )
         );
-      return { note: removed, attachments: removedAttachments };
+      return { note: removed, attachments: removedAttachments, tags: removedTags };
     });
 
     if (!result) return errorResponse(404, "Nota não encontrada.");
@@ -325,6 +348,18 @@ export async function DELETE(
         })
       )
     );
+    await Promise.all(
+      result.tags.map((tag) =>
+        writeAuditLog({
+          action: "DELETE",
+          tableName: "tags",
+          recordId: tag.id,
+          userId: user.id,
+          oldData: { name: tag.name },
+          request,
+        })
+      )
+    );
     await removeStorageObjects(
       supabase,
       result.attachments.map((attachment) => attachment.storagePath),
@@ -333,7 +368,11 @@ export async function DELETE(
 
     await invalidateNoteListCache(user.id);
 
-    return NextResponse.json({ ok: true, deletedAttachments: result.attachments.length });
+    return NextResponse.json({
+      ok: true,
+      deletedAttachments: result.attachments.length,
+      deletedTags: result.tags.length,
+    });
   } catch (error) {
     const code = await logServerError("DELETE /api/notes/[id]", error, { userId }, request);
     return errorResponse(500, "Erro ao excluir a nota.", code);

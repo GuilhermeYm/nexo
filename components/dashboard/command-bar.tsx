@@ -10,6 +10,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -17,13 +18,23 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { ErrorReport } from "@/components/errors/error-report";
+import { NotePreviewPanel } from "@/components/notes/notes-view";
+import {
+  ATTACHMENT_TYPE_NAME,
+  AttachmentIcon,
+} from "@/components/files/attachment-icon";
+import { FileViewerDialog } from "@/components/files/file-viewer-dialog";
+import type { AttachmentListItem } from "@/lib/attachments/list";
 import type { RecentNote } from "@/lib/dashboard/queries";
 import { readApiFailure } from "@/lib/api-failure";
-import { cn } from "@/lib/utils";
+import type { NotePreview } from "@/lib/notes/list";
+import { TAG_DOT_CLASS, tagTone } from "@/lib/tags/palette";
+import { cn, formatBytes } from "@/lib/utils";
 
 /**
  * As perguntas que rodam no placeholder.
@@ -42,6 +53,36 @@ const PLACEHOLDERS = [
 
 const ROTATION_MS = 4200;
 const SEARCH_DEBOUNCE_MS = 220;
+
+/** O que a busca achou: notas primeiro, arquivos depois (`GET /api/search`). */
+interface SearchHits {
+  notes: RecentNote[];
+  files: AttachmentListItem[];
+  tags: SearchTag[];
+}
+
+interface SearchTag {
+  id: string;
+  name: string;
+  color: string | null;
+  noteCount: number;
+}
+
+/** Uma linha da lista, na ordem em que as setas percorrem: notas, arquivos. */
+type SearchEntry =
+  | { kind: "note"; note: RecentNote }
+  | { kind: "file"; file: AttachmentListItem }
+  | { kind: "tag"; tag: SearchTag };
+
+function toEntries(hits: SearchHits): SearchEntry[] {
+  return [
+    ...hits.tags.map((tag) => ({ kind: "tag" as const, tag })),
+    ...hits.notes.map((note) => ({ kind: "note" as const, note })),
+    ...hits.files.map((file) => ({ kind: "file" as const, file })),
+  ];
+}
+
+const NO_HITS: SearchHits = { notes: [], files: [], tags: [] };
 
 type UploadState =
   | { phase: "idle" }
@@ -69,15 +110,18 @@ export function CommandBar({
   onUploaded,
   registerPickFile,
 }: CommandBarProps) {
+  const router = useRouter();
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const expandedInputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const previewDialogRef = useRef<HTMLDialogElement>(null);
 
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const [expanded, setExpanded] = useState(false);
   // O resultado carrega a busca que o originou. Guardar as duas coisas
   // juntas é o que permite derivar “está buscando” sem um segundo estado —
@@ -85,8 +129,14 @@ export function CommandBar({
   // cascata no React 19.
   const [results, setResults] = useState<{
     query: string;
-    items: RecentNote[];
+    hits: SearchHits;
   } | null>(null);
+  /** O arquivo aberto no visualizador, por cima do painel. */
+  const [viewing, setViewing] = useState<AttachmentListItem | null>(null);
+  const [previewNoteId, setPreviewNoteId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<NotePreview | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const [highlight, setHighlight] = useState(-1);
   const [upload, setUpload] = useState<UploadState>({ phase: "idle" });
   const [dragging, setDragging] = useState(false);
@@ -123,29 +173,69 @@ export function CommandBar({
       searchAbort.current = controller;
 
       try {
+        const isTagSearch = trimmed.startsWith("#");
+        const tagQuery = isTagSearch ? trimmed.slice(1).trim() : trimmed;
+        const params = new URLSearchParams({
+          q: tagQuery,
+          ...(isTagSearch ? { scope: "tags" } : {}),
+        });
         const response = await fetch(
-          `/api/search?q=${encodeURIComponent(trimmed)}`,
+          `/api/search?${params}`,
           { signal: controller.signal }
         );
         if (!response.ok) {
-          setResults({ query: trimmed, items: [] });
+          setResults({ query: trimmed, hits: NO_HITS });
           return;
         }
         const payload = await response.json();
-        setResults({ query: trimmed, items: payload.notes ?? [] });
+        setResults({
+          query: trimmed,
+          hits: {
+            notes: payload.notes ?? [],
+            files: payload.files ?? [],
+            tags: payload.tags ?? [],
+          },
+        });
         setHighlight(-1);
       } catch (error) {
         // Abort é o caso normal — uma busca mais nova cancelou esta, e a
         // resposta dela é que manda. Qualquer outra falha precisa tirar a
         // lista do esqueleto: senão ela fica carregando para sempre.
         if ((error as Error)?.name !== "AbortError") {
-          setResults({ query: trimmed, items: [] });
+          setResults({ query: trimmed, hits: NO_HITS });
         }
       }
     }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    if (!previewNoteId) return;
+
+    const controller = new AbortController();
+    setPreview(null);
+    setPreviewStatus("loading");
+
+    async function loadPreview() {
+      try {
+        const response = await fetch(`/api/notes/${previewNoteId}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("preview request failed");
+        const payload = (await response.json()) as { note: NotePreview };
+        if (!controller.signal.aborted) {
+          setPreview(payload.note);
+          setPreviewStatus("idle");
+        }
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setPreviewStatus("error");
+      }
+    }
+
+    void loadPreview();
+    return () => controller.abort();
+  }, [previewNoteId, previewAttempt]);
 
   /* --- Upload --------------------------------------------------------- */
 
@@ -226,7 +316,8 @@ export function CommandBar({
       return;
     }
 
-    const items = results?.query === query.trim() ? results.items : null;
+    const items =
+      results?.query === query.trim() ? toEntries(results.hits) : null;
     if (!items || items.length === 0) return;
 
     if (event.key === "ArrowDown") {
@@ -237,7 +328,47 @@ export function CommandBar({
       setHighlight((index) => (index <= 0 ? items.length - 1 : index - 1));
     } else if (event.key === "Enter" && highlight >= 0) {
       event.preventDefault();
-      openNote(items[highlight].id);
+      openEntry(items[highlight]);
+    }
+  }
+
+  function openEntry(entry: SearchEntry) {
+    if (entry.kind === "note") openNotePreview(entry.note.id);
+    else if (entry.kind === "file") openFile(entry.file);
+    else openTag(entry.tag.id);
+  }
+
+  function openTag(tagId: string) {
+    setExpanded(false);
+    setFocused(false);
+    router.push(`/dashboard/tags?tag=${encodeURIComponent(tagId)}`);
+  }
+
+  function openNotePreview(noteId: string) {
+    setExpanded(false);
+    setFocused(false);
+    setPreviewNoteId(noteId);
+  }
+
+  function closeNotePreview() {
+    setPreviewNoteId(null);
+    setPreview(null);
+    setPreviewStatus("idle");
+  }
+
+  /** O arquivo abre por cima da busca ampliada, sem encerrar a consulta. */
+  function openFile(file: AttachmentListItem) {
+    if (!expanded) setFocused(false);
+    setViewing(file);
+  }
+
+  function closeFileViewer() {
+    setViewing(null);
+
+    // Esc fecha primeiro o arquivo e devolve o foco à busca. Só o próximo Esc
+    // encerra a superfície ampliada, preservando a consulta entre os dois.
+    if (expanded) {
+      window.requestAnimationFrame(() => expandedInputRef.current?.focus());
     }
   }
 
@@ -274,6 +405,14 @@ export function CommandBar({
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [expanded]);
 
+  useEffect(() => {
+    const dialog = previewDialogRef.current;
+    if (!dialog) return;
+
+    if (previewNoteId && !dialog.open) dialog.showModal();
+    if (!previewNoteId && dialog.open) dialog.close();
+  }, [previewNoteId]);
+
   // O diálogo nativo sobe para a top layer, aplica o backdrop e mantém o foco
   // dentro da busca ampliada. Não é uma cópia da busca: compartilha a mesma
   // consulta, resultados e seleção por teclado da barra compacta.
@@ -302,7 +441,7 @@ export function CommandBar({
   // Só vale o resultado da busca que está no campo agora. Enquanto a
   // resposta da busca atual não chega, `current` é null e a lista mostra o
   // esqueleto — sem precisar de um estado “carregando” separado.
-  const current = results?.query === trimmedQuery ? results.items : null;
+  const current = results?.query === trimmedQuery ? results.hits : null;
   const searching = trimmedQuery.length > 0 && current === null;
   const showResults = focused && trimmedQuery.length > 0;
 
@@ -329,7 +468,7 @@ export function CommandBar({
             "transition-[border-color,box-shadow] duration-150 ease-out motion-reduce:transition-none",
             dragging
               ? "border-accent shadow-[0_2px_24px_-8px] shadow-accent/30"
-              : focused
+              : focused && inputFocused
                 ? "border-subtle-foreground shadow-[0_2px_20px_-10px] shadow-black/25"
                 : "border-border hover:border-subtle-foreground/60"
           )}
@@ -351,13 +490,18 @@ export function CommandBar({
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              onFocus={() => setFocused(true)}
+              onFocus={() => {
+                setFocused(true);
+                setInputFocused(true);
+              }}
+              onBlur={() => setInputFocused(false)}
+              onDoubleClick={() => setExpanded(true)}
               onKeyDown={(event) => handleKeyDown(event)}
               role="combobox"
               aria-expanded={showResults}
               aria-controls={listboxId}
               aria-autocomplete="list"
-              aria-label="Buscar nas suas notas"
+              aria-label="Buscar nas suas notas e arquivos"
               data-focus-ring="container"
               // O placeholder de verdade fica vazio: quem desenha o texto é a
               // camada abaixo, que precisa de transição entre as frases. O
@@ -425,7 +569,7 @@ export function CommandBar({
               ref={fileRef}
               type="file"
               className="hidden"
-              accept=".pdf,.txt,.md,.docx,.mp3,.wav,.m4a"
+              accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.md,.docx,.mp3,.wav,.m4a"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void sendFile(file);
@@ -436,7 +580,7 @@ export function CommandBar({
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={upload.phase === "sending"}
-              title="Enviar arquivo (PDF, texto, áudio)"
+              title="Enviar arquivo (imagem, PDF, texto, áudio)"
               className="flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             >
               {upload.phase === "sending" ? (
@@ -479,7 +623,7 @@ export function CommandBar({
               query={query}
               highlight={highlight}
               onHighlight={setHighlight}
-              onOpenNote={openNote}
+              onOpen={openEntry}
             />
           </div>
         )}
@@ -558,7 +702,7 @@ export function CommandBar({
                 Buscar na Nexo
               </h2>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                Encontre notas pelo título, conteúdo ou contexto.
+                Encontre notas e arquivos pelo nome, conteúdo ou contexto.
               </p>
             </div>
             <button
@@ -593,7 +737,7 @@ export function CommandBar({
                 aria-expanded={trimmedQuery.length > 0}
                 aria-controls={`${listboxId}-expanded`}
                 aria-autocomplete="list"
-                aria-label="Buscar nas suas notas"
+                aria-label="Buscar nas suas notas e arquivos"
                 autoComplete="off"
                 data-focus-ring="container"
                 placeholder="Busque uma nota, uma decisão, um arquivo…"
@@ -626,14 +770,14 @@ export function CommandBar({
                   query={query}
                   highlight={highlight}
                   onHighlight={setHighlight}
-                  onOpenNote={openNote}
+                  onOpen={openEntry}
                   expanded
                 />
               </div>
             ) : (
               <p className="px-1 py-7 text-center text-sm leading-relaxed text-muted-foreground">
                 Escreva o que você lembra. A Nexo também procura dentro das suas
-                notas, não só nos títulos.
+                notas e no que leu dos seus arquivos, não só nos nomes.
               </p>
             )}
           </div>
@@ -645,6 +789,26 @@ export function CommandBar({
           </footer>
         </div>
       </dialog>
+
+      <dialog
+        ref={previewDialogRef}
+        aria-label="Prévia da nota"
+        onClose={closeNotePreview}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) closeNotePreview();
+        }}
+        className="m-auto w-[min(42rem,calc(100%-1.5rem))] border-0 bg-transparent p-0 text-foreground backdrop:bg-black/35 backdrop:backdrop-blur-[3px]"
+      >
+        <NotePreviewPanel
+          preview={preview}
+          status={previewStatus}
+          now={Date.now()}
+          onClose={closeNotePreview}
+          onRetry={() => setPreviewAttempt((attempt) => attempt + 1)}
+        />
+      </dialog>
+
+      <FileViewerDialog attachment={viewing} onClose={closeFileViewer} />
     </div>
   );
 }
@@ -654,71 +818,181 @@ function SearchResults({
   query,
   highlight,
   onHighlight,
-  onOpenNote,
+  onOpen,
   expanded = false,
 }: {
-  current: RecentNote[] | null;
+  current: SearchHits | null;
   query: string;
   highlight: number;
   onHighlight: (index: number) => void;
-  onOpenNote: (noteId: string) => void;
+  onOpen: (entry: SearchEntry) => void;
   expanded?: boolean;
 }) {
   if (current === null) return <ResultsSkeleton />;
 
-  if (current.length === 0) {
+  const tagSearch = query.trim().startsWith("#");
+  if (current.tags.length === 0 && current.notes.length === 0 && current.files.length === 0) {
     return (
       <p className="px-4 py-6 text-center text-sm text-muted-foreground">
         Nada encontrado para <span className="text-foreground">“{query.trim()}”</span>.
-        Tente outras palavras — a busca também lê o conteúdo, não só o título.
+        {tagSearch
+          ? " Tente outro nome de tag."
+          : " Tente outras palavras — a busca também lê o conteúdo, não só o nome."}
       </p>
     );
   }
 
+  const rowClass = (index: number) =>
+    cn(
+      "flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors duration-150 focus-visible:bg-secondary focus-visible:outline-none",
+      index === highlight ? "bg-secondary" : "bg-transparent",
+      expanded && "py-3"
+    );
+  // Os títulos dos grupos só aparecem quando há arquivo: sem ele, a lista é a
+  // mesma de antes, só de notas.
+  const grouped = current.files.length > 0;
+  const noteOffset = current.tags.length;
+  const fileOffset = noteOffset + current.notes.length;
+
   return (
-    <ul className={cn("overflow-y-auto py-1.5", expanded ? "max-h-[50vh]" : "max-h-[340px]")}>
-      {current.map((note, index) => (
-        <li key={note.id}>
-          <button
-            type="button"
-            role="option"
-            aria-selected={index === highlight}
-            onMouseEnter={() => onHighlight(index)}
-            onClick={() => onOpenNote(note.id)}
-            className={cn(
-              "flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors duration-150",
-              index === highlight ? "bg-secondary" : "bg-transparent",
-              expanded && "py-3"
-            )}
-          >
-            <NoteTypeIcon
-              type={note.type}
-              className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
-            />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm text-foreground">
-                {note.title}
-              </span>
-              {note.summary ? (
-                <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-subtle-foreground">
-                  <Sparkles className="size-3 shrink-0" aria-hidden="true" />
-                  <span className="sr-only">Resumo da Nexo: </span>
-                  <span className="truncate">{note.summary}</span>
+    <div className={cn("overflow-y-auto py-1.5", expanded ? "max-h-[50vh]" : "max-h-[340px]")}>
+      {current.tags.length > 0 && (
+        <ResultGroup label="Tags">
+          {current.tags.map((tag, index) => (
+            <li key={tag.id}>
+              <button
+                type="button"
+                role="option"
+                data-focus-ring="container"
+                aria-selected={index === highlight}
+                onMouseEnter={() => onHighlight(index)}
+                onFocus={() => onHighlight(index)}
+                onClick={() => onOpen({ kind: "tag", tag })}
+                className={rowClass(index)}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn("mt-1 size-2.5 shrink-0 rounded-full", TAG_DOT_CLASS[tagTone(tag)])}
+                />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                  #{tag.name}
                 </span>
-              ) : note.excerpt ? (
-                <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
-                  {note.excerpt}
+                <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
+                  {tag.noteCount} {tag.noteCount === 1 ? "nota" : "notas"}
                 </span>
-              ) : null}
-            </span>
-            {note.workspaceName && (
-              <span className="mt-0.5 shrink-0 text-xs text-subtle-foreground">
-                {note.workspaceName}
-              </span>
-            )}
-          </button>
-        </li>
-      ))}
+              </button>
+            </li>
+          ))}
+        </ResultGroup>
+      )}
+      {current.notes.length > 0 && (
+        <ResultGroup label={grouped ? "Notas" : null}>
+          {current.notes.map((note, index) => (
+            <li key={note.id}>
+              <button
+                type="button"
+                role="option"
+                data-focus-ring="container"
+                aria-selected={noteOffset + index === highlight}
+                onMouseEnter={() => onHighlight(noteOffset + index)}
+                onFocus={() => onHighlight(noteOffset + index)}
+                onClick={() => onOpen({ kind: "note", note })}
+                className={rowClass(noteOffset + index)}
+              >
+                <NoteTypeIcon
+                  type={note.type}
+                  className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-foreground">
+                    {note.title}
+                  </span>
+                  {note.summary ? (
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-subtle-foreground">
+                      <Sparkles className="size-3 shrink-0" aria-hidden="true" />
+                      <span className="sr-only">Resumo da Nexo: </span>
+                      <span className="truncate">{note.summary}</span>
+                    </span>
+                  ) : note.excerpt ? (
+                    <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
+                      {note.excerpt}
+                    </span>
+                  ) : null}
+                </span>
+                {note.workspaceName && (
+                  <span className="mt-0.5 shrink-0 text-xs text-subtle-foreground">
+                    {note.workspaceName}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ResultGroup>
+      )}
+
+      {grouped && (
+        <ResultGroup label="Arquivos">
+          {current.files.map((file, fileIndex) => {
+            const index = fileOffset + fileIndex;
+            return (
+              <li key={file.id}>
+                <button
+                  type="button"
+                  role="option"
+                  data-focus-ring="container"
+                  aria-selected={index === highlight}
+                  onMouseEnter={() => onHighlight(index)}
+                  onFocus={() => onHighlight(index)}
+                  onClick={() => onOpen({ kind: "file", file })}
+                  className={rowClass(index)}
+                >
+                  <AttachmentIcon
+                    type={file.type}
+                    className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-foreground">
+                      {file.filename}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-subtle-foreground">
+                      {ATTACHMENT_TYPE_NAME[file.type]}
+                      {file.note ? ` · Nota: ${file.note.title}` : ""}
+                    </span>
+                  </span>
+                  {file.sizeBytes !== null && (
+                    <span className="mt-0.5 shrink-0 text-xs tabular-nums text-subtle-foreground">
+                      {formatBytes(file.sizeBytes)}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ResultGroup>
+      )}
+    </div>
+  );
+}
+
+function ResultGroup({
+  label,
+  children,
+}: {
+  label: string | null;
+  children: ReactNode;
+}) {
+  const labelId = useId();
+  if (!label) return <ul role="group">{children}</ul>;
+  return (
+    <ul role="group" aria-labelledby={labelId} className="[&+&]:mt-1.5 [&+&]:border-t [&+&]:border-border [&+&]:pt-1.5">
+      <li
+        id={labelId}
+        role="presentation"
+        className="px-4 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.06em] text-subtle-foreground uppercase"
+      >
+        {label}
+      </li>
+      {children}
     </ul>
   );
 }

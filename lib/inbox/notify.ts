@@ -22,18 +22,15 @@ import { notifications } from "@/lib/db/schema";
  * Se a cota estourou e o aviso não foi gravado, a cota continua estourada e a
  * resposta ao usuário continua correta.
  *
- * **Onde isto ainda não é chamado.** Hoje a única notificação que existe é a
- * de boas-vindas, escrita pela trigger `handle_new_user` — em SQL, porque ela
- * acontece dentro do INSERT em `auth.users`, antes de qualquer código nosso
- * rodar. Este módulo é a porta para todas as outras: aviso de cota, retomada
- * de tarefa que ficou sem crédito, mudança de plano.
+ * **Quem mais escreve na Entrada.** A trigger `handle_new_user` (as
+ * boas-vindas, em SQL, porque acontece dentro do INSERT em `auth.users`), a
+ * trigger de `ai_jobs` de 0031 (o fim de cada tarefa — são
+ * cinco workers, e nenhum precisa lembrar), o `pg_cron` do resumo de limites
+ * (0025) e os CLIs `bun run notify` e `bun run errors`. Daqui saem o aviso
+ * de limite de leituras e o do reset da conta.
  *
- * **Antes de pendurar isto num caminho que repete**, cuidado com o óbvio: um
- * aviso de cota disparado a cada carga do dashboard vira trinta linhas iguais
- * na Entrada. O jeito de resolver não é lembrar de checar antes de chamar —
- * é `metadata` carregar uma chave do evento (`{ kind: "quota", month:
- * "2026-08" }`) e a inserção virar um upsert sobre ela. Quando a primeira
- * notificação automática entrar, esse índice único entra junto.
+ * **Num caminho que repete**, `metadata.dedupeKey` + o índice único de 0025:
+ * o mesmo evento não entra duas vezes.
  */
 
 /** Teto do título: é uma linha de lista, não um parágrafo. */

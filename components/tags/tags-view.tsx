@@ -58,9 +58,11 @@ function fold(text: string): string {
 export function TagsView({
   tags,
   renderedAt,
+  initialTagId = null,
 }: {
   tags: TagWithUsage[];
   renderedAt: number;
+  initialTagId?: string | null;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -99,7 +101,9 @@ export function TagsView({
   }, []);
 
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<TagWithUsage | null>(null);
+  const [selected, setSelected] = useState<TagWithUsage | null>(
+    () => tags.find((tag) => tag.id === initialTagId) ?? null
+  );
   const [view, setView] = useState<"list" | "graph">("list");
   const [graphData, setGraphData] = useState<TagGraph | "error" | null>(null);
 
@@ -160,7 +164,7 @@ export function TagsView({
 
       try {
         const response = await fetch(
-          `/api/search?q=${encodeURIComponent(trimmed)}`,
+          `/api/search?scope=notes&q=${encodeURIComponent(trimmed)}`,
           { signal: controller.signal }
         );
         if (!response.ok) {

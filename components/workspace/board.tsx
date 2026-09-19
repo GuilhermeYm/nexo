@@ -4,12 +4,16 @@ import {
   ArrowLeft,
   ArrowUpToLine,
   BookOpen,
+  Circle,
+  Diamond,
   Download,
   Eraser,
   ExternalLink,
   FilePlus2,
   Spline,
   FolderInput,
+  ImagePlus,
+  LoaderCircle,
   Maximize,
   Minus,
   Paperclip,
@@ -52,6 +56,8 @@ import {
   connectionAt,
 } from "@/components/workspace/connection-layer";
 import { ConnectionLabels } from "@/components/workspace/connection-labels";
+import { BoardMarksLayer, type DraftMark } from "@/components/workspace/board-marks-layer";
+import { markContains, normalizeStroke, simplifyPoints, smoothStrokePoints } from "@/lib/workspace/board-marks";
 import {
   DEFAULT_WINDOW_SIZE,
   frameHeightOf,
@@ -85,12 +91,16 @@ import {
 } from "@/hooks/use-board-viewport";
 import type {
   BoardConnection,
+  BoardMark,
+  BoardMarkKind,
+  BoardMarkTone,
   BoardWindow,
   BoardWorkspace,
   OpenableAttachment,
   OpenableNote,
 } from "@/lib/workspace/queries";
 import { cn } from "@/lib/utils";
+import { useBoardUploads } from "@/hooks/use-board-uploads";
 
 /**
  * A lousa de um workspace.
@@ -130,6 +140,7 @@ interface BoardProps {
   initialWindows: BoardWindow[];
   /** As flechas, já lidas junto com as janelas. Ver o comentário da página. */
   initialConnections: BoardConnection[];
+  initialMarks: BoardMark[];
   /**
    * Janela em que a lousa deve chegar centralizada.
    *
@@ -146,6 +157,7 @@ export function Board({
   workspace,
   initialWindows,
   initialConnections,
+  initialMarks,
   focusWindowId,
   windowCap,
 }: BoardProps) {
@@ -171,8 +183,10 @@ export function Board({
     lastErased,
     undoErase,
     dismissErased,
+    marks,
+    createMark,
     deleteNote,
-  } = useBoardWindows(workspace.id, initialWindows, initialConnections);
+  } = useBoardWindows(workspace.id, initialWindows, initialConnections, initialMarks);
 
   const router = useRouter();
 
@@ -207,7 +221,13 @@ export function Board({
    * `windowAt` e `connectionAt`, não o DOM — a camada responderia sempre por
    * ela mesma.
    */
-  const [tool, setTool] = useState<"none" | "eraser" | "link">("none");
+  const [tool, setTool] = useState<"none" | "eraser" | "link" | "pen" | "shape">("none");
+  const [markTone, setMarkTone] = useState<BoardMarkTone>("default");
+  const [markWeight, setMarkWeight] = useState(3);
+  const [shapeKind, setShapeKind] = useState<Exclude<BoardMarkKind, "pen">>("rectangle");
+  const [draftMark, setDraftMark] = useState<DraftMark | null>(null);
+  const draftRef = useRef<DraftMark | null>(null);
+  const draftFrame = useRef<number | null>(null);
   /**
    * O que a passada da borracha já encostou.
    *
@@ -242,6 +262,8 @@ export function Board({
   // nenhum atualizador de estado precisa deixar de ser puro.
   const sweptRef = useRef<ReadonlySet<string>>(EMPTY_SET);
   const sweptLinksRef = useRef<ReadonlySet<string>>(EMPTY_SET);
+  const sweptMarksRef = useRef<ReadonlySet<string>>(EMPTY_SET);
+  const [sweptMarks, setSweptMarks] = useState<ReadonlySet<string>>(EMPTY_SET);
   const sweeping = useRef(false);
   /**
    * Onde o último botão direito (ou toque longo) aconteceu, em coordenadas
@@ -593,6 +615,16 @@ export function Board({
         ? null
         : connectionAt(at, connections, windows, viewport.zoom);
       setUnderEraserLink(link?.id ?? null);
+      let mark: BoardMark | null = null;
+      if (!hit && !link) {
+        for (let index = marks.length - 1; index >= 0; index -= 1) {
+          const candidate = marks[index];
+          if (!sweptMarksRef.current.has(candidate.id) && markContains(candidate, at, 8 / viewport.zoom)) {
+            mark = candidate;
+            break;
+          }
+        }
+      }
 
       if (!sweeping.current) return;
 
@@ -607,9 +639,16 @@ export function Board({
         const next = new Set(sweptLinksRef.current).add(link.id);
         sweptLinksRef.current = next;
         setSweptLinks(next);
+        return;
+      }
+
+      if (mark && !sweptMarksRef.current.has(mark.id)) {
+        const next = new Set(sweptMarksRef.current).add(mark.id);
+        sweptMarksRef.current = next;
+        setSweptMarks(next);
       }
     },
-    [windowAt, toContainer, toBoard, connections, windows, viewport.zoom]
+    [windowAt, toContainer, toBoard, connections, windows, marks, viewport.zoom]
   );
 
   const commitSweep = useCallback(() => {
@@ -617,24 +656,46 @@ export function Board({
 
     const windowIds = [...sweptRef.current];
     const linkIds = [...sweptLinksRef.current];
+    const markIds = [...sweptMarksRef.current];
     sweptRef.current = EMPTY_SET;
     sweptLinksRef.current = EMPTY_SET;
+    sweptMarksRef.current = EMPTY_SET;
     setSwept(EMPTY_SET);
     setSweptLinks(EMPTY_SET);
+    setSweptMarks(EMPTY_SET);
 
-    if (windowIds.length > 0 || linkIds.length > 0) {
-      void erase({ windows: windowIds, connections: linkIds });
+    if (windowIds.length > 0 || linkIds.length > 0 || markIds.length > 0) {
+      void erase({ windows: windowIds, connections: linkIds, marks: markIds });
     }
   }, [erase]);
 
-  /** Guarda a ferramenta e devolve à lousa o que o gesto ainda não gravou. */
+  /**
+   * Guarda a ferramenta.
+   *
+   * Fechar a borracha também encerra a passada atual. O botão fica acima da
+   * camada de gesto e pode receber o clique antes de o pointerup dela; limpar
+   * os conjuntos aqui sem commit fazia o desenho apenas escondido reaparecer.
+   */
   const stopTool = useCallback(() => {
+    if (
+      tool === "eraser" &&
+      (sweptRef.current.size > 0 ||
+        sweptLinksRef.current.size > 0 ||
+        sweptMarksRef.current.size > 0)
+    ) {
+      commitSweep();
+    }
+
     linkSession.current += 1;
     sweeping.current = false;
     sweptRef.current = EMPTY_SET;
     sweptLinksRef.current = EMPTY_SET;
+    sweptMarksRef.current = EMPTY_SET;
     setSwept(EMPTY_SET);
     setSweptLinks(EMPTY_SET);
+    setSweptMarks(EMPTY_SET);
+    draftRef.current = null;
+    setDraftMark(null);
     setUnderEraser(null);
     setUnderEraserLink(null);
     setArmedClear(false);
@@ -646,8 +707,12 @@ export function Board({
       cancelAnimationFrame(linkPointerFrame.current);
       linkPointerFrame.current = null;
     }
+    if (draftFrame.current !== null) {
+      cancelAnimationFrame(draftFrame.current);
+      draftFrame.current = null;
+    }
     setTool("none");
-  }, []);
+  }, [commitSweep, tool]);
 
   useEffect(
     () => () => {
@@ -684,7 +749,7 @@ export function Board({
    * itens do menu do fundo), para nenhuma delas esquecer disso.
    */
   const pickTool = useCallback(
-    (next: "eraser" | "link") => {
+    (next: "eraser" | "link" | "pen" | "shape") => {
       if (zenMode) return;
       linkSession.current += 1;
       setLabelingId(null);
@@ -692,6 +757,79 @@ export function Board({
     },
     [zenMode]
   );
+
+  const boardPointFromEvent = useCallback((event: React.PointerEvent) => {
+    const point = toContainer(event.clientX, event.clientY);
+    return toBoard(point.x, point.y);
+  }, [toBoard, toContainer]);
+
+  const paintDraft = useCallback(() => {
+    if (draftFrame.current !== null) return;
+    draftFrame.current = requestAnimationFrame(() => {
+      draftFrame.current = null;
+      setDraftMark(draftRef.current ? { ...draftRef.current, points: [...draftRef.current.points] } : null);
+    });
+  }, []);
+
+  const startDrawing = useCallback((event: React.PointerEvent) => {
+    if (tool !== "pen" && tool !== "shape") return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = boardPointFromEvent(event);
+    draftRef.current = {
+      kind: tool === "pen" ? "pen" : shapeKind,
+      points: tool === "pen" ? [point] : [],
+      start: point,
+      end: point,
+      tone: markTone,
+      weight: markWeight,
+    };
+    setDraftMark(draftRef.current);
+  }, [boardPointFromEvent, markTone, markWeight, shapeKind, tool]);
+
+  const moveDrawing = useCallback((event: React.PointerEvent) => {
+    const draft = draftRef.current;
+    if (!draft) return;
+    const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
+    if (draft.kind === "pen") {
+      for (const pointer of coalesced) {
+        const container = toContainer(pointer.clientX, pointer.clientY);
+        draft.points.push(toBoard(container.x, container.y));
+      }
+    } else {
+      draft.end = boardPointFromEvent(event);
+    }
+    paintDraft();
+  }, [boardPointFromEvent, paintDraft, toBoard, toContainer]);
+
+  const finishDrawing = useCallback((event: React.PointerEvent) => {
+    const draft = draftRef.current;
+    draftRef.current = null;
+    setDraftMark(null);
+    if (!draft) return;
+    if (draft.kind === "pen") {
+      // O pointerup pode chegar depois do último pointermove. Guardar a
+      // posição final evita a pequena ponta reta/curta que isso produzia.
+      draft.points.push(boardPointFromEvent(event));
+      const points = simplifyPoints(
+        smoothStrokePoints(draft.points),
+        Math.max(0.8, 1.5 / viewport.zoom)
+      );
+      if (points.length < 2) return;
+      const normalized = normalizeStroke(points);
+      void createMark({ kind: "pen", ...normalized, tone: draft.tone, weight: draft.weight });
+      return;
+    }
+    draft.end = boardPointFromEvent(event);
+    const width = Math.round(Math.abs(draft.end.x - draft.start.x));
+    const height = Math.round(Math.abs(draft.end.y - draft.start.y));
+    if (width < 4 || height < 4) return;
+    void createMark({ kind: draft.kind, points: [], x: Math.round(Math.min(draft.start.x, draft.end.x)), y: Math.round(Math.min(draft.start.y, draft.end.y)), width, height, tone: draft.tone, weight: draft.weight });
+  }, [boardPointFromEvent, createMark, viewport.zoom]);
+
+  const cancelDrawing = useCallback(() => {
+    draftRef.current = null;
+    setDraftMark(null);
+  }, []);
 
   /**
    * Liga ou desliga o modo de leitura.
@@ -715,7 +853,7 @@ export function Board({
   const clearBoard = useCallback(() => {
     setArmedClear(false);
     // Só as janelas: as flechas caem junto por cascade, no banco.
-    void erase({ windows: "all" });
+    void erase({ windows: "all", marks: "all" });
   }, [erase]);
 
   /**
@@ -810,6 +948,9 @@ export function Board({
             !swept.has(item.fromWindowId) &&
             !swept.has(item.toWindowId)
         );
+  const visibleMarks = sweptMarks.size === 0
+    ? marks
+    : marks.filter((mark) => !sweptMarks.has(mark.id));
 
   /** A janela que a borracha vai apagar se encostar agora. */
   const eraserTarget =
@@ -926,8 +1067,8 @@ export function Board({
     [renameConnection]
   );
 
-  /** Retângulo que contém todas as janelas. */
-  const bounds = boundsOf(visibleWindows);
+  /** Retângulo que contém janelas e desenhos. */
+  const bounds = boundsOfBoard(visibleWindows, visibleMarks);
 
   const fitAll = useCallback(() => {
     const box = frameRef.current?.getBoundingClientRect();
@@ -950,7 +1091,7 @@ export function Board({
    */
   const framed = useRef(false);
   useEffect(() => {
-    if (framed.current || windows.length === 0) return;
+    if (framed.current || (windows.length === 0 && marks.length === 0)) return;
 
     const box = frameRef.current?.getBoundingClientRect();
     if (!box) return;
@@ -976,8 +1117,8 @@ export function Board({
 
     if (restored !== false) return;
     framed.current = true;
-    fitTo(boundsOf(windows), box.width, box.height);
-  }, [focusWindowId, restored, windows, fitTo]);
+    fitTo(boundsOfBoard(windows, marks), box.width, box.height);
+  }, [focusWindowId, restored, windows, marks, fitTo]);
 
   /* ---------------------------------------------------------------- */
   /* Criação                                                           */
@@ -1029,6 +1170,95 @@ export function Board({
     },
     [createWindow, spawnPoint, zenMode]
   );
+
+  // Atalho de saída da lousa. Ele vale inclusive dentro de uma janela sendo
+  // editada: Ctrl + Shift + D não é texto nem formatação e precisa continuar
+  // sendo a porta rápida de volta ao Dashboard. Um diálogo modal, porém,
+  // mantém o próprio foco e as próprias teclas.
+  useEffect(() => {
+    function handleDashboardShortcut(event: KeyboardEvent) {
+      if (
+        event.code !== "KeyD" ||
+        !event.ctrlKey ||
+        !event.shiftKey ||
+        event.altKey ||
+        event.metaKey ||
+        document.querySelector("dialog[open]")
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      router.push("/dashboard");
+    }
+
+    window.addEventListener("keydown", handleDashboardShortcut);
+    return () => window.removeEventListener("keydown", handleDashboardShortcut);
+  }, [router]);
+
+  /**
+   * Atalhos de uma tecla, como nas ferramentas de desenho conhecidas.
+   * Campos de texto, menus e diálogos mantêm as teclas para si; na lousa,
+   * repetir a tecla da ferramenta guarda-a e V volta ao ponteiro.
+   */
+  useEffect(() => {
+    function handleToolShortcut(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        zenMode ||
+        pickerOpen
+      ) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, [contenteditable='true'], [role='dialog'], [role='menu']"
+        )
+      ) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const shortcutTool = {
+        p: "pen",
+        f: "shape",
+        l: "link",
+        b: "eraser",
+      }[key] as "pen" | "shape" | "link" | "eraser" | undefined;
+
+      if (key === "v") {
+        if (tool !== "none") {
+          event.preventDefault();
+          stopTool();
+        }
+        return;
+      }
+      if (!shortcutTool) return;
+      if (shortcutTool === "link" && tool !== "link" && windows.length < 2) return;
+      if (
+        shortcutTool === "eraser" &&
+        tool !== "eraser" &&
+        windows.length === 0 &&
+        connections.length === 0 &&
+        marks.length === 0
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      if (tool === shortcutTool) stopTool();
+      else pickTool(shortcutTool);
+    }
+
+    window.addEventListener("keydown", handleToolShortcut);
+    return () => window.removeEventListener("keydown", handleToolShortcut);
+  }, [connections.length, marks.length, pickerOpen, pickTool, stopTool, tool, windows.length, zenMode]);
 
   const handleBackgroundDoubleClick = useCallback(
     (event: React.MouseEvent) => {
@@ -1125,6 +1355,43 @@ export function Board({
     [spawn]
   );
 
+  /* --- Arquivo do computador direto na lousa ------------------------ */
+
+  const boardPointAt = useCallback(
+    (clientX: number, clientY: number) => {
+      const point = toContainer(clientX, clientY);
+      return toBoard(point.x, point.y);
+    },
+    [toContainer, toBoard]
+  );
+
+  const viewCenter = useCallback(() => {
+    const box = frameRef.current?.getBoundingClientRect();
+    return toBoard((box?.width ?? 800) / 2, (box?.height ?? 600) / 2);
+  }, [toBoard]);
+
+  const placeUploaded = useCallback(
+    async (
+      attachmentId: string,
+      at: { x: number; y: number },
+      size: { width: number; height: number } | null
+    ) => {
+      await spawn(
+        { kind: "attachment", attachmentId, ...(size ?? {}) },
+        { x: snapToGrid(at.x), y: snapToGrid(at.y) }
+      );
+    },
+    [spawn]
+  );
+
+  const uploads = useBoardUploads({
+    enabled: !zenMode && windows.length < windowCap,
+    toBoardPoint: boardPointAt,
+    viewCenter,
+    place: placeUploaded,
+    onError: setWorkspaceError,
+  });
+
   /* ---------------------------------------------------------------- */
 
   const zoomPercent = Math.round(viewport.zoom * 100);
@@ -1145,12 +1412,36 @@ export function Board({
    * O cleanup também impede que o timer de uma passada anterior dispense o
    * cartão mais novo.
    */
+  //
+  // O relógio para enquanto o ponteiro ou o foco estão no cartão: três
+  // segundos não bastam para ler, decidir e alcançar o botão, e sumir com o
+  // Desfazer debaixo do cursor seria o cartão vencendo a pessoa (WCAG 2.2.1).
+  // A pausa é guardada junto com a passada que ela segura, para um cartão
+  // que sumiu com o ponteiro em cima não deixar o próximo pausado para sempre.
+  const [heldErase, setHeldErase] = useState<typeof lastErased>(null);
+  const undoHeld = lastErased !== null && heldErase === lastErased;
+  const undoClock = useRef<{ erase: typeof lastErased; remaining: number }>({
+    erase: null,
+    remaining: ERASE_UNDO_TIMEOUT,
+  });
+
   useEffect(() => {
     if (!lastErased) return;
+    if (undoClock.current.erase !== lastErased) {
+      undoClock.current = { erase: lastErased, remaining: ERASE_UNDO_TIMEOUT };
+    }
+    if (undoHeld) return;
 
-    const timeout = window.setTimeout(dismissErased, ERASE_UNDO_TIMEOUT);
-    return () => window.clearTimeout(timeout);
-  }, [lastErased, dismissErased]);
+    const startedAt = performance.now();
+    const timeout = window.setTimeout(dismissErased, undoClock.current.remaining);
+    return () => {
+      window.clearTimeout(timeout);
+      undoClock.current.remaining = Math.max(
+        0,
+        undoClock.current.remaining - (performance.now() - startedAt)
+      );
+    };
+  }, [lastErased, undoHeld, dismissErased]);
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-clip bg-background">
@@ -1201,8 +1492,8 @@ export function Board({
                 </h1>
               )}
               <span className="shrink-0 text-xs whitespace-nowrap text-subtle-foreground">
-                <span className="tabular-nums">{visibleWindows.length}</span>{" "}
-                {visibleWindows.length === 1 ? "elemento" : "elementos"}
+                <span className="tabular-nums">{visibleWindows.length + visibleMarks.length}</span>{" "}
+                {visibleWindows.length + visibleMarks.length === 1 ? "elemento" : "elementos"}
               </span>
             </div>
           </ContextMenuTrigger>
@@ -1260,7 +1551,27 @@ export function Board({
 
             <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
 
-            {/* As duas ferramentas do ponteiro. Modo, e não clique: ficam
+            <ToolButton
+              label="Caneta"
+              hint={tool === "pen" ? "Clique de novo para guardar." : "Desenhe livremente na lousa."}
+              shortcut="P"
+              expanded={tool === "pen"}
+              onClick={() => (tool === "pen" ? stopTool() : pickTool("pen"))}
+            >
+              <Pencil className="size-4" aria-hidden="true" />
+            </ToolButton>
+
+            <ToolButton
+              label="Formas"
+              hint={tool === "shape" ? "Clique de novo para guardar." : "Retângulo, elipse ou losango."}
+              shortcut="F"
+              expanded={tool === "shape"}
+              onClick={() => (tool === "shape" ? stopTool() : pickTool("shape"))}
+            >
+              <Square className="size-4" aria-hidden="true" />
+            </ToolButton>
+
+            {/* As ferramentas do ponteiro. Modo, e não clique: ficam
                 acesas enquanto estão na mão, e o mesmo botão as guarda. */}
             <ToolButton
               label="Ligar"
@@ -1269,6 +1580,7 @@ export function Board({
                   ? "Clique de novo para guardar."
                   : "Toque num elemento e depois no outro."
               }
+              shortcut="L"
               disabled={tool !== "link" && windows.length < 2}
               expanded={tool === "link"}
               onClick={() => (tool === "link" ? stopTool() : pickTool("link"))}
@@ -1283,10 +1595,12 @@ export function Board({
                   ? "Clique de novo para guardar."
                   : "Tira da lousa sem tirar da conta."
               }
+              shortcut="B"
               disabled={
                 tool !== "eraser" &&
                 windows.length === 0 &&
-                connections.length === 0
+                connections.length === 0 &&
+                marks.length === 0
               }
               expanded={tool === "eraser"}
               onClick={() =>
@@ -1302,6 +1616,27 @@ export function Board({
                 exatamente com um painel travado. E ele nunca fica
                 desabilitado com o painel aberto: com a lousa no teto de
                 elementos, "trazer" está fora de questão, mas "fechar" não. */}
+            <input {...uploads.inputProps} />
+            <ToolButton
+              label="Enviar arquivo"
+              hint={
+                uploads.sending
+                  ? `Enviando ${uploads.sending}…`
+                  : "Imagem, PDF, texto ou áudio — também dá para arrastar ou colar aqui."
+              }
+              disabled={atCap || uploads.sending !== null}
+              onClick={uploads.pickFiles}
+            >
+              {uploads.sending ? (
+                <LoaderCircle
+                  className="size-4 animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ImagePlus className="size-4" aria-hidden="true" />
+              )}
+            </ToolButton>
+
             <ToolButton
               label="Trazer da conta"
               hint={
@@ -1338,7 +1673,33 @@ export function Board({
           para a tela: ele "não fecha totalmente".
 
           `clip` não cria contêiner rolável nenhum. Não há o que rolar. */}
-      <div ref={frameRef} className="relative min-h-0 flex-1 overflow-clip">
+      <div
+        ref={frameRef}
+        className="relative min-h-0 flex-1 overflow-clip"
+        {...uploads.dropHandlers}
+      >
+        {uploads.dropping && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-background/80 backdrop-blur-[2px]"
+          >
+            <span className="rounded-full bg-background px-4 py-2 text-sm font-medium text-foreground shadow-[0_8px_24px_-12px] shadow-black/30">
+              Solte para pôr na lousa
+            </span>
+          </div>
+        )}
+        {uploads.sending && (
+          <p
+            role="status"
+            className="absolute top-3 left-1/2 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full bg-background px-3.5 py-1.5 text-xs text-muted-foreground shadow-[0_8px_24px_-12px] shadow-black/30 ring-1 ring-border"
+          >
+            <LoaderCircle
+              className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+            <span className="truncate">Enviando {uploads.sending}…</span>
+          </p>
+        )}
         {/* O fundo. A trama acompanha pan e zoom, e é ela que dá à lousa a
             sensação de superfície — sem referência visual, arrastar no vazio
             não parece movimento. Qual trama e qual cor é escolha da pessoa,
@@ -1375,6 +1736,8 @@ export function Board({
               >
                 {/* As flechas primeiro: elas passam por baixo das janelas, e
                     quem vem antes no fluxo é pintado embaixo. */}
+                <BoardMarksLayer marks={visibleMarks} draft={draftMark} />
+
                 <ConnectionLayer
                   connections={visibleConnections}
                   windows={visibleWindows}
@@ -1505,7 +1868,7 @@ export function Board({
               destructive
               confirmLabel="Apagar tudo mesmo"
               onSelect={clearBoard}
-              disabled={windows.length === 0}
+              disabled={windows.length === 0 && marks.length === 0}
             >
               <Trash2 className="mt-0.5 size-4 shrink-0" />
               <ContextMenuItemLabel
@@ -1516,7 +1879,7 @@ export function Board({
           </ContextMenuContent>
         </ContextMenu>
 
-        {visibleWindows.length === 0 && (
+        {visibleWindows.length === 0 && visibleMarks.length === 0 && (
           <BoardEmptyState
             onCreateNote={() => spawn({ kind: "note", title: "Nova nota" })}
             onOpenPicker={() => setPickerOpen(true)}
@@ -1540,10 +1903,16 @@ export function Board({
             ligar, e a camada estaria só cobrindo os botões do estado vazio —
             que é justamente o que a pessoa precisa alcançar depois de apagar
             tudo. */}
-        {usingTool && visibleWindows.length > 0 && (
+        {usingTool && ((tool === "pen" || tool === "shape") || visibleWindows.length > 0 || visibleMarks.length > 0) && (
           <div
             onPointerDown={(event) => {
               if (event.button !== 0) return;
+
+              if (tool === "pen" || tool === "shape") {
+                startDrawing(event);
+                return;
+              }
+
               event.currentTarget.setPointerCapture(event.pointerId);
 
               if (tool === "link") {
@@ -1555,6 +1924,10 @@ export function Board({
               sweep(event.clientX, event.clientY);
             }}
             onPointerMove={(event) => {
+              if (tool === "pen" || tool === "shape") {
+                moveDrawing(event);
+                return;
+              }
               if (tool === "link") {
                 const hit = windowAt(event.clientX, event.clientY);
                 setUnderEraser(hit?.id ?? null);
@@ -1568,8 +1941,8 @@ export function Board({
 
               sweep(event.clientX, event.clientY);
             }}
-            onPointerUp={tool === "eraser" ? commitSweep : undefined}
-            onPointerCancel={tool === "eraser" ? commitSweep : undefined}
+            onPointerUp={tool === "eraser" ? commitSweep : tool === "pen" || tool === "shape" ? finishDrawing : undefined}
+            onPointerCancel={tool === "eraser" ? commitSweep : tool === "pen" || tool === "shape" ? cancelDrawing : undefined}
             onPointerLeave={() => {
               setUnderEraser(null);
               setUnderEraserLink(null);
@@ -1646,12 +2019,16 @@ export function Board({
             saber para não se assustar: qual ferramenta está na mão, o que ela
             faz com o que encosta, e como sair. */}
         {usingTool && (
-          <div className="absolute top-3 left-1/2 z-30 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/95 py-1.5 pr-1.5 pl-3.5 backdrop-blur-sm">
+          <div className="absolute top-3 left-1/2 z-30 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border border-border bg-background/95 py-1.5 pr-1.5 pl-3.5 backdrop-blur-sm sm:rounded-full">
             {tool === "link" ? (
               <Spline
                 className="size-4 shrink-0 text-accent"
                 aria-hidden="true"
               />
+            ) : tool === "pen" ? (
+              <Pencil className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+            ) : tool === "shape" ? (
+              <Square className="size-4 shrink-0 text-foreground" aria-hidden="true" />
             ) : (
               <Eraser
                 className="size-4 shrink-0 text-error"
@@ -1659,7 +2036,7 @@ export function Board({
               />
             )}
 
-            <p className="min-w-0 text-xs leading-snug text-muted-foreground">
+            <p className="min-w-0 text-xs leading-snug text-muted-foreground max-sm:hidden">
               <span className="font-semibold text-foreground">
                 {tool === "link"
                   ? // `linkOrigin`, não `linkingFrom`: a origem fechada no
@@ -1670,23 +2047,57 @@ export function Board({
                     : linkOrigin
                       ? `De “${shortTitle(titleOf(linkOrigin))}” para onde?`
                       : "Escolha de onde a flecha deve sair."
-                  : "Passe por cima para tirar da lousa."}
+                  : tool === "pen"
+                    ? "Arraste para desenhar."
+                    : tool === "shape"
+                      ? "Arraste para criar a forma."
+                      : "Passe por cima para tirar da lousa."}
               </span>{" "}
               <span className="hidden sm:inline">
                 {tool === "link"
                   ? linkTarget && linkOrigin
                     ? `Destino: “${shortTitle(titleOf(linkTarget))}”.`
                     : "Passe sobre uma nota e toque para confirmar."
-                  : "Notas e arquivos continuam na sua conta."}
+                  : tool === "pen" || tool === "shape"
+                    ? "O desenho é salvo quando você solta."
+                    : "Notas e arquivos continuam na sua conta."}
               </span>
             </p>
+
+            {(tool === "pen" || tool === "shape") && (
+              <>
+                {tool === "shape" && (
+                  <div className="flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="Tipo de forma">
+                    {([
+                      ["rectangle", Square, "Retângulo"],
+                      ["ellipse", Circle, "Elipse"],
+                      ["diamond", Diamond, "Losango"],
+                    ] as const).map(([kind, Icon, label]) => (
+                      <button key={kind} type="button" title={label} aria-pressed={shapeKind === kind} onClick={() => setShapeKind(kind)} className={cn("flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-tertiary hover:text-foreground", shapeKind === kind && "bg-foreground text-background hover:bg-foreground hover:text-background")}>
+                        <Icon className="size-3.5" aria-hidden="true" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-1 border-l border-border pl-2" role="group" aria-label="Cor do traço">
+                  {(["default", "1", "2", "3", "4", "5", "6"] as BoardMarkTone[]).map((tone) => (
+                    <button key={tone} type="button" title={tone === "default" ? "Cor padrão" : `Cor ${tone}`} aria-label={tone === "default" ? "Cor padrão" : `Cor ${tone}`} aria-pressed={markTone === tone} onClick={() => setMarkTone(tone)} className={cn("size-7 rounded-full border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent pointer-coarse:size-9", markTone === tone ? "border-foreground" : "border-transparent")} style={{ background: markToneColor(tone) }} />
+                  ))}
+                </div>
+                <label className="flex items-center gap-1 border-l border-border pl-2 text-[10px] text-muted-foreground">
+                  <span className="sr-only">Espessura</span>
+                  <input type="range" min={1} max={12} value={markWeight} onChange={(event) => setMarkWeight(Number(event.target.value))} className="w-14 accent-foreground" />
+                  <span className="w-3 tabular-nums">{markWeight}</span>
+                </label>
+              </>
+            )}
 
             {tool === "eraser" && (
               <button
                 type="button"
                 onClick={() => (armedClear ? clearBoard() : setArmedClear(true))}
                 onBlur={() => setArmedClear(false)}
-                disabled={visibleWindows.length === 0}
+                disabled={visibleWindows.length === 0 && visibleMarks.length === 0}
                 className={cn(
                   "flex h-7 shrink-0 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-9",
                   // Dois passos, como no menu do botão direito: o primeiro
@@ -1707,7 +2118,7 @@ export function Board({
               title={
                 tool === "link"
                   ? "Guardar a ligação — Esc"
-                  : "Guardar a borracha — Esc"
+                  : `Guardar ${tool === "pen" ? "a caneta" : tool === "shape" ? "as formas" : "a borracha"} — Esc`
               }
               className="flex size-7 shrink-0 items-center justify-center rounded-full text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:size-9"
             >
@@ -1769,6 +2180,14 @@ export function Board({
         {(notice || lastErased || atCap) && (
           <div
             role="status"
+            onPointerEnter={() => setHeldErase(lastErased)}
+            onPointerLeave={() => setHeldErase(null)}
+            onFocus={() => setHeldErase(lastErased)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setHeldErase(null);
+              }
+            }}
             className="absolute bottom-4 left-1/2 z-30 w-[min(30rem,calc(100%-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl bg-background shadow-[0_16px_40px_-18px_rgba(0,0,0,0.48)] ring-1 ring-border"
           >
             <div className="flex items-start gap-3 px-4 py-3.5">
@@ -1792,7 +2211,9 @@ export function Board({
                 ) : lastErased ? (
                   <>
                     <p className="mb-0.5 text-xs font-medium text-subtle-foreground">
-                      Desfazer disponível por 3 segundos
+                      {undoHeld
+                        ? "Desfazer disponível enquanto você estiver aqui"
+                        : "Desfazer disponível por 3 segundos"}
                     </p>
                     <p>{eraseSummary(lastErased)}</p>
                   </>
@@ -1834,10 +2255,11 @@ export function Board({
             </div>
             {lastErased && !notice && (
               <div
-                key={`${lastErased.windows.map((item) => item.id).join(",")}:${lastErased.links.map((item) => `${item.fromWindowId}>${item.toWindowId}`).join(",")}`}
+                key={`${lastErased.windows.map((item) => item.id).join(",")}:${lastErased.links.map((item) => `${item.fromWindowId}>${item.toWindowId}`).join(",")}:${lastErased.marks.map((item) => item.id).join(",")}`}
                 className="h-1 origin-left bg-accent motion-reduce:hidden"
                 style={{
                   animation: `erase-undo-countdown ${ERASE_UNDO_TIMEOUT}ms linear forwards`,
+                  animationPlayState: undoHeld ? "paused" : "running",
                 }}
               >
                 <span className="sr-only">
@@ -2256,6 +2678,7 @@ function BoardEmptyState({
 function ToolButton({
   label,
   hint,
+  shortcut,
   disabled,
   expanded,
   wide,
@@ -2264,6 +2687,7 @@ function ToolButton({
 }: {
   label: string;
   hint: string;
+  shortcut?: string;
   disabled?: boolean;
   /** Presente só nos botões que abrem e fecham alguma coisa. */
   expanded?: boolean;
@@ -2283,7 +2707,8 @@ function ToolButton({
       }}
       disabled={disabled}
       aria-expanded={expanded}
-      title={`${label} — ${hint}`}
+      aria-keyshortcuts={shortcut?.toLowerCase()}
+      title={`${label}${shortcut ? ` (${shortcut})` : ""} — ${hint}`}
       className={cn(
         "flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors duration-150 hover:bg-tertiary hover:text-foreground disabled:pointer-events-none disabled:opacity-40 pointer-coarse:h-11",
         // Aceso enquanto o que ele abriu está aberto. O rótulo não muda de
@@ -2429,8 +2854,20 @@ function shortTitle(value: string): string {
   return value.length > 28 ? `${value.slice(0, 27).trimEnd()}…` : value;
 }
 
+/** Canvas/SVG leem os tokens --nx-*; os --color-* do Tailwind são inline. */
+function markToneColor(tone: BoardMarkTone): string {
+  return tone === "default"
+    ? "var(--nx-text-primary)"
+    : `var(--nx-tag-${tone}-text)`;
+}
+
 /** O que o cartão de "apagado" diz. */
 function eraseSummary(batch: ErasedBatch): string {
+  if (batch.removed === 0 && batch.connections === 0 && batch.marks.length > 0) {
+    return batch.marks.length === 1
+      ? "1 desenho removido da lousa."
+      : `${batch.marks.length} desenhos removidos da lousa.`;
+  }
   // Só flechas: é a passada que encostou num traço sem encostar em janela
   // nenhuma, e falar de "elementos" ali seria falar de coisa que não saiu.
   if (batch.removed === 0) {
@@ -2466,13 +2903,21 @@ function eraseSummary(batch: ErasedBatch): string {
         ? " 1 ligação caiu junto."
         : ` ${batch.connections} ligações caíram junto.`;
 
-  return `${what} da lousa. ${fate}${links}`;
+  const drawings = batch.marks.length === 0
+    ? ""
+    : batch.marks.length === 1
+      ? " 1 desenho saiu junto."
+      : ` ${batch.marks.length} desenhos saíram junto.`;
+  return `${what} da lousa. ${fate}${links}${drawings}`;
 }
 
-function boundsOf(windows: BoardWindow[]) {
-  if (windows.length === 0) return null;
-
-  return windows.reduce(
+function boundsOfBoard(windows: BoardWindow[], marks: BoardMark[]) {
+  const boxes = [
+    ...windows.map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height })),
+    ...marks.map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height })),
+  ];
+  if (boxes.length === 0) return null;
+  return boxes.reduce(
     (box, item) => ({
       minX: Math.min(box.minX, item.x),
       minY: Math.min(box.minY, item.y),

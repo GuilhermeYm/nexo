@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { errorResponse, logServerError } from "@/lib/api";
-import { writeAuditLog } from "@/lib/audit";
+import { deleteOwnedAttachments } from "@/lib/attachments/delete";
 import { db } from "@/lib/db";
 import { attachments } from "@/lib/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
@@ -130,16 +130,8 @@ export async function GET(
 }
 
 /**
- * Apaga um arquivo: a linha, o objeto no bucket e as janelas que o mostravam.
- *
- * A nota que a Nexo escreveu sobre o arquivo **fica** — ela é texto da conta,
- * não o arquivo. Quem quiser as duas coisas fora apaga a nota pelo caminho
- * dela, que já oferece levar os anexos junto.
- *
- * As janelas `kind = 'attachment'` somem pela FK composta com `ON DELETE
- * CASCADE` (0009). A linha sai primeiro e o objeto depois: se o Storage
- * falhar, sobra um objeto órfão no bucket privado, que ninguém alcança — o
- * contrário deixaria na tela um arquivo que não abre.
+ * Apaga um arquivo. As regras (a nota fica, as janelas somem, linha antes do
+ * objeto) estão em `deleteOwnedAttachments`.
  */
 export async function DELETE(
   request: Request,
@@ -168,37 +160,8 @@ export async function DELETE(
       return errorResponse(429, "Muitas exclusões seguidas. Aguarde um pouco.");
     }
 
-    const [removed] = await db
-      .delete(attachments)
-      .where(and(eq(attachments.id, parsedId.data), eq(attachments.userId, user.id)))
-      .returning({
-        id: attachments.id,
-        filename: attachments.filename,
-        storagePath: attachments.storagePath,
-      });
-
+    const [removed] = await deleteOwnedAttachments(supabase, user.id, [parsedId.data], request);
     if (!removed) return errorResponse(404, "Arquivo não encontrado.");
-
-    await writeAuditLog({
-      action: "DELETE",
-      tableName: "attachments",
-      recordId: removed.id,
-      userId: user.id,
-      oldData: { filename: removed.filename },
-      request,
-    });
-
-    const { error } = await supabase.storage.from(BUCKET).remove([removed.storagePath]);
-    if (error) {
-      // A linha já saiu: para a pessoa, o arquivo foi apagado. O objeto que
-      // sobrou no bucket fica registrado para a limpeza manual.
-      await logServerError(
-        "DELETE /api/attachments/[id] (storage)",
-        error,
-        { userId: user.id, attachmentId: removed.id },
-        request
-      );
-    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

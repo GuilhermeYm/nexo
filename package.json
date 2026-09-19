@@ -21,7 +21,10 @@
     "shots:links": "node --env-file=.env scripts/shot-connections.mjs",
     "shots:entrada": "node --env-file=.env scripts/shot-inbox.mjs",
     "shots:erros": "node --env-file=.env scripts/shot-errors.mjs",
-    "shots:agenda": "node --env-file=.env scripts/shot-agenda.mjs"
+    "shots:agenda": "node --env-file=.env scripts/shot-agenda.mjs",
+    "shots:images": "node --env-file=.env.local --env-file=.env scripts/shot-images.mjs",
+    "shots:busca": "node --env-file=.env scripts/shot-search.mjs",
+    "shots:pastas": "node --env-file=.env.local --env-file=.env scripts/shot-folders.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
@@ -56,6 +59,7 @@
     "react-force-graph-2d": "^1.29.1",
     "react-hook-form": "^7.86.0",
     "server-only": "^0.0.1",
+    "sharp": "^0.35.3",
     "tailwind-merge": "^3.6.0",
     "unpdf": "^1.8.1",
     "uuid": "^14.0.2",

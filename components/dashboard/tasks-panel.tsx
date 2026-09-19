@@ -106,8 +106,11 @@ export function TasksPanel({
   now,
   registerRefresh,
   onUpload,
+  focusJobId = null,
 }: {
   initial: AiJobItem[];
+  /** Vindo da Entrada: abre a tela cheia já no detalhe desta tarefa. */
+  focusJobId?: string | null;
   renderedAt: number;
   now: number;
   /** Entrega o revalidador ao shell, para um upload recém-concluído aparecer
@@ -128,7 +131,17 @@ export function TasksPanel({
   // item do histórico, mas uma queda de rede nesse segundo request não pode
   // ressuscitar visualmente uma tarefa que o servidor já excluiu.
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
-  const [expanded, setExpanded] = useState(false);
+  // Quem chega de uma notificação é uma navegação nova: o painel monta com o
+  // id e abre direto. O shell tira o `?tarefa=` da URL em seguida, para
+  // recarregar a página não reabrir a tela cheia.
+  const [focusJob] = useState(focusJobId);
+  const [expanded, setExpanded] = useState(focusJobId !== null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearFailure, setClearFailure] = useState<{
+    message: string;
+    code: string | null;
+  } | null>(null);
   const visibleItems = items.filter((job) => !deletedIds.has(job.id));
 
   const handleDeleted = useCallback(
@@ -147,12 +160,44 @@ export function TasksPanel({
 
   const pinned = visibleItems.filter(isPinnedJob);
   const history = visibleItems.filter((job) => !isPinnedJob(job));
+  const completedCount = history.filter((job) => job.status === "succeeded").length;
 
   const clock = now || renderedAt;
   const quiet =
     pinned.length === 0 &&
     history.length > 0 &&
     lastActivity(history) < clock - STALE_AFTER_MS;
+
+  async function clearSucceededJobs() {
+    if (clearing) return;
+
+    setClearing(true);
+    setClearFailure(null);
+
+    try {
+      const response = await fetch("/api/jobs", { method: "DELETE" });
+      if (!response.ok) {
+        const failure = await readApiFailure(
+          response,
+          "Não foi possível limpar as tarefas concluídas."
+        );
+        setClearFailure({ message: failure.message, code: failure.code });
+        return;
+      }
+
+      const { deletedIds: ids } = (await response.json()) as { deletedIds: string[] };
+      setDeletedIds((current) => new Set([...current, ...ids]));
+      setConfirmingClear(false);
+      await refresh();
+    } catch {
+      setClearFailure({
+        message: "Erro de conexão. Tente novamente.",
+        code: null,
+      });
+    } finally {
+      setClearing(false);
+    }
+  }
 
   return (
     <>
@@ -162,15 +207,31 @@ export function TasksPanel({
       status={status}
       isRefreshing={isRefreshing}
       action={
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          title="Tela cheia — o histórico inteiro, com o detalhe de cada tarefa"
-          className="-mr-1.5 flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
-        >
-          <Maximize2 className="size-3.5" aria-hidden="true" />
-          <span className="sr-only">Abrir Tarefas em tela cheia</span>
-        </button>
+        <div className="-mr-1.5 flex items-center gap-0.5">
+          {completedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setClearFailure(null);
+                setConfirmingClear(true);
+              }}
+              title="Limpar tarefas concluídas do histórico"
+              className="flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-error/10 hover:text-error pointer-coarse:size-11"
+            >
+              <Trash2 className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">Limpar tarefas concluídas</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            title="Tela cheia — o histórico inteiro, com o detalhe de cada tarefa"
+            className="flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
+          >
+            <Maximize2 className="size-3.5" aria-hidden="true" />
+            <span className="sr-only">Abrir Tarefas em tela cheia</span>
+          </button>
+        </div>
       }
     >
       {visibleItems.length === 0 ? (
@@ -237,8 +298,39 @@ export function TasksPanel({
       open={expanded}
       onClose={() => setExpanded(false)}
       pinned={pinned}
-      live={items}
+      live={visibleItems}
       now={clock}
+      initialJobId={focusJob}
+      hasCompleted={completedCount > 0}
+      onClearCompleted={() => {
+        setClearFailure(null);
+        setConfirmingClear(true);
+      }}
+    />
+
+    <ConfirmDialog
+      open={confirmingClear}
+      title="Limpar tarefas concluídas?"
+      subject="Todas as tarefas concluídas serão removidas do histórico."
+      description="Apenas o registro da atividade será removido. Notas, arquivos, resumos e tags continuam na sua conta."
+      confirmLabel="Limpar histórico"
+      busyLabel="Limpando…"
+      busy={clearing}
+      error={
+        clearFailure ? (
+          <>
+            <span>{clearFailure.message}</span>
+            {clearFailure.code && (
+              <ErrorReport code={clearFailure.code} route="/api/jobs" compact />
+            )}
+          </>
+        ) : undefined
+      }
+      onOpenChange={(open) => {
+        setConfirmingClear(open);
+        if (!open) setClearFailure(null);
+      }}
+      onConfirm={() => void clearSucceededJobs()}
     />
     </>
   );

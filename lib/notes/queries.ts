@@ -10,6 +10,7 @@ import {
   inArray,
   isNull,
   ne,
+  notInArray,
   or,
   sql,
   type SQL,
@@ -33,6 +34,8 @@ import {
   type NotePreview,
   type NoteListResult,
 } from "@/lib/notes/list";
+import type { NoteDeletionImpact } from "@/lib/notes/deletion-impact";
+import { likeContains } from "@/lib/utils";
 
 export interface EditableNote {
   id: string;
@@ -54,6 +57,138 @@ export interface EditableNote {
    * janela": o vínculo mora em `attachments.note_id`, do lado do arquivo.
    */
   attachment: { id: string; filename: string; type: string } | null;
+}
+
+/**
+ * As notas vivas de uma pasta.
+ *
+ * O critério é o mesmo da contagem em `listFolders` — nota ativa e fora da
+ * Agenda — porque é esse número que a pessoa vê antes de decidir. Qualquer
+ * divergência aqui faria o aviso prometer uma coisa e a exclusão fazer outra.
+ */
+export async function listFolderNoteIds(
+  userId: string,
+  folderId: string
+): Promise<string[]> {
+  const rows = await db
+    .select({ id: notes.id })
+    .from(noteFolders)
+    .innerJoin(
+      notes,
+      and(
+        eq(notes.id, noteFolders.noteId),
+        eq(notes.userId, userId),
+        ne(notes.status, "deleted"),
+        isNull(notes.taskDate)
+      )
+    )
+    .where(and(eq(noteFolders.folderId, folderId), eq(noteFolders.userId, userId)));
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Tags das notas que podem ser apagadas pelo acervo e o impacto que remover
+ * cada tag teria fora da seleção. A posse é aplicada às notas e às tags: IDs
+ * forjados simplesmente não entram no resultado.
+ */
+export async function getNoteDeletionImpact(
+  userId: string,
+  selectedNoteIds: string[]
+): Promise<NoteDeletionImpact> {
+  const [relatedTags, attachmentRows] = await Promise.all([
+    db
+      .selectDistinct({
+        id: tags.id,
+        name: tags.name,
+        color: tags.color,
+      })
+      .from(noteTags)
+      .innerJoin(
+        notes,
+        and(
+          eq(notes.id, noteTags.noteId),
+          eq(notes.userId, userId),
+          ne(notes.status, "deleted"),
+          isNull(notes.taskDate)
+        )
+      )
+      .innerJoin(
+        tags,
+        and(eq(tags.id, noteTags.tagId), eq(tags.userId, userId))
+      )
+      .where(inArray(noteTags.noteId, selectedNoteIds))
+      .orderBy(asc(tags.name)),
+    db
+      .select({ count: count(attachments.id) })
+      .from(attachments)
+      .innerJoin(
+        notes,
+        and(
+          eq(notes.id, attachments.noteId),
+          eq(notes.userId, userId),
+          ne(notes.status, "deleted"),
+          isNull(notes.taskDate)
+        )
+      )
+      .where(
+        and(
+          eq(attachments.userId, userId),
+          inArray(attachments.noteId, selectedNoteIds)
+        )
+      ),
+  ]);
+  const attachmentCount = attachmentRows[0]?.count ?? 0;
+
+  if (relatedTags.length === 0) return { attachmentCount, tags: [] };
+
+  const tagIds = relatedTags.map((tag) => tag.id);
+  const otherConditions = and(
+    inArray(noteTags.tagId, tagIds),
+    eq(notes.userId, userId),
+    ne(notes.status, "deleted"),
+    // Inclui inclusive uma lista da Agenda: a tag é global e desapareceria
+    // dela também, então esconder esse uso tornaria a confirmação enganosa.
+    notInArray(notes.id, selectedNoteIds)
+  );
+
+  const [counts, previews] = await Promise.all([
+    db
+      .select({
+        tagId: noteTags.tagId,
+        count: count(notes.id),
+      })
+      .from(noteTags)
+      .innerJoin(notes, eq(notes.id, noteTags.noteId))
+      .where(otherConditions)
+      .groupBy(noteTags.tagId),
+    db
+      .select({
+        tagId: noteTags.tagId,
+        id: notes.id,
+        title: notes.title,
+      })
+      .from(noteTags)
+      .innerJoin(notes, eq(notes.id, noteTags.noteId))
+      .where(otherConditions)
+      .orderBy(desc(notes.updatedAt)),
+  ]);
+
+  const countByTag = new Map(counts.map((row) => [row.tagId, row.count]));
+  const previewsByTag = new Map<string, Array<{ id: string; title: string }>>();
+  for (const note of previews) {
+    const current = previewsByTag.get(note.tagId) ?? [];
+    if (current.length < 3) current.push({ id: note.id, title: note.title });
+    previewsByTag.set(note.tagId, current);
+  }
+
+  return {
+    attachmentCount,
+    tags: relatedTags.map((tag) => ({
+      ...tag,
+      otherNoteCount: countByTag.get(tag.id) ?? 0,
+      otherNotes: previewsByTag.get(tag.id) ?? [],
+    })),
+  };
 }
 
 /**
@@ -95,7 +230,7 @@ export async function listOwnedNotes(
     conditions.push(
       or(
         sql`${notes.searchVector} @@ ${tsQuery}`,
-        ilike(notes.title, `%${query}%`)
+        ilike(notes.title, likeContains(query))
       )!
     );
   }

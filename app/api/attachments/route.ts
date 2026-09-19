@@ -21,6 +21,12 @@ import {
 import { getAiPreferences } from "@/lib/ai/preferences";
 import { hasAudioTranscriptionProvider } from "@/lib/ai/transcribe-audio";
 import { processAudioTranscription } from "@/lib/ai/process-audio-transcription";
+import {
+  hasImageReadingProvider,
+  imageReadingSetupHint,
+  readImageSize,
+} from "@/lib/ai/read-image";
+import { processImageReading } from "@/lib/ai/process-image-reading";
 import { redactAndTrim } from "@/lib/errors/redact";
 import { reportError } from "@/lib/errors/report";
 import { rateLimit } from "@/lib/rate-limit";
@@ -32,6 +38,10 @@ import {
   type AttachmentListSort,
 } from "@/lib/attachments/list";
 import { listOwnedAttachments } from "@/lib/attachments/queries";
+import {
+  deleteOwnedAttachments,
+  MAX_ATTACHMENTS_PER_DELETE,
+} from "@/lib/attachments/delete";
 import { matchesSignature, readSignature } from "@/lib/validations/file-signature";
 
 const BUCKET = "files";
@@ -50,9 +60,10 @@ const listAttachmentsSchema = z.object({
 // que entendem esta configuração podem estender o limite da rota para ele.
 export const maxDuration = 75;
 
-type AttachmentType = "pdf" | "document" | "audio";
+type AttachmentType = "pdf" | "document" | "audio" | "image";
 
-// Whitelist de MIME — precisa bater com allowed_mime_types do bucket files.
+// Whitelist de MIME — precisa bater com allowed_mime_types do bucket files
+// (0003 e, para imagem, 0030). SVG e HEIC ficam de fora: ver 0030.
 const MIME_TO_TYPE: Record<string, AttachmentType> = {
   "application/pdf": "pdf",
   "text/plain": "document",
@@ -63,6 +74,10 @@ const MIME_TO_TYPE: Record<string, AttachmentType> = {
   "audio/wav": "audio",
   "audio/mp4": "audio",
   "audio/x-m4a": "audio",
+  "image/jpeg": "image",
+  "image/png": "image",
+  "image/webp": "image",
+  "image/gif": "image",
 };
 
 /**
@@ -116,6 +131,114 @@ export async function GET(request: Request) {
   }
 }
 
+const deleteAttachmentsSchema = z.object({
+  ids: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(MAX_ATTACHMENTS_PER_DELETE)
+    .refine((ids) => new Set(ids).size === ids.length, "IDs repetidos."),
+});
+
+/**
+ * Apaga vários arquivos de uma vez — a seleção em massa do acervo.
+ *
+ * Ids de outra conta ou já apagados não casam com a query e ficam fora de
+ * `deleted`: a resposta diz quantos saíram de fato, e o cliente tira da tela
+ * todos os que pediu (os que não existem também não deveriam estar lá).
+ */
+export async function DELETE(request: Request) {
+  const supabase = await createClient();
+  let userId: string | null = null;
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+    userId = user.id;
+
+    const parsed = deleteAttachmentsSchema.safeParse(
+      await request.json().catch(() => null)
+    );
+    if (!parsed.success) return errorResponse(400, "Seleção inválida.");
+
+    // Mesmo balde da exclusão individual: um lote não abre um teto à parte.
+    const limit = await rateLimit({
+      key: `attachments:delete:${user.id}`,
+      limit: 60,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas exclusões seguidas. Aguarde um pouco.");
+    }
+
+    const removed = await deleteOwnedAttachments(supabase, user.id, parsed.data.ids, request);
+    return NextResponse.json({ ok: true, deleted: removed.length });
+  } catch (error) {
+    const code = await logServerError("DELETE /api/attachments", error, { userId }, request);
+    return errorResponse(500, "Não foi possível apagar os arquivos.", code);
+  }
+}
+
+/**
+ * O que muda entre os dois tipos que a IA lê depois da resposta. O fluxo é um
+ * só; os textos e o worker são de cada um.
+ */
+const DEFERRED_READING = {
+  audio: {
+    ready: hasAudioTranscriptionProvider,
+    setupHint: () =>
+      "Configure GROQ_API_KEY ou OPENAI_API_KEY nesta instância e envie um novo áudio para transcrevê-lo.",
+    fallbackTitle: "Áudio",
+    metadataKey: "transcription",
+    jobKind: "transcribe",
+    pendingContent: "Áudio aguardando transcrição.",
+    waitingContent:
+      "Áudio aguardando a configuração de uma chave de IA para ser transcrito.",
+    runningLabel: "Transcrevendo",
+    waitingLabel: "Transcrição aguardando IA",
+    pendingDetail:
+      "O áudio está guardado; a transcrição e a classificação aparecem nesta nota quando terminarem.",
+  },
+  image: {
+    ready: hasImageReadingProvider,
+    setupHint: imageReadingSetupHint,
+    fallbackTitle: "Imagem",
+    metadataKey: "imageReading",
+    // `extract` existe no enum desde 0004 com este fim: "PDF/imagem -> texto".
+    jobKind: "extract",
+    pendingContent: "Imagem aguardando leitura.",
+    waitingContent:
+      "Imagem guardada. A descrição aparece aqui quando esta instância tiver um modelo de IA que enxerga imagens.",
+    runningLabel: "Lendo",
+    waitingLabel: "Leitura aguardando IA",
+    pendingDetail:
+      "A imagem está guardada; a descrição e o texto que aparece nela chegam a esta nota quando a leitura terminar.",
+  },
+} as const;
+
+/**
+ * O anexo como o cliente pode vê-lo: sem `storage_path` (arrumação interna)
+ * e sem `metadata`. Antes a rota devolvia a linha inteira.
+ */
+function publicAttachment(row: typeof attachments.$inferSelect) {
+  return {
+    id: row.id,
+    noteId: row.noteId,
+    type: row.type,
+    filename: row.filename,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    durationSeconds: row.durationSeconds,
+    createdAt: row.createdAt,
+  };
+}
+
+/** `text/plain;charset=utf-8` → `text/plain`: a whitelist compara o tipo, não os parâmetros. */
+function normalizeMimeType(type: string): string {
+  return type.split(";")[0].trim().toLowerCase();
+}
+
 /** Nome seguro para o storage: minúsculas, sem acento/espaço, extensão preservada. */
 function sanitizeFilename(name: string): string {
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
@@ -143,12 +266,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /** Extrai texto onde dá (txt/md/pdf); demais tipos seguem sem texto. */
-async function extractText(file: File): Promise<string> {
+async function extractText(file: File, mimeType: string): Promise<string> {
   try {
-    if (file.type === "text/plain" || file.type === "text/markdown") {
+    if (mimeType === "text/plain" || mimeType === "text/markdown") {
       return await file.text();
     }
-    if (file.type === "application/pdf") {
+    if (mimeType === "application/pdf") {
       const { extractText: extractPdfText } = await import("unpdf");
       const buffer = new Uint8Array(await file.arrayBuffer());
       const { text } = await withTimeout(
@@ -160,7 +283,7 @@ async function extractText(file: File): Promise<string> {
   } catch (error) {
     logServerError("/api/attachments (extractText)", error);
     // PDF ilegível é erro do arquivo, não do servidor: propaga para virar 422.
-    if (file.type === "application/pdf") {
+    if (mimeType === "application/pdf") {
       throw new PdfReadError("Não foi possível ler o PDF.");
     }
   }
@@ -202,7 +325,11 @@ export async function POST(request: Request) {
       return errorResponse(400, "Envie um arquivo no campo 'file'.");
     }
 
-    const attachmentType = MIME_TO_TYPE[file.type];
+    // O tipo sem parâmetros. O runtime do Bun entrega `text/plain;charset=utf-8`
+    // para o mesmo arquivo que o Node entrega como `text/plain` — comparado
+    // cru, todo .txt e .md voltava 415 com a aplicação rodando no Bun.
+    const mimeType = normalizeMimeType(file.type);
+    const attachmentType = MIME_TO_TYPE[mimeType];
     if (!attachmentType) {
       return errorResponse(415, "Tipo de arquivo não suportado.");
     }
@@ -215,7 +342,7 @@ export async function POST(request: Request) {
 
     // O MIME vem do cliente — confere se o conteúdo bate com o declarado.
     const signature = await readSignature(file);
-    if (!matchesSignature(file.type, signature)) {
+    if (!matchesSignature(mimeType, signature)) {
       return errorResponse(
         400,
         "O conteúdo do arquivo não corresponde ao tipo declarado."
@@ -227,7 +354,7 @@ export async function POST(request: Request) {
     uploadedPath = `${user.id}/${randomUUID()}-${sanitizeFilename(file.name)}`;
     const { error: uploadError } = await supabase.storage
       .from(BUCKET)
-      .upload(uploadedPath, file, { contentType: file.type, upsert: false });
+      .upload(uploadedPath, file, { contentType: mimeType, upsert: false });
     if (uploadError) {
       const code = await logServerError(
         "/api/attachments (storage)",
@@ -239,26 +366,32 @@ export async function POST(request: Request) {
       return errorResponse(500, "Não foi possível salvar o arquivo.", code);
     }
 
-    // Áudio não tem texto até ser transcrito. Criamos o conteúdo primeiro e
-    // deixamos o worker terminar depois da resposta para não prender o envio.
-    if (attachmentType === "audio") {
-      const title = file.name.replace(/\.[^.]+$/, "").slice(0, 200) || "Áudio";
-      const providerReady = hasAudioTranscriptionProvider();
+    // Áudio e imagem não têm texto até a IA ouvir ou olhar. O arquivo e a
+    // nota nascem agora; o trabalho da IA roda depois da resposta, para não
+    // prender a barra de envio. Ver docs/IA.md e docs/IMAGENS.md.
+    if (attachmentType === "audio" || attachmentType === "image") {
+      const deferred = DEFERRED_READING[attachmentType];
+      const providerReady = deferred.ready();
+      const title =
+        file.name.replace(/\.[^.]+$/, "").slice(0, 200) || deferred.fallbackTitle;
+      // Largura e altura, para a janela da lousa nascer na proporção da
+      // imagem. Vão em `attachments.metadata`, que o cliente não lê direto.
+      const imageSize =
+        attachmentType === "image" ? await readImageSize(file) : null;
+
       const [note] = await db
         .insert(notes)
         .values({
           userId: user.id,
           title,
-          content: providerReady
-            ? "Áudio aguardando transcrição."
-            : "Áudio aguardando a configuração de uma chave de IA para ser transcrito.",
+          content: providerReady ? deferred.pendingContent : deferred.waitingContent,
           type: "document",
           source: "user",
           metadata: {
             filename: file.name,
-            mimeType: file.type,
+            mimeType: mimeType,
             sizeBytes: file.size,
-            transcription: providerReady ? "queued" : "waiting_configuration",
+            [deferred.metadataKey]: providerReady ? "queued" : "waiting_configuration",
           },
         })
         .returning();
@@ -271,8 +404,9 @@ export async function POST(request: Request) {
           type: attachmentType,
           storagePath: uploadedPath,
           filename: file.name,
-          mimeType: file.type,
+          mimeType: mimeType,
           sizeBytes: file.size,
+          metadata: imageSize ? { width: imageSize.width, height: imageSize.height } : null,
         })
         .returning();
 
@@ -281,14 +415,12 @@ export async function POST(request: Request) {
         .values({
           userId: user.id,
           noteId: note.id,
-          kind: "transcribe",
+          kind: deferred.jobKind,
           status: providerReady ? "queued" : "waiting_configuration",
           label: providerReady
-            ? `Transcrevendo ${file.name}`
-            : `Transcrição aguardando IA: ${file.name}`,
-          detail: providerReady
-            ? "O áudio está guardado; a transcrição e a classificação aparecem nesta nota quando terminarem."
-            : "Configure GROQ_API_KEY ou OPENAI_API_KEY nesta instância e envie um novo áudio para transcrevê-lo.",
+            ? `${deferred.runningLabel} ${file.name}`
+            : `${deferred.waitingLabel}: ${file.name}`,
+          detail: providerReady ? deferred.pendingDetail : deferred.setupHint(),
         })
         .returning({ id: aiJobs.id });
 
@@ -299,7 +431,7 @@ export async function POST(request: Request) {
         userId: user.id,
         newData: {
           filename: file.name,
-          mimeType: file.type,
+          mimeType: mimeType,
           sizeBytes: file.size,
         },
         request,
@@ -307,21 +439,23 @@ export async function POST(request: Request) {
       await invalidateNoteListCache(user.id);
 
       if (providerReady) {
-        after(async function runAudioTranscription() {
-          await processAudioTranscription({
-            file,
-            filename: file.name,
-            mimeType: file.type,
-            userId: user.id,
-            noteId: note.id,
-            jobId: job.id,
-            request,
-          });
+        const work = {
+          file,
+          filename: file.name,
+          mimeType: mimeType,
+          userId: user.id,
+          noteId: note.id,
+          jobId: job.id,
+          request,
+        };
+        after(async function runDeferredReading() {
+          if (attachmentType === "audio") await processAudioTranscription(work);
+          else await processImageReading(work);
         });
       }
 
       return NextResponse.json(
-        { note, attachment, tags: [], aiClassified: false },
+        { note, attachment: publicAttachment(attachment), tags: [], aiClassified: false },
         { status: 201 }
       );
     }
@@ -329,7 +463,7 @@ export async function POST(request: Request) {
     // 2) Extrai texto e classifica (Groq ou OpenAI se houver chave; stub
     //    caso contrário — ver lib/ai/classify-document.ts).
     const [text, { reasoningEffort }] = await Promise.all([
-      extractText(file),
+      extractText(file, mimeType),
       getAiPreferences(user.id),
     ]);
     const classifyStartedAt = new Date();
@@ -340,7 +474,7 @@ export async function POST(request: Request) {
       provider: classifyProvider,
       model: classifyModel,
     } = await classifyDocument(
-      { text, filename: file.name, mimeType: file.type },
+      { text, filename: file.name, mimeType: mimeType },
       { reasoningEffort }
     );
     const classifyFinishedAt = new Date();
@@ -378,7 +512,7 @@ export async function POST(request: Request) {
         context: {
           provider: classifyFailure.provider,
           model: classifyFailure.model,
-          mimeType: file.type,
+          mimeType: mimeType,
           sizeBytes: file.size,
           hadText: text.length > 0,
         },
@@ -397,7 +531,7 @@ export async function POST(request: Request) {
         source: usedAi ? "ai" : "user",
         metadata: {
           filename: file.name,
-          mimeType: file.type,
+          mimeType: mimeType,
           sizeBytes: file.size,
           aiClassified: usedAi,
         },
@@ -461,7 +595,7 @@ export async function POST(request: Request) {
         type: attachmentType,
         storagePath: uploadedPath,
         filename: file.name,
-        mimeType: file.type,
+        mimeType: mimeType,
         sizeBytes: file.size,
       })
       .returning();
@@ -474,7 +608,7 @@ export async function POST(request: Request) {
       // Só metadados — nunca o conteúdo do arquivo.
       newData: {
         filename: file.name,
-        mimeType: file.type,
+        mimeType: mimeType,
         sizeBytes: file.size,
       },
       request,
@@ -483,7 +617,7 @@ export async function POST(request: Request) {
     await invalidateNoteListCache(user.id);
 
     return NextResponse.json(
-      { note, attachment, tags: allTags, aiClassified: usedAi },
+      { note, attachment: publicAttachment(attachment), tags: allTags, aiClassified: usedAi },
       { status: 201 }
     );
   } catch (error) {

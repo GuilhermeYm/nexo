@@ -12,6 +12,7 @@ import {
   Pin,
   Sparkles,
   Tags,
+  Trash2,
   WandSparkles,
   X,
   type LucideIcon,
@@ -209,14 +210,26 @@ export function TasksFullscreen({
   pinned,
   live,
   now,
+  initialJobId = null,
+  hasCompleted = false,
+  onClearCompleted,
 }: {
   open: boolean;
   onClose: () => void;
+  /**
+   * A tarefa que a Entrada mandou abrir (`/dashboard?tarefa=`). Vale mesmo
+   * fora da primeira página do histórico — o detalhe busca a tarefa pelo id.
+   */
+  initialJobId?: string | null;
   /** As fixadas, direto do painel — já vivas. */
   pinned: AiJobItem[];
   /** A lista viva do painel. Muda de identidade a cada evento do Realtime. */
   live: AiJobItem[];
   now: number;
+  /** Mantém a ação disponível enquanto a primeira página do histórico carrega. */
+  hasCompleted?: boolean;
+  /** Abre a confirmação compartilhada com o painel compacto. */
+  onClearCompleted?: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -230,9 +243,10 @@ export function TasksFullscreen({
   const [page, setPage] = useState<LoadedPage>({ key: null, jobs: [], cursor: null });
   const [loadingMore, setLoadingMore] = useState(false);
   const [failedKey, setFailedKey] = useState<string | null>(null);
-  const [chosenId, setChosenId] = useState<string | null>(null);
-  // No celular o detalhe ocupa a tela; no desktop fica ao lado.
-  const [showDetailOnMobile, setShowDetailOnMobile] = useState(false);
+  const [chosenId, setChosenId] = useState<string | null>(initialJobId);
+  // No celular o detalhe ocupa a tela; no desktop fica ao lado. Quem chega
+  // pela Entrada veio ver uma tarefa: começa no detalhe dela.
+  const [showDetailOnMobile, setShowDetailOnMobile] = useState(initialJobId !== null);
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const request = useRef<AbortController | null>(null);
@@ -358,7 +372,7 @@ export function TasksFullscreen({
   // No desktop a tela nunca começa com metade vazia: sem escolha, o detalhe
   // mostra a primeira tarefa. No celular a lista vem primeiro.
   const selectedId =
-    chosenId && ordered.some((job) => job.id === chosenId)
+    chosenId && (chosenId === initialJobId || ordered.some((job) => job.id === chosenId))
       ? chosenId
       : isDesktop
         ? (ordered[0]?.id ?? null)
@@ -422,6 +436,8 @@ export function TasksFullscreen({
   }
 
   const empty = !firstLoading && !listFailed && ordered.length === 0;
+  const canClearCompleted =
+    hasCompleted || history.some((job) => job.status === "succeeded");
   // Uma parada de Tab para a lista inteira; as setas andam dentro dela.
   const tabbableId = selectedId ?? ordered[0]?.id ?? null;
 
@@ -447,14 +463,27 @@ export function TasksFullscreen({
                 Tudo o que a Nexo leu, classificou e transcreveu — e como.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={close}
-              className="flex size-9 shrink-0 items-center justify-center rounded-xl text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
-            >
-              <X className="size-[18px]" aria-hidden="true" />
-              <span className="sr-only">Fechar a tela cheia de Tarefas</span>
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              {onClearCompleted && canClearCompleted && (
+                <button
+                  type="button"
+                  onClick={onClearCompleted}
+                  title="Limpar tarefas concluídas do histórico"
+                  className="flex size-9 items-center justify-center rounded-xl text-subtle-foreground transition-colors duration-150 hover:bg-error/10 hover:text-error pointer-coarse:size-11"
+                >
+                  <Trash2 className="size-[18px]" aria-hidden="true" />
+                  <span className="sr-only">Limpar tarefas concluídas</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={close}
+                className="flex size-9 items-center justify-center rounded-xl text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
+              >
+                <X className="size-[18px]" aria-hidden="true" />
+                <span className="sr-only">Fechar a tela cheia de Tarefas</span>
+              </button>
+            </div>
           </header>
 
           <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(19rem,25rem)_minmax(0,1fr)]">

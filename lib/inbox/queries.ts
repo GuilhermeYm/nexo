@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
+import { NOTIFICATIONS_LIMIT } from "@/lib/inbox/limits";
 
 /**
  * Leituras da Entrada (notificações).
@@ -15,7 +16,6 @@ import { notifications } from "@/lib/db/schema";
 
 export interface NotificationItem {
   id: string;
-  type: "system" | "user";
   title: string;
   body: string | null;
   metadata: unknown;
@@ -25,9 +25,9 @@ export interface NotificationItem {
 }
 
 /**
- * Lista todas as notificações do usuário, das mais recentes para as mais
- * antigas. Não filtra por lida/não lida — a página mostra tudo e deixa o
- * cliente agrupar visualmente.
+ * As notificações do usuário, das mais recentes para as mais antigas, até
+ * `NOTIFICATIONS_LIMIT`. Não filtra por lida/não lida — a página mostra tudo
+ * e deixa o cliente agrupar visualmente.
  */
 export async function listNotifications(
   userId: string
@@ -35,7 +35,6 @@ export async function listNotifications(
   return db
     .select({
       id: notifications.id,
-      type: notifications.type,
       title: notifications.title,
       body: notifications.body,
       metadata: notifications.metadata,
@@ -45,7 +44,8 @@ export async function listNotifications(
     })
     .from(notifications)
     .where(eq(notifications.userId, userId))
-    .orderBy(desc(notifications.createdAt));
+    .orderBy(desc(notifications.createdAt), desc(notifications.id))
+    .limit(NOTIFICATIONS_LIMIT);
 }
 
 /**
@@ -80,6 +80,41 @@ export async function markNotificationRead(
     .returning({ id: notifications.id });
 
   return updated !== undefined;
+}
+
+/**
+ * Marca várias como lidas ou não lidas. Devolve quantas eram do usuário — um
+ * id de outra conta simplesmente não casa.
+ */
+export async function markNotificationsRead(
+  userId: string,
+  ids: string[],
+  read: boolean
+): Promise<number> {
+  const updated = await db
+    .update(notifications)
+    .set({ read, readAt: read ? new Date() : null })
+    .where(and(eq(notifications.userId, userId), inArray(notifications.id, ids)))
+    .returning({ id: notifications.id });
+
+  return updated.length;
+}
+
+/**
+ * Apaga várias. O `DELETE` continua revogado de `authenticated` (0011): o
+ * PostgREST não apaga nada, só esta função, que entra como `postgres` e
+ * filtra pelo `user_id` do token.
+ */
+export async function deleteNotifications(
+  userId: string,
+  ids: string[]
+): Promise<number> {
+  const removed = await db
+    .delete(notifications)
+    .where(and(eq(notifications.userId, userId), inArray(notifications.id, ids)))
+    .returning({ id: notifications.id });
+
+  return removed.length;
 }
 
 /**

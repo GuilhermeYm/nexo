@@ -8,7 +8,15 @@
  *
  *   - a trigger `handle_new_user` cria a notificação de boas-vindas: toda
  *     conta nova nasce com a Entrada ocupada;
- *   - marcar como lida e desmarcar vão para o Postgres, não só para a tela;
+ *   - a trigger de `ai_jobs` (0031) avisa o fim das tarefas — e cala nos dois
+ *     casos em que deve calar (leitura de nota que deu certo, classificação
+ *     sem chave de IA);
+ *   - o número sobre o ícone da Entrada sobe sozinho, pelo Realtime;
+ *   - "Ver em Tarefas" abre a tela cheia no detalhe daquela tarefa, marca o
+ *     aviso como lido e tira o `?tarefa=` da URL;
+ *   - apagar a tarefa falha leva o aviso dela junto;
+ *   - marcar como lida e desmarcar, uma a uma e em lote, vão para o
+ *     Postgres, não só para a tela; apagar em lote também;
  *   - "marcar todas" zera o contador de não lidas;
  *   - **e o cliente não escreve na tabela.** Esta última parte é a razão de
  *     este roteiro existir: a interface fica idêntica se a RLS estiver
@@ -127,14 +135,40 @@ async function main() {
       welcome.map((row) => `${row.type}: ${row.title}`).join(", ") || "nenhuma"
     );
 
-    // Mais duas, para a lista ter o que mostrar e o "marcar todas" ter serviço.
-    await sql.query(
-      `insert into notifications (user_id, type, title, body)
-       values ($1, 'system', 'Seu plano continua Gratuito',
-               'Você usou 12 das 50 capturas deste mês.'),
-              ($1, 'user', 'Alguém compartilhou uma lousa com você',
-               'Ainda não dá para abrir — os compartilhamentos chegam em breve.')`,
+    // ---- a trigger de fim de tarefa (0031) ----
+    //
+    // Direto no banco, como o worker faz: `ai_jobs` não aceita escrita do
+    // cliente. Quatro tarefas, dois avisos — as outras duas são os silêncios.
+    async function insertJob(kind, status, label, extra = {}) {
+      const { rows } = await sql.query(
+        `insert into ai_jobs (user_id, kind, status, label, detail, error, error_code)
+         values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+        [userId, kind, status, label, extra.detail ?? null, extra.error ?? null, extra.errorCode ?? null]
+      );
+      return rows[0].id;
+    }
+    await insertJob("summarize", "failed", "Ler “Teste QA”", {
+      detail: "Não conseguiu depois de 3 tentativas.",
+      error: "timeout",
+    });
+    await insertJob("transcribe", "succeeded", "Transcreveu reuniao.mp3", {
+      detail: "12 min de áudio",
+    });
+    await insertJob("summarize", "succeeded", "Leu “Outra nota”");
+    await insertJob("classify", "failed", "Não conseguiu classificar a.pdf");
+
+    const { rows: jobNotices } = await sql.query(
+      `select title, metadata->>'href' as href from notifications
+        where user_id = $1 and metadata->>'kind' = 'job' order by title`,
       [userId]
+    );
+    check(
+      "a falha e a conclusão viram aviso; a leitura certa e a classificação sem chave, não",
+      jobNotices.length === 2 &&
+        jobNotices.some((row) => row.title === "Leitura de nota falhou") &&
+        jobNotices.some((row) => row.title === "Transcrição concluída") &&
+        jobNotices.every((row) => row.href?.startsWith("/dashboard?tarefa=")),
+      jobNotices.map((row) => row.title).join(", ") || "nenhum"
     );
 
     browser = await chromium.launch({ executablePath: findChrome() });
@@ -163,13 +197,31 @@ async function main() {
     // — e foi ele que derrubava a página inteira enquanto a tabela não
     // existia, porque o `await` dele está no `Promise.all` que a página espera.
     await page.waitForSelector("a:has-text('Entrada')", { timeout: 30000 });
-    const badge = await page.textContent("a:has-text('Entrada')");
+    const entrada = page.locator("nav a:has-text('Entrada')");
+    const badge = await entrada.textContent();
     check(
-      "o dashboard carrega e o trilho mostra as não lidas",
-      (badge ?? "").includes("3"),
+      "o dashboard carrega e o ícone da Entrada mostra as não lidas",
+      (badge ?? "").includes("3 não lidas"),
       (badge ?? "").replace(/\s+/g, " ").trim()
     );
+
+    // O número sobe sem recarregar: uma tarefa termina com o dashboard aberto.
+    const organizeId = await insertJob("organize", "failed", "Organizando as notas em pastas", {
+      detail: "As pastas ficaram como estavam.",
+      error: "timeout",
+    });
+    const live = await entrada
+      .filter({ hasText: "4 não lidas" })
+      .waitFor({ timeout: 20000 })
+      .then(() => true)
+      .catch(() => false);
+    check("o número sobre o ícone sobe sozinho, pelo Realtime", live);
+
+    // Recolhido, o trilho só tem o ícone — e o número continua lá.
+    await page.keyboard.press("Control+Shift+B");
+    await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/01-dashboard-com-badge-light.png` });
+    await page.keyboard.press("Control+Shift+B");
 
     await page.goto(`${BASE}/dashboard/entrada`, { waitUntil: "networkidle" });
     await page.addStyleTag({ content: HIDE_DEV_BADGE });
@@ -177,28 +229,118 @@ async function main() {
     await page.waitForTimeout(600);
 
     const listed = await page.$$eval(ITEM, (nodes) => nodes.length);
-    check("a Entrada lista as três notificações", listed === 3, `${listed}`);
+    check("a Entrada lista as quatro notificações", listed === 4, `${listed}`);
     await page.screenshot({ path: `${OUT}/02-entrada-light.png` });
 
     // ---- marcar como lida ----
     await page.click(`${ITEM} >> nth=0`);
     check(
       "tocar numa notificação a marca como lida no banco",
-      (await waitForUnread(sql, userId, 2)) === 2
+      (await waitForUnread(sql, userId, 3)) === 3
     );
 
     await page.click(`${ITEM} >> nth=0`);
     check(
       "e tocar de novo a devolve para não lida",
-      (await waitForUnread(sql, userId, 3)) === 3
+      (await waitForUnread(sql, userId, 4)) === 4
     );
 
+    // ---- da Entrada para Tarefas ----
+    await page
+      .locator("li", { hasText: "Leitura de nota falhou" })
+      .locator("a:has-text('Ver em Tarefas')")
+      .click();
+    const detailOpened = await page
+      .locator("dialog[open]", { hasText: "Ler “Teste QA”" })
+      .waitFor({ timeout: 20000 })
+      .then(() => true)
+      .catch(() => false);
+    await page.waitForTimeout(600);
+    check(
+      "\"Ver em Tarefas\" abre a tela cheia no detalhe da tarefa",
+      detailOpened,
+      page.url()
+    );
+    check(
+      "e tira o ?tarefa= da URL",
+      new URL(page.url()).search === "",
+      page.url()
+    );
+    check("e marca o aviso como lido", (await waitForUnread(sql, userId, 3)) === 3);
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.screenshot({ path: `${OUT}/03-tarefas-pela-entrada-light.png` });
+    await page.keyboard.press("Escape");
+
+    // Apagar a tarefa falha leva o aviso junto — ele apontaria para o nada.
+    const jobDelete = await page.evaluate(async (id) => {
+      const response = await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+      return response.status;
+    }, organizeId);
+    const { rows: orphan } = await sql.query(
+      "select count(*)::int as total from notifications where user_id = $1 and metadata->>'jobId' = $2",
+      [userId, organizeId]
+    );
+    check(
+      "apagar a tarefa falha apaga o aviso dela",
+      jobDelete === 200 && orphan[0].total === 0,
+      `DELETE ${jobDelete}, ${orphan[0].total} aviso(s)`
+    );
+
+    // ---- seleção em lote ----
+    await page.goto(`${BASE}/dashboard/entrada`, { waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector(ITEM, { timeout: 20000 });
+    await page.click("button:has-text('Selecionar')");
+    await page.click("button:has-text('Selecionar todas')");
+    await page.click("button:has-text('Marcar como lida')");
+    check(
+      "selecionar todas e marcar como lida vai para o banco",
+      (await waitForUnread(sql, userId, 0)) === 0
+    );
+
+    await page.click("li label >> nth=0");
+    await page.click("button:has-text('Não lida')");
+    check(
+      "e marcar uma como não lida também",
+      (await waitForUnread(sql, userId, 1)) === 1
+    );
+
+    await page.click("li label >> nth=0");
+    await page.click("li label >> nth=1");
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}/04-selecao-light.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}/04-selecao-mobile-light.png` });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.click("button:has-text('Apagar')");
+    await page.click("dialog[open] button:has-text('Apagar notificações')");
+    await page.locator("dialog[open]").waitFor({ state: "detached", timeout: 10000 }).catch(() => {});
+    const { rows: remaining } = await sql.query(
+      "select count(*)::int as total from notifications where user_id = $1",
+      [userId]
+    );
+    check(
+      "apagar as selecionadas tira as duas do banco",
+      remaining[0].total === 1,
+      `${remaining[0].total} restante(s)`
+    );
+    await page.click("button:has-text('Concluir')");
+
+    // ---- marcar todas ----
+    await sql.query(
+      "update notifications set read = false, read_at = null where user_id = $1",
+      [userId]
+    );
+    await page.reload({ waitUntil: "networkidle" });
     await page.click("button:has-text('Marcar todas como lidas')");
     check(
       "\"marcar todas\" zera o contador",
       (await waitForUnread(sql, userId, 0)) === 0
     );
-    await page.screenshot({ path: `${OUT}/03-todas-lidas-light.png` });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.screenshot({ path: `${OUT}/05-todas-lidas-light.png` });
 
     // ---- o cliente não escreve na tabela ----
     //
@@ -222,7 +364,7 @@ async function main() {
     check(
       "a RLS deixa a pessoa ler só as próprias",
       Array.isArray(readable) &&
-        readable.length === 3 &&
+        readable.length === 1 &&
         readable.every((row) => row.user_id === userId),
       `${readable?.length ?? 0} linha(s)`
     );
@@ -240,8 +382,10 @@ async function main() {
       .from("notifications")
       .delete({ count: "exact" })
       .eq("id", readable?.[0]?.id ?? "00000000-0000-0000-0000-000000000000");
+    // Apagar existe, mas pela rota (`DELETE /api/notifications`), que filtra
+    // pelo token. O PostgREST continua sem `DELETE` (0011, 0031).
     check(
-      "nem apagar as próprias",
+      "nem apagar as próprias pelo PostgREST",
       Boolean(deleteError) || deleted === 0,
       deleteError?.message ?? `${deleted} apagada(s)`
     );
@@ -300,7 +444,7 @@ async function main() {
       document.documentElement.setAttribute("data-theme", "dark");
     });
     await page.waitForTimeout(400);
-    await page.screenshot({ path: `${OUT}/04-entrada-escuro.png` });
+    await page.screenshot({ path: `${OUT}/06-entrada-escuro.png` });
 
     console.log(`\n${results.join("\n")}`);
     const consoleProblems = [...new Set(problems.filter((p) => p.includes(": ")))];

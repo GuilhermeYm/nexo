@@ -41,6 +41,7 @@ const EXPECTED_TABLES = [
   "profiles",
   "tags",
   "workspace_connections",
+  "workspace_board_marks",
   "workspace_windows",
   "workspaces",
 ];
@@ -137,10 +138,20 @@ const SERVER_ONLY_WRITES = [
   // PostgREST apagaria a fronteira entre o que a pessoa e a IA decidiram.
   { table: "folders", privileges: ["INSERT", "UPDATE", "DELETE"] },
   { table: "note_folders", privileges: ["INSERT", "UPDATE", "DELETE"] },
+  // Desenhos passam pela rota para validar pontos, teto por lousa e rate
+  // limit. O cliente só precisa de SELECT para receber o Realtime.
+  { table: "workspace_board_marks", privileges: ["INSERT", "UPDATE", "DELETE"] },
 ];
 
 /** Funções internas que nenhuma rota chama por RPC. */
-const PRIVATE_FUNCTIONS = ["handle_new_user", "rls_auto_enable", "ai_limit_digest"];
+const PRIVATE_FUNCTIONS = [
+  "handle_new_user",
+  "rls_auto_enable",
+  "ai_limit_digest",
+  "enforce_board_marks_cap",
+  "notify_ai_job_outcome",
+  "forget_ai_job_notifications",
+];
 
 async function main() {
   const sql = new pg.Client({

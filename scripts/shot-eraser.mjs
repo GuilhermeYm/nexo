@@ -313,6 +313,10 @@ async function main() {
     await page.screenshot({ path: `${OUT}/05-apagar-tudo-armado-light.png` });
 
     await page.click('button:has-text("Apagar mesmo")');
+    // O cartão do Desfazer vive 3 s — e para enquanto o ponteiro está nele.
+    // As conferências abaixo levam mais que isso; o ponteiro fica no cartão,
+    // como ficaria o de quem está lendo.
+    await page.hover('[role="status"]:has(button:has-text("Desfazer"))');
     check("a lousa esvazia", (await waitForWindowCount(sql, userId, 0)) === 0);
     check(
       "e nenhuma nota foi embora com ela",

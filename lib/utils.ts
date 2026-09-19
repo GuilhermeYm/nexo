@@ -33,3 +33,11 @@ export function formatBytes(bytes: number | null): string {
 
   return `${rounded.toLocaleString("pt-BR")} ${units[unit]}`;
 }
+
+/**
+ * `%texto%` para um `ilike` de "contém", com `%`, `_` e `\` do que a pessoa
+ * digitou tratados como texto — sem isso, buscar `%` casa com tudo.
+ */
+export function likeContains(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+}

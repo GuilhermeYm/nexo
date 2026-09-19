@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { RecentNote } from "@/lib/dashboard/queries";
 import { db } from "@/lib/db";
 import { noteTags, notes, tags, workspaces } from "@/lib/db/schema";
+import { likeContains } from "@/lib/utils";
 
 /**
  * Leituras da página de Tags (`/dashboard/tags`).
@@ -63,6 +64,42 @@ export async function listTagsWithUsage(
       sql`max(${notes.updatedAt}) desc nulls last`,
       desc(tags.createdAt)
     );
+}
+
+/**
+ * Tags para a busca rápida. Ao digitar somente `#`, as mais usadas vêm
+ * primeiro para revelar o vocabulário que a pessoa já usa.
+ */
+export async function searchTags(
+  userId: string,
+  query: string,
+  limit = 12
+): Promise<TagWithUsage[]> {
+  const trimmed = query.trim();
+  const conditions = [eq(tags.userId, userId)];
+  if (trimmed) {
+    conditions.push(sql`${tags.name} ilike ${likeContains(trimmed)}`);
+  }
+
+  return db
+    .select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      createdAt: tags.createdAt,
+      noteCount: sql<number>`count(${notes.id})::int`,
+      lastUsedAt: sql<Date | null>`max(${notes.updatedAt})`,
+    })
+    .from(tags)
+    .leftJoin(noteTags, eq(noteTags.tagId, tags.id))
+    .leftJoin(
+      notes,
+      and(eq(notes.id, noteTags.noteId), ne(notes.status, "deleted"))
+    )
+    .where(and(...conditions))
+    .groupBy(tags.id)
+    .orderBy(sql`max(${notes.updatedAt}) desc nulls last`, desc(tags.createdAt))
+    .limit(limit);
 }
 
 /**

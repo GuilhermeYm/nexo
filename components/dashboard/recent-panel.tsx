@@ -1,26 +1,18 @@
 "use client";
 
-import { Inbox, LayoutGrid, SquarePen, Sparkles, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { Inbox, Sparkles } from "lucide-react";
+import { useState } from "react";
 
+import {
+  NoteContextMenu,
+  useNoteDeletion,
+  type NoteMenuTarget,
+} from "@/components/dashboard/note-context-menu";
 import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { EmptyState, Panel, QuietFooter } from "@/components/dashboard/panel";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuItemLabel,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
 import { useLiveResource } from "@/hooks/use-live-resource";
 import { useNewItems } from "@/hooks/use-new-items";
 import {
@@ -60,16 +52,10 @@ const TAG_TONE: Record<string, string> = {
  * A marca de autoria não é enfeite: o princípio de produto diz que o que a IA
  * criou é sempre identificável. Então toda linha de origem `ai` carrega o
  * selo, e ele nunca some.
+ *
+ * O menu de cada linha é o `NoteContextMenu`, o mesmo que o trilho usa nas
+ * notas dentro das pastas.
  */
-const WORKSPACE_DOT: Record<string, string> = {
-  "1": "bg-tag-1-foreground",
-  "2": "bg-tag-2-foreground",
-  "3": "bg-tag-3-foreground",
-  "4": "bg-tag-4-foreground",
-  "5": "bg-tag-5-foreground",
-  "6": "bg-tag-6-foreground",
-};
-
 export function RecentPanel({
   initial,
   renderedAt,
@@ -87,11 +73,7 @@ export function RecentPanel({
   /** Abre o rascunho do dashboard. */
   onCreateNote?: () => void;
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [notePendingDelete, setNotePendingDelete] = useState<RecentNote | null>(null);
-  const [deleteAttachments, setDeleteAttachments] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const { items, status, isRefreshing, refresh } = useLiveResource<RecentNote>({
     endpoint: "/api/notes/recent",
     field: "notes",
@@ -99,71 +81,13 @@ export function RecentPanel({
     tables: [...TABLES],
   });
 
+  // Um diálogo de exclusão para a lista inteira, não um por linha.
+  const deletion = useNoteDeletion({ onDeleted: refresh, onError: setError });
+
   const fresh = useNewItems(items, noteId);
   const clock = now || renderedAt;
   const quiet =
     items.length > 0 && lastTouched(items) < clock - STALE_AFTER_MS;
-
-  /**
-   * Abre a nota numa lousa.
-   *
-   * A posição não é escolhida aqui: quem está no dashboard não está olhando
-   * para a lousa e não teria como escolher um ponto que faça sentido. O
-   * servidor encaixa a janela logo abaixo do que já existe lá, e a navegação
-   * leva junto o id para a lousa centralizar nela ao chegar.
-   */
-  const openInWorkspace = useCallback(
-    async (noteId: string, workspaceId: string) => {
-      try {
-        const response = await fetch(`/api/workspaces/${workspaceId}/windows`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ kind: "note", noteId }),
-        });
-        const body = await response.json().catch(() => null);
-
-        // 409 é "já está aberta lá" — não é erro para o usuário, é destino
-        // alcançado. Navegar é a resposta certa.
-        if (!response.ok && response.status !== 409) {
-          setError(body?.error ?? "Não foi possível abrir na lousa.");
-          return;
-        }
-
-        router.push(
-          body?.windowId
-            ? `/workspace/${workspaceId}?focus=${body.windowId}`
-            : `/workspace/${workspaceId}`
-        );
-      } catch {
-        setError("Sem conexão. A nota não foi aberta na lousa.");
-      }
-    },
-    [router]
-  );
-
-  const deleteNote = useCallback(
-    async (noteId: string) => {
-      setDeleting(true);
-      try {
-        const response = await fetch(`/api/notes/${noteId}`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deleteAttachments }),
-        });
-        if (!response.ok) {
-          setError("Não foi possível excluir a nota.");
-          return;
-        }
-        setNotePendingDelete(null);
-      } catch {
-        setError("Sem conexão. A nota não foi excluída.");
-      } finally {
-        setDeleting(false);
-        refresh();
-      }
-    },
-    [deleteAttachments, refresh]
-  );
 
   return (
     <Panel title="Recentes" status={status} isRefreshing={isRefreshing}>
@@ -190,13 +114,8 @@ export function RecentPanel({
                 entranceIndex={index}
                 workspaces={workspaces}
                 onOpen={() => onOpenNote(note.id)}
-                onOpenInWorkspace={(workspaceId) =>
-                  openInWorkspace(note.id, workspaceId)
-                }
-                onDelete={() => {
-                  setDeleteAttachments(false);
-                  setNotePendingDelete(note);
-                }}
+                onDelete={deletion.request}
+                onError={setError}
               />
             ))}
           </ul>
@@ -219,38 +138,7 @@ export function RecentPanel({
           {error}
         </p>
       )}
-      <ConfirmDialog
-        open={notePendingDelete !== null}
-        title="Excluir esta nota?"
-        description="Ela sairá da sua conta, da busca e de todas as lousas em que estiver aberta."
-        subject={notePendingDelete?.title || "Sem título"}
-        confirmLabel="Excluir nota"
-        busyLabel="Excluindo nota…"
-        busy={deleting}
-        error={error ?? undefined}
-        onOpenChange={(open) => {
-          if (!open && !deleting) setNotePendingDelete(null);
-        }}
-        onConfirm={() => {
-          if (notePendingDelete) void deleteNote(notePendingDelete.id);
-        }}
-      >
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={deleteAttachments}
-            onChange={(event) => setDeleteAttachments(event.target.checked)}
-            disabled={deleting}
-            className="mt-0.5 size-4 accent-error"
-          />
-          <span>
-            <span className="block font-medium">Apagar também os arquivos associados</span>
-            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              Essa escolha remove permanentemente os arquivos enviados junto com a nota.
-            </span>
-          </span>
-        </label>
-      </ConfirmDialog>
+      {deletion.dialog}
     </Panel>
   );
 }
@@ -269,8 +157,8 @@ function RecentRow({
   entranceIndex,
   workspaces,
   onOpen,
-  onOpenInWorkspace,
   onDelete,
+  onError,
 }: {
   note: RecentNote;
   now: number;
@@ -278,168 +166,119 @@ function RecentRow({
   entranceIndex: number;
   workspaces: WorkspaceSummary[];
   onOpen: () => void;
-  onOpenInWorkspace: (workspaceId: string) => void;
-  onDelete: () => void;
+  onDelete: (note: NoteMenuTarget) => void;
+  onError: (message: string) => void;
 }) {
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <li
-          data-row-enter={isNew ? "" : undefined}
-          data-dashboard-enter={isNew ? undefined : ""}
-          className={cn(
-            "relative",
-            isNew
-              ? "animate-row-in motion-reduce:animate-none"
-              : "animate-dashboard-enter motion-reduce:animate-none"
-          )}
-          style={
-            isNew
-              ? undefined
-              : { animationDelay: `${Math.min(entranceIndex, 6) * 40 + 355}ms` }
-          }
+    <NoteContextMenu
+      note={note}
+      workspaces={workspaces}
+      onOpen={onOpen}
+      onDelete={onDelete}
+      onError={onError}
+    >
+      <li
+        data-row-enter={isNew ? "" : undefined}
+        data-dashboard-enter={isNew ? undefined : ""}
+        className={cn(
+          "relative",
+          isNew
+            ? "animate-row-in motion-reduce:animate-none"
+            : "animate-dashboard-enter motion-reduce:animate-none"
+        )}
+        style={
+          isNew
+            ? undefined
+            : { animationDelay: `${Math.min(entranceIndex, 6) * 40 + 355}ms` }
+        }
+      >
+        {isNew && (
+          <span
+            aria-hidden="true"
+            data-row-flash=""
+            className="pointer-events-none absolute inset-0 animate-row-flash bg-accent/10 motion-reduce:hidden"
+          />
+        )}
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-150 hover:bg-secondary/40"
         >
-          {isNew && (
-            <span
-              aria-hidden="true"
-              data-row-flash=""
-              className="pointer-events-none absolute inset-0 animate-row-flash bg-accent/10 motion-reduce:hidden"
-            />
-          )}
-          <button
-            type="button"
-            onClick={onOpen}
-            className="flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-150 hover:bg-secondary/40"
-          >
-            <NoteTypeIcon
-              type={note.type}
-              className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
-            />
+          <NoteTypeIcon
+            type={note.type}
+            className="mt-0.5 size-4 shrink-0 text-subtle-foreground"
+          />
 
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
-                <p className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {note.title}
-                </p>
-                <time
-                  dateTime={toIsoString(note.updatedAt)}
-                  title={formatAbsolute(note.updatedAt)}
-                  suppressHydrationWarning
-                  className="shrink-0 text-xs tabular-nums text-subtle-foreground"
-                >
-                  {formatRelative(note.updatedAt, now)}
-                </time>
-              </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <p className="min-w-0 flex-1 truncate text-sm text-foreground">
+                {note.title}
+              </p>
+              <time
+                dateTime={toIsoString(note.updatedAt)}
+                title={formatAbsolute(note.updatedAt)}
+                suppressHydrationWarning
+                className="shrink-0 text-xs tabular-nums text-subtle-foreground"
+              >
+                {formatRelative(note.updatedAt, now)}
+              </time>
+            </div>
 
-              {note.excerpt && (
-                <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                  {note.excerpt}
-                </p>
+            {note.excerpt && (
+              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                {note.excerpt}
+              </p>
+            )}
+
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-subtle-foreground">
+                {NOTE_TYPE_LABEL[note.type] ?? "Nota"}
+              </span>
+
+              {note.workspaceName && (
+                <>
+                  <Separator />
+                  <span className="text-[11px] text-subtle-foreground">
+                    {note.workspaceName}
+                  </span>
+                </>
               )}
 
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-subtle-foreground">
-                  {NOTE_TYPE_LABEL[note.type] ?? "Nota"}
-                </span>
-
-                {note.workspaceName && (
-                  <>
-                    <Separator />
-                    <span className="text-[11px] text-subtle-foreground">
-                      {note.workspaceName}
-                    </span>
-                  </>
-                )}
-
-                {note.source === "ai" && (
-                  <>
-                    <Separator />
-                    <span
-                      className="flex items-center gap-1 text-[11px] text-subtle-foreground"
-                      title="Criada pela Nexo — você pode editar ou desfazer"
-                    >
-                      <Sparkles className="size-3" aria-hidden="true" />
-                      pela Nexo
-                    </span>
-                  </>
-                )}
-
-                {note.tags.slice(0, 3).map((tag) => (
+              {note.source === "ai" && (
+                <>
+                  <Separator />
                   <span
-                    key={tag.id}
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                      TAG_TONE[tag.color ?? ""] ??
-                      "bg-secondary text-muted-foreground"
-                    }`}
+                    className="flex items-center gap-1 text-[11px] text-subtle-foreground"
+                    title="Criada pela Nexo — você pode editar ou desfazer"
                   >
-                    #{tag.name}
+                    <Sparkles className="size-3" aria-hidden="true" />
+                    pela Nexo
                   </span>
-                ))}
+                </>
+              )}
 
-                {note.tags.length > 3 && (
-                  <span className="text-[11px] text-subtle-foreground">
-                    +{note.tags.length - 3}
-                  </span>
-                )}
-              </div>
-            </div>
-          </button>
-        </li>
-      </ContextMenuTrigger>
-
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={onOpen}>
-          <SquarePen className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
-          <ContextMenuItemLabel label="Abrir no editor" />
-        </ContextMenuItem>
-
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            <LayoutGrid className="size-4 shrink-0 text-subtle-foreground" />
-            <span className="min-w-0 flex-1 font-medium">
-              Abrir no workspace
-            </span>
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent>
-            {workspaces.length === 0 ? (
-              <ContextMenuItem disabled>
-                <ContextMenuItemLabel label="Nenhum workspace ainda" />
-              </ContextMenuItem>
-            ) : (
-              workspaces.map((workspace) => (
-                <ContextMenuItem
-                  key={workspace.id}
-                  onSelect={() => onOpenInWorkspace(workspace.id)}
+              {note.tags.slice(0, 3).map((tag) => (
+                <span
+                  key={tag.id}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    TAG_TONE[tag.color ?? ""] ??
+                    "bg-secondary text-muted-foreground"
+                  }`}
                 >
-                  <span
-                    aria-hidden="true"
-                    className={`mt-1.5 size-2 shrink-0 rounded-full ${
-                      WORKSPACE_DOT[workspace.color ?? ""] ??
-                      "bg-subtle-foreground"
-                    }`}
-                  />
-                  <ContextMenuItemLabel label={workspace.name} />
-                </ContextMenuItem>
-              ))
-            )}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
+                  #{tag.name}
+                </span>
+              ))}
 
-        <ContextMenuSeparator />
-
-        <ContextMenuItem
-          destructive
-          confirmLabel="Excluir para valer"
-          onSelect={onDelete}
-        >
-          <Trash2 className="mt-0.5 size-4 shrink-0" />
-          <ContextMenuItemLabel
-            label="Excluir"
-            hint="Sai da conta, da busca e de todas as lousas."
-          />
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+              {note.tags.length > 3 && (
+                <span className="text-[11px] text-subtle-foreground">
+                  +{note.tags.length - 3}
+                </span>
+              )}
+            </div>
+          </div>
+        </button>
+      </li>
+    </NoteContextMenu>
   );
 }
 

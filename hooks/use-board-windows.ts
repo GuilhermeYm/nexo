@@ -9,6 +9,7 @@ import { paletteFromName } from "@/lib/tags/palette";
 import type { ConnectionStyle } from "@/lib/workspace/connection-style";
 import type {
   BoardConnection,
+  BoardMark,
   BoardNoteTag,
   BoardWindow,
   WindowContent,
@@ -104,6 +105,7 @@ export interface ErasedBatch {
   connections: number;
   windows: RestorableWindow[];
   links: RestorableConnection[];
+  marks: BoardMark[];
 }
 
 /**
@@ -115,6 +117,7 @@ export interface ErasedBatch {
 export interface EraseTarget {
   windows?: string[] | "all";
   connections?: string[] | "all";
+  marks?: string[] | "all";
 }
 
 export interface CreateWindowInput {
@@ -127,7 +130,12 @@ export interface CreateWindowInput {
   /** Omitidos, o servidor posiciona logo abaixo do que já existe na lousa. */
   x?: number;
   y?: number;
+  /** Omitidos, vale o tamanho do tipo — ou, para imagem, o da proporção dela. */
+  width?: number;
+  height?: number;
 }
+
+export type CreateMarkInput = Omit<BoardMark, "id">;
 
 /** O que a janela de nota edita. Exportado para a lousa tipar os repasses. */
 export type NotePatch = {
@@ -162,7 +170,8 @@ function plainNotice(message: string): BoardNotice {
 export function useBoardWindows(
   workspaceId: string,
   initial: BoardWindow[],
-  initialConnections: BoardConnection[]
+  initialConnections: BoardConnection[],
+  initialMarks: BoardMark[] = []
 ) {
   const [windows, setWindows] = useState<BoardWindow[]>(initial);
   /**
@@ -176,6 +185,7 @@ export function useBoardWindows(
   const [connections, setConnections] = useState<BoardConnection[]>(
     initialConnections
   );
+  const [marks, setMarks] = useState<BoardMark[]>(initialMarks);
   /**
    * O aviso da lousa.
    *
@@ -188,11 +198,20 @@ export function useBoardWindows(
 
   const base = `/api/workspaces/${workspaceId}/windows`;
   const connectionsBase = `/api/workspaces/${workspaceId}/connections`;
+  const marksBase = `/api/workspaces/${workspaceId}/marks`;
 
   // Janelas e notas com alteração local ainda não confirmada. São as que a
   // mesclagem preserva quando um retrato do servidor chega.
   const pendingWindows = useRef(new Set<string>());
   const pendingNotes = useRef(new Set<string>());
+  /**
+   * Desenhos que já estão na tela, mas cujo POST ainda não voltou.
+   *
+   * O rascunho vira uma marca temporária no instante em que a pessoa solta
+   * o ponteiro. Preservá-la durante uma rebusca evita o clarão em que o
+   * desenho some até a resposta da API chegar.
+   */
+  const pendingMarks = useRef(new Set<string>());
 
   /**
    * Janelas que esta tela acabou de remover.
@@ -248,6 +267,7 @@ export function useBoardWindows(
     const snapshot = body as {
       windows?: BoardWindow[];
       connections?: BoardConnection[];
+      marks?: BoardMark[];
     } | null;
 
     if (Array.isArray(snapshot?.windows)) {
@@ -266,6 +286,12 @@ export function useBoardWindows(
       setConnections(
         mergeConnections(snapshot.connections, connectionTombstones.current)
       );
+    }
+    if (Array.isArray(snapshot?.marks)) {
+      setMarks((local) => [
+        ...snapshot.marks!,
+        ...local.filter((mark) => pendingMarks.current.has(mark.id)),
+      ]);
     }
   }, []);
 
@@ -294,6 +320,22 @@ export function useBoardWindows(
     if (burstTimer.current) clearTimeout(burstTimer.current);
     burstTimer.current = setTimeout(refresh, BURST_WINDOW);
   }, [refresh]);
+
+  const refreshMarks = useCallback(async () => {
+    try {
+      const response = await fetch(marksBase, { cache: "no-store" });
+      if (!response.ok) return;
+      const body = await response.json();
+      if (Array.isArray(body?.marks)) {
+        setMarks((local) => [
+          ...body.marks,
+          ...local.filter((mark) => pendingMarks.current.has(mark.id)),
+        ]);
+      }
+    } catch {
+      // Mantém o último desenho bom; o próximo evento tenta novamente.
+    }
+  }, [marksBase]);
 
   /* ---------------------------------------------------------------- */
   /* Escrita                                                           */
@@ -415,6 +457,11 @@ export function useBoardWindows(
           { event: "*", schema: "public", table: "workspace_connections" },
           scheduleRefresh
         )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "workspace_board_marks" },
+          refreshMarks
+        )
         .subscribe();
     })();
 
@@ -438,7 +485,7 @@ export function useBoardWindows(
       if (channel) supabase.removeChannel(channel);
       flushAll();
     };
-  }, [workspaceId, scheduleRefresh, flushWindow, flushNote]);
+  }, [workspaceId, scheduleRefresh, refreshMarks, flushWindow, flushNote]);
 
   /* ---------------------------------------------------------------- */
   /* Ações                                                             */
@@ -817,11 +864,19 @@ export function useBoardWindows(
         target.connections === "all"
           ? latestConnections.current.map((item) => item.id)
           : (target.connections ?? []);
+      const markIds = target.marks === "all"
+        ? marks.map((item) => item.id)
+        : (target.marks ?? []);
 
       const clearingWindows = target.windows === "all" || windowIds.length > 0;
       const clearingConnections =
         target.connections === "all" || connectionIds.length > 0;
-      if (!clearingWindows && !clearingConnections) return;
+      // Diferente das outras duas rotas, a dos desenhos não tem "apagar
+      // tudo": ela exige ids. Um "all" numa lousa sem desenho é lista vazia,
+      // e mandá-la voltava 400 — o apagar tudo falhava inteiro na tela
+      // depois de as janelas já terem saído no banco, sem Desfazer.
+      const clearingMarks = markIds.length > 0;
+      if (!clearingWindows && !clearingConnections && !clearingMarks) return;
 
       const doomed = new Set(windowIds);
 
@@ -848,13 +903,15 @@ export function useBoardWindows(
             !doomed.has(item.toWindowId)
         )
       );
+      const goneMarks = new Set(markIds);
+      setMarks((current) => current.filter((item) => !goneMarks.has(item.id)));
 
       const revive = (ids: string[], set: Set<string>) => {
         for (const id of ids) set.delete(id);
       };
 
       try {
-        const [fromWindows, fromConnections] = await Promise.all([
+        const [fromWindows, fromConnections, fromMarks] = await Promise.all([
           clearingWindows
             ? readBody(
                 fetch(base, {
@@ -877,14 +934,22 @@ export function useBoardWindows(
                 })
               )
             : null,
+          clearingMarks
+            ? readBody(fetch(marksBase, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: markIds }),
+              }))
+            : null,
         ]);
 
-        if (fromWindows?.failed || fromConnections?.failed) {
+        if (fromWindows?.failed || fromConnections?.failed || fromMarks?.failed) {
           // Apagar nunca esbarra em teto de plano — só em rede e em servidor.
           setError(
             plainNotice(
               fromWindows?.body?.error ??
                 fromConnections?.body?.error ??
+                fromMarks?.body?.error ??
                 "Não foi possível apagar."
             )
           );
@@ -901,17 +966,19 @@ export function useBoardWindows(
         // rodaram, porque ela viu o cascade já aplicado.
         applySnapshot(fromWindows?.body);
         applySnapshot(fromConnections?.body);
+        applySnapshot(fromMarks?.body);
 
         const removedWindows = fromWindows?.body?.restorable ?? [];
         const removedLinks = dedupeLinks([
           ...(fromWindows?.body?.restorableConnections ?? []),
           ...(fromConnections?.body?.restorableConnections ?? []),
         ]);
+        const removedMarks = fromMarks?.body?.restorableMarks ?? [];
 
         // Nada saiu de verdade — outro dispositivo já tinha apagado. Um
         // cartão dizendo "0 elementos saíram" com um Desfazer que não desfaz
         // nada é pior que cartão nenhum.
-        if (removedWindows.length === 0 && removedLinks.length === 0) {
+        if (removedWindows.length === 0 && removedLinks.length === 0 && removedMarks.length === 0) {
           setLastErased(null);
           return;
         }
@@ -924,6 +991,7 @@ export function useBoardWindows(
           connections: removedLinks.length,
           windows: removedWindows,
           links: removedLinks,
+          marks: removedMarks,
         });
       } catch {
         setError(plainNotice("Sem conexão. Nada foi apagado."));
@@ -932,7 +1000,7 @@ export function useBoardWindows(
         scheduleRefresh();
       }
     },
-    [base, connectionsBase, scheduleRefresh, applySnapshot]
+    [base, connectionsBase, marksBase, marks, scheduleRefresh, applySnapshot]
   );
 
   /**
@@ -949,21 +1017,34 @@ export function useBoardWindows(
     setLastErased(null);
 
     try {
-      const response = await fetch(`${base}/restore`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          windows: batch.windows,
-          connections: batch.links,
-        }),
-      });
+      let body: unknown = null;
+      if (batch.windows.length > 0 || batch.links.length > 0) {
+        const response = await fetch(`${base}/restore`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ windows: batch.windows, connections: batch.links }),
+        });
+        body = await response.json().catch(() => null);
+        if (!response.ok) {
+          setError(plainNotice((body as { error?: string } | null)?.error ?? "Não foi possível restaurar."));
+          setLastErased(batch);
+          return;
+        }
+      }
 
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(plainNotice(body?.error ?? "Não foi possível restaurar."));
-        // O cartão volta: a pessoa tenta de novo em vez de perder o lote.
-        setLastErased(batch);
-        return;
+      if (batch.marks.length > 0) {
+        const markResponse = await fetch(`${marksBase}/restore`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ marks: batch.marks }),
+        });
+        const markBody = await markResponse.json().catch(() => null);
+        if (!markResponse.ok) {
+          setError(plainNotice(markBody?.error ?? "Não foi possível restaurar os desenhos."));
+          setLastErased(batch);
+          return;
+        }
+        applySnapshot(markBody);
       }
 
       // Restaurar é o oposto de apagar: as lápides destas linhas não valem
@@ -971,14 +1052,78 @@ export function useBoardWindows(
       for (const row of batch.windows) tombstones.current.delete(row.id);
       connectionTombstones.current.clear();
 
-      applySnapshot(body);
+      if (body) applySnapshot(body);
     } catch {
       setError(plainNotice("Sem conexão. Nada foi restaurado."));
       setLastErased(batch);
     }
-  }, [base, lastErased, applySnapshot]);
+  }, [base, marksBase, lastErased, applySnapshot]);
 
   const dismissErased = useCallback(() => setLastErased(null), []);
+
+  /** Um gesto completo vira uma escrita; nunca há POST durante pointermove. */
+  const createMark = useCallback(async (input: CreateMarkInput) => {
+    const temporaryId = `pending:${crypto.randomUUID()}`;
+    const optimisticMark: BoardMark = { id: temporaryId, ...input };
+    pendingMarks.current.add(temporaryId);
+    setMarks((current) => [...current, optimisticMark]);
+
+    function removeOptimisticMark() {
+      pendingMarks.current.delete(temporaryId);
+      setMarks((current) => current.filter((mark) => mark.id !== temporaryId));
+    }
+
+    try {
+      const response = await fetch(marksBase, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        removeOptimisticMark();
+        setError(plainNotice(body?.error ?? "Não foi possível guardar o desenho."));
+        return false;
+      }
+      if (body?.mark) {
+        pendingMarks.current.delete(temporaryId);
+        setMarks((current) => {
+          const withoutTemporary = current.filter((mark) => mark.id !== temporaryId);
+          return withoutTemporary.some((mark) => mark.id === body.mark.id)
+            ? withoutTemporary
+            : [...withoutTemporary, body.mark];
+        });
+      } else {
+        removeOptimisticMark();
+      }
+      return true;
+    } catch {
+      removeOptimisticMark();
+      setError(plainNotice("Sem conexão. O desenho não foi guardado."));
+      return false;
+    }
+  }, [marksBase]);
+
+  const deleteMarks = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const removed = new Set(ids);
+    setMarks((current) => current.filter((mark) => !removed.has(mark.id)));
+    try {
+      const response = await fetch(marksBase, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        setError(plainNotice(body?.error ?? "Não foi possível apagar o desenho."));
+        scheduleRefresh();
+      }
+    } catch {
+      setError(plainNotice("Sem conexão. O desenho não foi apagado."));
+      scheduleRefresh();
+    }
+  }, [marksBase, scheduleRefresh]);
 
   /**
    * Liga dois elementos.
@@ -1189,6 +1334,9 @@ export function useBoardWindows(
     lastErased,
     undoErase,
     dismissErased,
+    marks,
+    createMark,
+    deleteMarks,
     deleteNote,
     refresh,
   };
@@ -1207,8 +1355,10 @@ interface EraseResponse {
   error?: string;
   restorable?: RestorableWindow[];
   restorableConnections?: RestorableConnection[];
+  restorableMarks?: BoardMark[];
   windows?: BoardWindow[];
   connections?: BoardConnection[];
+  marks?: BoardMark[];
 }
 
 async function readBody(

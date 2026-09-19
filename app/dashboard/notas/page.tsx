@@ -1,13 +1,20 @@
 import { redirect } from "next/navigation";
+import { z } from "zod";
 
 import { NotesView } from "@/components/notes/notes-view";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
-  title: "Notas — Nexo",
+  title: "Notas e pastas — Nexo",
 };
 
-export default async function NotesPage() {
+// `?folder=` chega da barra lateral do dashboard: `none` ou o id de uma pasta.
+// Qualquer outra coisa é ignorada — a lista abre em "Todas as pastas".
+const folderParamSchema = z.union([z.literal("none"), z.string().uuid()]);
+
+export default async function NotesPage({
+  searchParams,
+}: PageProps<"/dashboard/notas">) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -18,5 +25,14 @@ export default async function NotesPage() {
   // eslint-disable-next-line react-hooks/purity
   const renderedAt = Date.now();
 
-  return <NotesView initial={null} renderedAt={renderedAt} />;
+  const { folder } = await searchParams;
+  const parsedFolder = folderParamSchema.safeParse(folder);
+
+  return (
+    <NotesView
+      initial={null}
+      renderedAt={renderedAt}
+      initialFolder={parsedFolder.success ? parsedFolder.data : "all"}
+    />
+  );
 }

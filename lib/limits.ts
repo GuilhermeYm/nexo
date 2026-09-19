@@ -15,3 +15,9 @@
 export const ABSOLUTE_WINDOWS_PER_BOARD = 2_000;
 
 export const ABSOLUTE_CONNECTIONS_PER_BOARD = 2_000;
+
+/**
+ * Traços também são limitados por lousa. O limite é anti-abuso, não um
+ * plano de produto; cada traço já tem um segundo teto de pontos na validação.
+ */
+export const ABSOLUTE_BOARD_MARKS_PER_BOARD = 5_000;

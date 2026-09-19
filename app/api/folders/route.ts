@@ -6,7 +6,11 @@ import { db } from "@/lib/db";
 import { folders } from "@/lib/db/schema";
 import { folderNameTaken, listFolders } from "@/lib/folders/queries";
 import { folderNameSchema, MAX_FOLDERS_PER_USER } from "@/lib/folders/types";
-import { invalidateNoteListCache } from "@/lib/notes/cache";
+import {
+  invalidateNoteListCache,
+  readFolderListCache,
+  writeFolderListCache,
+} from "@/lib/notes/cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 
@@ -37,8 +41,16 @@ export async function GET(request: Request) {
     });
     if (!limit.success) return errorResponse(429, "Muitas requisições. Aguarde um pouco.");
 
+    // O trilho relê as pastas a cada volta à aba: é a leitura mais repetida
+    // dele, e a única que ainda ia sempre ao banco. A versão lida antes da
+    // consulta é a que grava — se uma escrita trocar o namespace no meio, o
+    // resultado velho vai para uma chave que ninguém mais lê.
+    const cached = await readFolderListCache(user.id);
+    const result = cached.value ?? (await listFolders(user.id));
+    if (!cached.value) await writeFolderListCache(user.id, cached.version, result);
+
     return NextResponse.json(
-      { folders: await listFolders(user.id) },
+      { folders: result },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {

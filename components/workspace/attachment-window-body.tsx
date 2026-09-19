@@ -126,6 +126,10 @@ export function AttachmentWindowBody({
     return <PdfViewer url={url} width={Math.max(120, width - 16)} />;
   }
 
+  if (attachment.type === "image") {
+    return <ImageViewer url={url} filename={attachment.filename} />;
+  }
+
   if (attachment.type === "audio") {
     return (
       <Shell attachment={attachment} onDownload={download}>
@@ -199,6 +203,49 @@ function Shell({
       </div>
 
       <div className="mt-3 min-h-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A imagem, inteira e na proporção dela, dentro do espaço que houver.
+ *
+ * `img-src` do CSP já libera o Supabase. A URL assinada é renovada pelo laço
+ * acima a cada ~15 min, mas trocar o `src` de uma imagem já desenhada a
+ * baixaria de novo à toa: a primeira URL fica, e só é trocada se a imagem
+ * falhar (por exemplo, recarregada depois de a URL vencer).
+ *
+ * `draggable={false}`: sem isso, arrastar sobre a imagem puxa o fantasma
+ * nativo do navegador em vez de deixar a lousa responder.
+ */
+function ImageViewer({ url, filename }: { url: string; filename: string }) {
+  const [src, setSrc] = useState(url);
+  const [broken, setBroken] = useState(false);
+
+  if (broken && src === url) {
+    return (
+      <p className="p-4 text-sm leading-relaxed text-muted-foreground">
+        Não foi possível desenhar esta imagem. Ela continua guardada — baixe
+        para abrir no aplicativo de sempre.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center p-2">
+      {/* eslint-disable-next-line @next/next/no-img-element -- URL assinada
+          de vida curta: o otimizador do Next a guardaria em cache e a
+          serviria depois de vencida, para quem não tem mais acesso. */}
+      <img
+        src={src}
+        alt={filename}
+        draggable={false}
+        onError={() => {
+          if (src !== url) setSrc(url);
+          else setBroken(true);
+        }}
+        className="max-h-full max-w-full rounded-md object-contain select-none"
+      />
     </div>
   );
 }

@@ -8,7 +8,9 @@ export const metadata = {
   title: "Tags — Nexo",
 };
 
-export default async function TagsPage() {
+export default async function TagsPage({
+  searchParams,
+}: PageProps<"/dashboard/tags">) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -18,11 +20,19 @@ export default async function TagsPage() {
   if (!user) redirect("/login");
 
   const tags = await listTagsWithUsage(user.id);
+  const { tag } = await searchParams;
+  const initialTagId = typeof tag === "string" ? tag : null;
 
   // Mesmo padrão do dashboard: este instante pinta o primeiro estado nos
   // dois lados (servidor e hidratação); depois o relógio do cliente assume.
   // eslint-disable-next-line react-hooks/purity
   const renderedAt = Date.now();
 
-  return <TagsView tags={tags} renderedAt={renderedAt} />;
+  return (
+    <TagsView
+      tags={tags}
+      renderedAt={renderedAt}
+      initialTagId={initialTagId}
+    />
+  );
 }

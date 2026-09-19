@@ -64,3 +64,36 @@ export function writeHideDraft(on: boolean): void {
   }
   window.dispatchEvent(new Event(PREFERENCES_EVENT));
 }
+
+export const SIDEBAR_VIEW_KEY = "nexo-sidebar-view";
+
+/** O que a barra lateral do dashboard lista abaixo da navegação. */
+export type SidebarView = "workspaces" | "folders" | "both";
+
+const SIDEBAR_VIEWS: readonly SidebarView[] = ["workspaces", "folders", "both"];
+
+/**
+ * Workspaces, pastas de notas, ou os dois.
+ *
+ * Padrão `workspaces`: é o que a barra sempre mostrou, e quem nunca criou
+ * uma pasta não precisa de uma seção vazia disputando espaço.
+ */
+export function readSidebarView(): SidebarView {
+  try {
+    const value = window.localStorage.getItem(SIDEBAR_VIEW_KEY);
+    return SIDEBAR_VIEWS.includes(value as SidebarView)
+      ? (value as SidebarView)
+      : "workspaces";
+  } catch {
+    return "workspaces";
+  }
+}
+
+export function writeSidebarView(view: SidebarView): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_VIEW_KEY, view);
+  } catch {
+    // localStorage indisponível: a escolha vale só para esta sessão.
+  }
+  window.dispatchEvent(new Event(PREFERENCES_EVENT));
+}

@@ -6,7 +6,7 @@ import { markNoteForReading } from "@/lib/ai/note-reading";
 import { errorResponse, logServerError } from "@/lib/api";
 import { writeAuditLog } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { attachments, notes, workspaceWindows } from "@/lib/db/schema";
+import { attachments, noteTags, notes, tags, workspaceWindows } from "@/lib/db/schema";
 import {
   countTaskItems,
   richDocumentSchema,
@@ -58,6 +58,8 @@ const deleteNotesSchema = z.object({
   ),
   /** Arquivos são independentes por padrão; só somem com escolha explícita. */
   deleteAttachments: z.boolean().default(false),
+  /** Tags são globais e só somem com escolha explícita após ver o impacto. */
+  deleteTags: z.boolean().default(false),
 });
 
 const BUCKET = "files";
@@ -283,7 +285,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const { ids, deleteAttachments } = parsed.data;
+    const { ids, deleteAttachments, deleteTags } = parsed.data;
     const removed = await db.transaction(async (tx) => {
       const removed = await tx
         .update(notes)
@@ -298,6 +300,24 @@ export async function DELETE(request: Request) {
         )
         .returning({ id: notes.id, title: notes.title });
       const removedIds = removed.map((note) => note.id);
+      const removedTags =
+        deleteTags && removedIds.length > 0
+          ? await tx
+              .delete(tags)
+              .where(
+                and(
+                  eq(tags.userId, user.id),
+                  inArray(
+                    tags.id,
+                    tx
+                      .select({ id: noteTags.tagId })
+                      .from(noteTags)
+                      .where(inArray(noteTags.noteId, removedIds))
+                  )
+                )
+              )
+              .returning({ id: tags.id, name: tags.name })
+          : [];
       const removedAttachments =
         deleteAttachments && removedIds.length > 0
           ? await tx
@@ -324,7 +344,7 @@ export async function DELETE(request: Request) {
             eq(workspaceWindows.userId, user.id)
           )
         );
-      return { notes: removed, attachments: removedAttachments };
+      return { notes: removed, attachments: removedAttachments, tags: removedTags };
     });
 
     if (removed.notes.length === 0) return errorResponse(404, "Nenhuma nota encontrada.");
@@ -353,6 +373,18 @@ export async function DELETE(request: Request) {
         })
       )
     );
+    await Promise.all(
+      removed.tags.map((tag) =>
+        writeAuditLog({
+          action: "DELETE",
+          tableName: "tags",
+          recordId: tag.id,
+          userId: user.id,
+          oldData: { name: tag.name },
+          request,
+        })
+      )
+    );
     await removeStorageObjects(
       supabase,
       removed.attachments.map((attachment) => attachment.storagePath),
@@ -364,6 +396,7 @@ export async function DELETE(request: Request) {
       ok: true,
       deleted: removed.notes.length,
       deletedAttachments: removed.attachments.length,
+      deletedTags: removed.tags.length,
     });
   } catch (error) {
     const code = await logServerError("DELETE /api/notes", error, { userId }, request);

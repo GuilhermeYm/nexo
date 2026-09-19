@@ -23,7 +23,12 @@ export const metadata = {
 /** Nome do workspace que todo usuário ganha ao entrar pela primeira vez. */
 const DEFAULT_WORKSPACE_NAME = "Dashboard";
 
-export default async function DashboardPage() {
+/** `?tarefa=` vem de uma notificação da Entrada; qualquer outra coisa é ignorada. */
+const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export default async function DashboardPage({
+  searchParams,
+}: PageProps<"/dashboard">) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -56,6 +61,9 @@ export default async function DashboardPage() {
     await sweepPendingNotes(ownerId);
   });
 
+  const { tarefa } = await searchParams;
+  const focusJobId = typeof tarefa === "string" && JOB_ID.test(tarefa) ? tarefa : null;
+
   const [jobs, notes, topTags, unreadCount] = await Promise.all([
     listAiJobs(user.id),
     listRecentNotes(user.id),
@@ -81,6 +89,7 @@ export default async function DashboardPage() {
       renderedAt={renderedAt}
       serverHour={new Date(renderedAt).getHours()}
       unreadCount={unreadCount}
+      focusJobId={focusJobId}
     />
   );
 }
