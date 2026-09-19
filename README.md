@@ -1,5 +1,7 @@
 # Nexo
 
+**Versão:** 1.0.0 · **Bun:** 1.4.0
+
 ![O segundo cérebro que você sempre quis, sem o trabalho que você sempre evitou. Capture em segundos. Encontre em milissegundos.](.github/assets/banner.png)
 
 Um organizador pessoal que aceita o material como ele chega — um PDF, um
@@ -32,11 +34,13 @@ ajuda escritos:
 
 [**💬 Configurar o Nexo com o Claude**](https://claude.ai/new?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20feito%20com%20Next.js%2C%20Supabase%20e%20Drizzle.%20Me%20ajude%20a%3A%201%29%20criar%20e%20configurar%20o%20projeto%20no%20Supabase%2C%202%29%20preencher%20o%20.env%20com%20as%20chaves%20certas%2C%203%29%20aplicar%20as%20migrations%20do%20Drizzle%2C%204%29%20rodar%20o%20projeto%20localmente%20com%20Bun%2C%20e%205%29%20entender%20as%20funcionalidades%20principais%20%28captura%20de%20arquivos%2C%20a%20lousa%2C%20tags%2C%20agenda%20e%20busca%29.%20Pode%20me%20guiar%3F)
 
-Isso não é integração nenhuma com o produto — é só um link para
-[claude.ai](https://claude.ai) com a caixa de mensagem pré-preenchida
-(parâmetro `?q=`). Requer uma conta Claude (tem plano gratuito). Se preferir,
-o mesmo prompt funciona colado manualmente em qualquer assistente, ou você
-segue a seção **Como rodar** abaixo sem nenhum deles.
+[**💬 Configurar o Nexo com o ChatGPT**](https://chatgpt.com/?q=Quero%20usar%20o%20Nexo%20%28https%3A%2F%2Fgithub.com%2FGuilhermeYm%2Fnexo%29%2C%20um%20organizador%20pessoal%20auto-hospedado%20feito%20com%20Next.js%2C%20Supabase%20e%20Drizzle.%20Me%20ajude%20a%3A%201%29%20criar%20e%20configurar%20o%20projeto%20no%20Supabase%2C%202%29%20preencher%20o%20.env%20com%20as%20chaves%20certas%2C%203%29%20aplicar%20as%20migrations%20do%20Drizzle%2C%204%29%20rodar%20o%20projeto%20localmente%20com%20Bun%20ou%20com%20Docker%2C%20e%205%29%20entender%20as%20funcionalidades%20principais%20%28captura%20de%20arquivos%2C%20a%20lousa%2C%20tags%2C%20agenda%20e%20busca%29.%20Pode%20me%20guiar%3F)
+
+Isso não é integração nenhuma com o produto — são apenas links para o Claude
+e o [ChatGPT](https://chatgpt.com) com a caixa de mensagem pré-preenchida
+(parâmetro `?q=`). Requer uma conta no assistente escolhido. Se preferir, o
+mesmo prompt funciona colado manualmente em qualquer assistente, ou você segue
+a seção **Como rodar** abaixo sem nenhum deles.
 
 ## O que existe hoje
 
@@ -129,6 +133,19 @@ Requer [Bun](https://bun.sh) e uma conta no [Supabase](https://supabase.com)
 
 7. Acesse `http://localhost:3000`, crie sua conta em `/registro` e comece a
    usar.
+
+### Com Docker
+
+Para construir e iniciar a versão de produção com Docker:
+
+```bash
+docker build -t nexo .
+docker run --env-file .env -p 3000:3000 nexo
+```
+
+Depois, acesse `http://localhost:3000`. O container usa Bun `1.4.0` e recebe
+as variáveis do `.env` somente em tempo de execução; o arquivo `.env` não é
+copiado para a imagem.
 
 Faltar uma variável obrigatória (as do Supabase e a `DATABASE_URL`) não
 quebra em algum lugar fundo e sem explicação — a aplicação recusa lançando
