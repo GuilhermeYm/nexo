@@ -15,6 +15,11 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 
 import { LinkEditor } from "@/components/editor/link-editor";
+import {
+  TextColorGlyph,
+  TextColorSwatches,
+  useActiveTextColor,
+} from "@/components/editor/text-color-picker";
 import { HINTS } from "@/lib/editor/shortcuts";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +45,9 @@ export function EditorBubbleMenu({
   compact?: boolean;
 }) {
   const [linkOpen, setLinkOpen] = useState(false);
+  // A paleta troca o conteúdo do menu, como o campo de link: um painel a
+  // mais flutuando sobre um menu que já flutua seria uma pilha frágil.
+  const [colorOpen, setColorOpen] = useState(false);
 
   // `⌘K` abre o campo de link — mas só com texto selecionado, que é quando o
   // menu está na tela para ancorá-lo.
@@ -65,7 +73,10 @@ export function EditorBubbleMenu({
   useEffect(() => {
     if (!editor) return;
     function onSelect() {
-      if (editor?.state.selection.empty) setLinkOpen(false);
+      if (editor?.state.selection.empty) {
+        setLinkOpen(false);
+        setColorOpen(false);
+      }
     }
     editor.on("selectionUpdate", onSelect);
     return () => {
@@ -74,6 +85,39 @@ export function EditorBubbleMenu({
   }, [editor]);
 
   if (!editor) return null;
+
+  return (
+    <BubbleMenuBody
+      editor={editor}
+      compact={compact}
+      linkOpen={linkOpen}
+      setLinkOpen={setLinkOpen}
+      colorOpen={colorOpen}
+      setColorOpen={setColorOpen}
+    />
+  );
+}
+
+/**
+ * O menu em si. Separado para ler a cor ativa com o `editor` já garantido —
+ * um hook não pode vir depois do `return null` acima.
+ */
+function BubbleMenuBody({
+  editor,
+  compact,
+  linkOpen,
+  setLinkOpen,
+  colorOpen,
+  setColorOpen,
+}: {
+  editor: Editor;
+  compact: boolean;
+  linkOpen: boolean;
+  setLinkOpen: (open: boolean) => void;
+  colorOpen: boolean;
+  setColorOpen: (open: boolean) => void;
+}) {
+  const textColor = useActiveTextColor(editor);
 
   return (
     <BubbleMenu
@@ -87,9 +131,16 @@ export function EditorBubbleMenu({
         return true;
       }}
     >
-      <div className="flex items-center gap-0.5 rounded-xl border border-border bg-background p-1 shadow-lg">
+      {/* `print:hidden`: o menu vive no `body`, fora do chrome que já some na
+          impressão — com texto selecionado, ia parar no PDF. */}
+      <div className="flex items-center gap-0.5 rounded-xl border border-border bg-background p-1 shadow-lg print:hidden">
         {linkOpen ? (
           <LinkEditor editor={editor} onClose={() => setLinkOpen(false)} />
+        ) : colorOpen ? (
+          <TextColorSwatches
+            editor={editor}
+            onPicked={() => setColorOpen(false)}
+          />
         ) : (
           <>
             <MarkButton
@@ -139,6 +190,13 @@ export function EditorBubbleMenu({
               onClick={() => editor.chain().focus().toggleHighlight().run()}
             >
               <Highlighter className="size-4" aria-hidden="true" />
+            </MarkButton>
+            <MarkButton
+              hint="Cor do texto"
+              active={textColor !== null}
+              onClick={() => setColorOpen(true)}
+            >
+              <TextColorGlyph color={textColor} />
             </MarkButton>
 
             <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { richDocumentSchema } from "@/lib/editor/document";
+import { NOTE_FONT_IDS } from "@/lib/editor/note-fonts";
 import {
   ABSOLUTE_BOARD_MARKS_PER_BOARD,
   ABSOLUTE_CONNECTIONS_PER_BOARD,
@@ -172,11 +173,39 @@ export const updateWindowSchema = z
  * o `content` enviado pelo cliente é descartado. Assim não existe requisição
  * capaz de fazer a busca indexar uma coisa e o editor mostrar outra.
  */
+/**
+ * Uma referência da nota. Só `http:`/`https:`: o `href` vai para a tela e
+ * para o PDF, e um `javascript:` guardado aqui viraria script no clique.
+ */
+export const noteReferenceSchema = z.object({
+  url: z
+    .string()
+    .trim()
+    .max(2048)
+    .refine((value) => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === "http:" || protocol === "https:";
+      } catch {
+        return false;
+      }
+    }, "Use um link que comece com http:// ou https://."),
+  title: z.string().trim().max(200),
+});
+
+/** Teto repetido no CHECK da 0032. */
+export const MAX_NOTE_REFERENCES = 50;
+
 export const updateNoteSchema = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
     content: z.string().max(100_000).optional(),
     contentRich: richDocumentSchema.optional(),
+    references: z
+      .array(noteReferenceSchema)
+      .max(MAX_NOTE_REFERENCES, "No máximo 50 referências por nota.")
+      .optional(),
+    font: z.enum(NOTE_FONT_IDS).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Nada para atualizar.",

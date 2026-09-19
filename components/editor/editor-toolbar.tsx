@@ -3,6 +3,8 @@
 import type { Editor } from "@tiptap/react";
 import {
   Bold,
+  Check,
+  ChevronDown,
   Code,
   Heading1,
   Heading2,
@@ -20,9 +22,20 @@ import {
   Strikethrough,
   Underline,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 
+import { FloatingPanel } from "@/components/editor/floating-panel";
 import { LinkEditor } from "@/components/editor/link-editor";
+import {
+  NOTE_FONT_VARIABLES,
+  noteFontFamily,
+} from "@/components/editor/note-font-faces";
+import {
+  TextColorGlyph,
+  TextColorSwatches,
+  useActiveTextColor,
+} from "@/components/editor/text-color-picker";
+import { NOTE_FONTS, type NoteFontId } from "@/lib/editor/note-fonts";
 import { HINTS } from "@/lib/editor/shortcuts";
 import { cn } from "@/lib/utils";
 
@@ -40,9 +53,14 @@ import { cn } from "@/lib/utils";
  */
 export function EditorToolbar({
   editor,
+  font,
+  onFontChange,
   className,
 }: {
   editor: Editor | null;
+  /** A fonte do documento — é da nota, não da seleção. */
+  font: NoteFontId;
+  onFontChange: (font: NoteFontId) => void;
   className?: string;
 }) {
   return (
@@ -55,6 +73,10 @@ export function EditorToolbar({
       <div className="mx-auto flex w-full max-w-2xl items-center gap-0.5 overflow-x-auto">
         {editor && (
           <>
+            <FontPicker font={font} onChange={onFontChange} />
+
+            <Divider />
+
             <ToolbarButton
               hint={HINTS.bold}
               active={editor.isActive("bold")}
@@ -97,6 +119,7 @@ export function EditorToolbar({
             >
               <Highlighter className="size-4" aria-hidden="true" />
             </ToolbarButton>
+            <ColorButton editor={editor} />
 
             <Divider />
 
@@ -233,20 +256,13 @@ function ToolbarButton({
  */
 function LinkButton({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onOutside(event: PointerEvent) {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("pointerdown", onOutside, true);
-    return () => document.removeEventListener("pointerdown", onOutside, true);
-  }, [open]);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
 
   return (
-    <div ref={boxRef} className="relative">
+    <>
       <button
+        ref={anchorRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={HINTS.link}
@@ -263,12 +279,161 @@ function LinkButton({ editor }: { editor: Editor }) {
         <span className="sr-only">{HINTS.link}</span>
       </button>
 
-      {open && (
-        <div className="absolute top-full left-0 z-30 mt-1 rounded-xl border border-border bg-background py-1.5 shadow-lg">
-          <LinkEditor editor={editor} onClose={() => setOpen(false)} />
-        </div>
-      )}
-    </div>
+      <FloatingPanel
+        anchorRef={anchorRef}
+        open={open}
+        onClose={close}
+        label="Link"
+        className="py-1.5"
+      >
+        <LinkEditor editor={editor} onClose={close} />
+      </FloatingPanel>
+    </>
+  );
+}
+
+/**
+ * A cor do texto selecionado. O traço sob o "A" mostra a cor onde o cursor
+ * está; o painel é a paleta inteira, com "padrão" primeiro para desfazer.
+ */
+function ColorButton({ editor }: { editor: Editor }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  const current = useActiveTextColor(editor);
+  const hint = "Cor do texto";
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setOpen((v) => !v)}
+        title={hint}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
+          open || current
+            ? "bg-tertiary text-foreground"
+            : "text-subtle-foreground hover:bg-tertiary hover:text-foreground"
+        )}
+      >
+        <TextColorGlyph color={current} />
+        <span className="sr-only">{hint}</span>
+      </button>
+
+      <FloatingPanel
+        anchorRef={anchorRef}
+        open={open}
+        onClose={close}
+        label={hint}
+        className="p-1"
+      >
+        <TextColorSwatches editor={editor} onPicked={close} />
+      </FloatingPanel>
+    </>
+  );
+}
+
+/**
+ * A fonte da nota inteira — do título ao PDF. Fica no começo da barra, antes
+ * das marcas, porque não age sobre a seleção: é uma escolha do documento.
+ * Cada opção se desenha na própria fonte; ver é mais rápido que ler o nome.
+ */
+function FontPicker({
+  font,
+  onChange,
+}: {
+  font: NoteFontId;
+  onChange: (font: NoteFontId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  const current =
+    NOTE_FONTS.find((option) => option.id === font) ?? NOTE_FONTS[0];
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Fonte da nota"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors duration-150 pointer-coarse:h-10",
+          open
+            ? "bg-tertiary text-foreground"
+            : "text-muted-foreground hover:bg-tertiary hover:text-foreground"
+        )}
+      >
+        <span className="sr-only">Fonte da nota: </span>
+        <span style={{ fontFamily: noteFontFamily(current.id) }}>
+          {current.name}
+        </span>
+        <ChevronDown
+          className="size-3.5 text-subtle-foreground"
+          aria-hidden="true"
+        />
+      </button>
+
+      <FloatingPanel
+        anchorRef={anchorRef}
+        open={open}
+        onClose={close}
+        label="Fonte da nota"
+        // O painel vai para o `body`, fora de quem publica as `--font-note-*`.
+        className={cn("w-64 p-1", NOTE_FONT_VARIABLES)}
+      >
+        <ul className="flex flex-col">
+          {NOTE_FONTS.map((option) => {
+            const selected = option.id === font;
+            return (
+              <li key={option.id}>
+                <button
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => {
+                    onChange(option.id);
+                    close();
+                    anchorRef.current?.focus();
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-tertiary motion-reduce:transition-none",
+                    selected && "bg-tertiary"
+                  )}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className="block text-[15px] leading-snug text-foreground"
+                      style={{ fontFamily: noteFontFamily(option.id) }}
+                    >
+                      {option.name}
+                    </span>
+                    <span className="block text-xs text-subtle-foreground">
+                      {option.hint}
+                    </span>
+                  </span>
+                  {selected && (
+                    <Check
+                      className="size-4 shrink-0 text-foreground"
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-1 border-t border-border px-2.5 pt-2 pb-1.5 text-xs leading-relaxed text-subtle-foreground">
+          Vale para a nota inteira, e vai junto no PDF.
+        </p>
+      </FloatingPanel>
+    </>
   );
 }
 

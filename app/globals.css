@@ -26,6 +26,16 @@
   --nx-highlight-bg: #f5e4a8;
   --nx-highlight-text: #4a3d1a;
 
+  /* Cor do texto no editor (marca `textColor`, lib/editor/text-color.ts).
+     Todas passam de 5:1 sobre o papel — texto colorido ainda é texto. */
+  --nx-ink-red: #b3261e;
+  --nx-ink-orange: #b04a0c;
+  --nx-ink-yellow: #8a6100;
+  --nx-ink-green: #2e7338;
+  --nx-ink-blue: #1f5fb5;
+  --nx-ink-purple: #7a3db0;
+  --nx-ink-pink: #b02a66;
+
   /* Tags Light — 6 matizes, todas rebaixadas para conviver com o papel */
   --nx-tag-1-bg: #ede6d9;
   --nx-tag-1-text: #8b7355;
@@ -99,6 +109,14 @@
   /* Marca-texto no escuro — âmbar fosco, texto claro por cima */
   --nx-highlight-bg: #6b5a2a;
   --nx-highlight-text: #f4ecd6;
+
+  --nx-ink-red: #f2998f;
+  --nx-ink-orange: #f2ad70;
+  --nx-ink-yellow: #e6c65c;
+  --nx-ink-green: #86cf97;
+  --nx-ink-blue: #8fb8f7;
+  --nx-ink-purple: #c9a0f5;
+  --nx-ink-pink: #f09bbd;
 
   /* Tags Dark — mesmas 6 posições, aqui com brilho */
   --nx-tag-1-bg: #1e2a3a;
@@ -609,4 +627,33 @@ a {
     color: #17130a !important;
     background-color: transparent !important;
   }
+}
+
+/* A cor do texto (marca `textColor`). O documento guarda o nome da cor; o
+   valor sai daqui, do tema. Fora de `@layer`, para valer sobre as cores que
+   `strong` e `a` trazem de `PROSE_EDITOR_CLASS`. */
+[data-text-color="red"] { --nx-ink: var(--nx-ink-red); }
+[data-text-color="orange"] { --nx-ink: var(--nx-ink-orange); }
+[data-text-color="yellow"] { --nx-ink: var(--nx-ink-yellow); }
+[data-text-color="green"] { --nx-ink: var(--nx-ink-green); }
+[data-text-color="blue"] { --nx-ink: var(--nx-ink-blue); }
+[data-text-color="purple"] { --nx-ink: var(--nx-ink-purple); }
+[data-text-color="pink"] { --nx-ink: var(--nx-ink-pink); }
+
+[data-text-color],
+[data-text-color] :is(strong, a, em, s, u) {
+  color: var(--nx-ink);
+}
+
+/* No papel, a cor sobrevive ao "tudo escuro" do bloco acima — com os
+   valores do tema claro, que são os que foram pensados para fundo branco.
+   `body [data-text-color]` vence `body *` pela especificidade. */
+@media print {
+  body [data-text-color="red"] { color: #b3261e !important; }
+  body [data-text-color="orange"] { color: #b04a0c !important; }
+  body [data-text-color="yellow"] { color: #8a6100 !important; }
+  body [data-text-color="green"] { color: #2e7338 !important; }
+  body [data-text-color="blue"] { color: #1f5fb5 !important; }
+  body [data-text-color="purple"] { color: #7a3db0 !important; }
+  body [data-text-color="pink"] { color: #b02a66 !important; }
 }

@@ -25,6 +25,7 @@ import {
   noteTags,
   notes,
   tags,
+  workspaceWindows,
   workspaces,
 } from "@/lib/db/schema";
 import {
@@ -56,7 +57,26 @@ export interface EditableNote {
    * há. É a referência de origem que o editor mostra — ver "Anexos como
    * janela": o vínculo mora em `attachments.note_id`, do lado do arquivo.
    */
-  attachment: { id: string; filename: string; type: string } | null;
+  attachment: {
+    id: string;
+    filename: string;
+    mimeType: string;
+    type: string;
+    sizeBytes: number | null;
+    durationSeconds: number | null;
+  } | null;
+  /** Os links citados na nota, na ordem em que a pessoa os pôs. */
+  references: { url: string; title: string }[];
+  /** A fonte do documento — um id de `lib/editor/note-fonts.ts`. */
+  font: string;
+  /**
+   * As lousas onde a nota está aberta como janela, uma por workspace, em
+   * ordem de nome. `windowId` é a primeira janela dela ali — o link chega
+   * enquadrado nela (`?focus=`).
+   */
+  boards: { workspaceId: string; name: string; windowId: string }[];
+  /** A pasta da nota, ou nulo quando está sem pasta. */
+  folder: { id: string; name: string } | null;
 }
 
 /**
@@ -430,6 +450,8 @@ export async function getOwnedNote(
       title: notes.title,
       content: notes.content,
       contentRich: notes.contentRich,
+      references: notes.referenceLinks,
+      font: notes.font,
       type: notes.type,
       source: notes.source,
       workspaceId: notes.workspaceId,
@@ -465,11 +487,57 @@ export async function getOwnedNote(
     .select({
       id: attachments.id,
       filename: attachments.filename,
+      mimeType: attachments.mimeType,
       type: attachments.type,
+      sizeBytes: attachments.sizeBytes,
+      durationSeconds: attachments.durationSeconds,
     })
     .from(attachments)
     .where(and(eq(attachments.noteId, noteId), eq(attachments.userId, userId)))
     .limit(1);
 
-  return { ...row, tags: noteTagRows, attachment: attachment ?? null };
+  // Onde a nota está sendo usada: as janelas dela nas lousas. Uma nota
+  // aberta duas vezes na mesma lousa conta uma lousa só.
+  const windowRows = await db
+    .select({
+      windowId: workspaceWindows.id,
+      workspaceId: workspaceWindows.workspaceId,
+      name: workspaces.name,
+    })
+    .from(workspaceWindows)
+    .innerJoin(workspaces, eq(workspaceWindows.workspaceId, workspaces.id))
+    .where(
+      and(
+        eq(workspaceWindows.noteId, noteId),
+        eq(workspaceWindows.userId, userId),
+        eq(workspaces.userId, userId)
+      )
+    )
+    .orderBy(asc(sql`lower(${workspaces.name})`), asc(workspaceWindows.createdAt));
+  const boards = windowRows.filter(
+    (board, index) =>
+      windowRows.findIndex((other) => other.workspaceId === board.workspaceId) ===
+      index
+  );
+
+  const [folder] = await db
+    .select({ id: folders.id, name: folders.name })
+    .from(noteFolders)
+    .innerJoin(folders, eq(noteFolders.folderId, folders.id))
+    .where(
+      and(
+        eq(noteFolders.noteId, noteId),
+        eq(noteFolders.userId, userId),
+        eq(folders.userId, userId)
+      )
+    )
+    .limit(1);
+
+  return {
+    ...row,
+    tags: noteTagRows,
+    attachment: attachment ?? null,
+    boards,
+    folder: folder ?? null,
+  };
 }

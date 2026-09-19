@@ -1,7 +1,15 @@
 "use client";
 
 import { EditorContent, useEditor } from "@tiptap/react";
-import { ArrowLeft, Download, LayoutGrid, Paperclip, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  LayoutGrid,
+  PanelRightClose,
+  PanelRightOpen,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,7 +19,23 @@ import {
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { NoteAiSummary } from "@/components/editor/note-ai-summary";
-import { NoteTags } from "@/components/editor/note-tags";
+import {
+  NoteReferences,
+  type NoteReference,
+} from "@/components/editor/note-references";
+import {
+  NoteDetails,
+  type FolderChoice,
+} from "@/components/editor/note-details";
+import {
+  NOTE_FONT_VARIABLES,
+  noteFontStyle,
+} from "@/components/editor/note-font-faces";
+import {
+  NoteSourcePanel,
+  useSourcePanel,
+} from "@/components/editor/note-source-panel";
+import type { EditableTag } from "@/components/editor/note-tags";
 import { EditorZoomControls } from "@/components/editor/editor-zoom-controls";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -30,6 +54,7 @@ import { EditorToolbar } from "@/components/editor/editor-toolbar";
 import type { WorkspaceSummary } from "@/lib/dashboard/queries";
 import { buildEditorExtensions } from "@/lib/editor/extensions";
 import { plainToRichDocument } from "@/lib/editor/document";
+import { resolveNoteFont, type NoteFontId } from "@/lib/editor/note-fonts";
 import { PROSE_EDITOR_CLASS } from "@/lib/editor/prose-classes";
 import { useEditorZoom, useEditorZoomShortcuts } from "@/hooks/use-editor-zoom";
 import type { NoteAiView } from "@/lib/notes/ai-view";
@@ -70,19 +95,37 @@ interface NoteEditorProps {
   workspaces: WorkspaceSummary[];
   /** A leitura da IA pintada no servidor; o componente a mantém viva. */
   ai: NoteAiView | null;
+  /** As tags da conta, para as sugestões do campo de tags. */
+  tagVocabulary: EditableTag[];
+  /** As pastas da conta, para trocar a da nota na ficha. */
+  folders: FolderChoice[];
 }
 
-export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
+type NotePatch = {
+  title?: string;
+  contentRich?: unknown;
+  references?: NoteReference[];
+  font?: NoteFontId;
+};
+
+export function NoteEditor({
+  note,
+  workspaces,
+  ai,
+  tagVocabulary,
+  folders,
+}: NoteEditorProps) {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteAttachments, setDeleteAttachments] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [title, setTitle] = useState(note.title);
+  const [font, setFont] = useState(() => resolveNoteFont(note.font));
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const queued = useRef<{ title?: string; contentRich?: unknown }>({});
+  const queued = useRef<NotePatch>({});
   // Salvou algo que a IA ainda não foi chamada a ler.
   const unread = useRef(false);
   const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -99,11 +142,12 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
       readTimer.current = null;
       if (!unread.current) return;
       unread.current = false;
-      void fetch(`/api/notes/${note.id}/analyze`, { method: "POST", keepalive }).catch(
-        () => {
-          // Sem problema: a varredura do dashboard apanha a nota depois.
-        }
-      );
+      void fetch(`/api/notes/${note.id}/analyze`, {
+        method: "POST",
+        keepalive,
+      }).catch(() => {
+        // Sem problema: a varredura do dashboard apanha a nota depois.
+      });
     },
     [note.id]
   );
@@ -144,7 +188,10 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
         if (response.ok && !read) {
           unread.current = true;
           if (readTimer.current) clearTimeout(readTimer.current);
-          readTimer.current = setTimeout(() => requestRead(), READ_AFTER_QUIET_MS);
+          readTimer.current = setTimeout(
+            () => requestRead(),
+            READ_AFTER_QUIET_MS
+          );
         }
       } catch {
         setSaveState("error");
@@ -156,7 +203,7 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
   );
 
   const queue = useCallback(
-    (patch: { title?: string; contentRich?: unknown }) => {
+    (patch: NotePatch) => {
       queued.current = { ...queued.current, ...patch };
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => void flush(), SAVE_DELAY);
@@ -236,6 +283,14 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
     [queue]
   );
 
+  const handleFont = useCallback(
+    (next: NoteFontId) => {
+      setFont(next);
+      queue({ font: next });
+    },
+    [queue]
+  );
+
   const openInWorkspace = useCallback(
     async (workspaceId: string) => {
       await flush();
@@ -278,29 +333,27 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
     }
   }, [deleteAttachments, note.id, router]);
 
-  // Abre o arquivo de onde a nota nasceu. A URL assinada é pedida na hora e
-  // aberta em outra aba — o bucket é privado, não há endereço público para
-  // virar `href` (ver "A URL do arquivo" no AGENTS).
-  const openAttachment = useCallback(async () => {
-    if (!note.attachment) return;
-    try {
-      const response = await fetch(`/api/attachments/${note.attachment.id}`);
-      const body = (await response.json().catch(() => null)) as {
-        url?: string;
-      } | null;
-      if (response.ok && body?.url) {
-        window.open(body.url, "_blank", "noopener,noreferrer");
-      }
-    } catch {
-      // A referência continua visível mesmo quando o arquivo não abre.
-    }
-  }, [note.attachment]);
+  // O arquivo de onde a nota nasceu abre ao lado, não em outra aba: a pessoa
+  // lê o PDF e escreve a nota na mesma tela, como na lousa.
+  const sourcePanel = useSourcePanel(note.attachment !== null);
+  const setSourceOpen = sourcePanel.setOpen;
+  const closeSourcePanel = useCallback(
+    () => setSourceOpen(false),
+    [setSourceOpen]
+  );
 
   return (
     // As variantes `print:` desmontam o chrome da tela na impressão: a página
     // é 100dvh com rolagem interna, e sem elas o PDF sairia com uma página só
     // — o recorte do que está visível no viewport.
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background print:h-auto print:overflow-visible">
+    // `NOTE_FONT_VARIABLES` publica as `--font-note-*` para a página inteira:
+    // o documento as usa, e a barra desenha o nome de cada fonte nela mesma.
+    <div
+      className={cn(
+        "flex h-[100dvh] flex-col overflow-hidden bg-background print:h-auto print:overflow-visible",
+        NOTE_FONT_VARIABLES
+      )}
+    >
       <header className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2.5 sm:px-4 print:hidden">
         <Link
           href="/dashboard"
@@ -329,6 +382,32 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <SaveIndicator state={saveState} />
+
+          {note.attachment && (
+            <button
+              type="button"
+              onClick={() => sourcePanel.setOpen(!sourcePanel.open)}
+              aria-pressed={sourcePanel.open}
+              title={
+                sourcePanel.open
+                  ? "Fechar o arquivo de origem"
+                  : "Ver o arquivo de origem ao lado da nota"
+              }
+              className={cn(
+                "flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm transition-colors duration-150 pointer-coarse:h-11",
+                sourcePanel.open
+                  ? "bg-tertiary text-foreground"
+                  : "text-muted-foreground hover:bg-tertiary hover:text-foreground"
+              )}
+            >
+              {sourcePanel.open ? (
+                <PanelRightClose className="size-4" aria-hidden="true" />
+              ) : (
+                <PanelRightOpen className="size-4" aria-hidden="true" />
+              )}
+              <span className="hidden sm:inline">Arquivo</span>
+            </button>
+          )}
 
           <ContextMenu>
             <ContextMenuTrigger asChild>
@@ -401,10 +480,6 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
         </div>
       </header>
 
-      <EditorToolbar
-        editor={editor}
-        className="print:hidden"
-      />
       <EditorBubbleMenu editor={editor} />
 
       <ConfirmDialog
@@ -428,83 +503,129 @@ export function NoteEditor({ note, workspaces, ai }: NoteEditorProps) {
             className="mt-0.5 size-4 accent-error"
           />
           <span>
-            <span className="block font-medium">Apagar também os arquivos associados</span>
+            <span className="block font-medium">
+              Apagar também os arquivos associados
+            </span>
             <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              Essa escolha remove permanentemente os arquivos enviados junto com a nota.
+              Essa escolha remove permanentemente os arquivos enviados junto com
+              a nota.
             </span>
           </span>
         </label>
       </ConfirmDialog>
 
-      <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
-        <div className="mx-auto w-full max-w-2xl px-6 pt-10 pb-12">
-          <label className="sr-only" htmlFor="note-title">
-            Título da nota
-          </label>
-          <input
-            id="note-title"
-            value={title}
-            onChange={(event) => handleTitle(event.target.value)}
-            placeholder="Sem título"
-            maxLength={200}
-            data-focus-ring="container"
-            className="w-full rounded-lg bg-transparent text-3xl font-bold tracking-[-0.02em] text-foreground outline-none placeholder:text-subtle-foreground font-[family-name:var(--font-display)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-subtle-foreground sm:text-4xl"
+      {/* A nota à esquerda, o arquivo à direita. A barra de formatação fica
+          na coluna da nota: ela formata o texto, não o arquivo. */}
+      <div className="flex min-h-0 flex-1 print:block">
+        <div className="flex min-w-0 flex-1 flex-col print:block">
+          <EditorToolbar
+            editor={editor}
+            font={font}
+            onFontChange={handleFont}
+            className="print:hidden"
           />
-
-          {/* A referência de origem: de qual documento a Nexo derivou esta
-              nota. Não leva `print:hidden` — a procedência é conteúdo, e faz
-              sentido no PDF exportado. */}
-          {note.attachment && (
-            <button
-              type="button"
-              onClick={() => void openAttachment()}
-              title="Abrir o arquivo de origem"
-              className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-muted-foreground motion-reduce:transition-none"
+          <div className="min-h-0 flex-1 overflow-y-auto print:overflow-visible">
+            {/* A fonte escolhida vale daqui para dentro: título, corpo e
+                referências. A ficha e o rodapé voltam à fonte da interface
+                (`font-sans`) — são controles, não texto da nota. */}
+            <div
+              style={noteFontStyle(font)}
+              className="mx-auto w-full max-w-2xl px-6 pt-10 pb-12 print:max-w-none print:px-0 print:pt-0"
             >
-              <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">
-                Derivada de{" "}
-                <span className="font-medium text-muted-foreground">
-                  {note.attachment.filename}
-                </span>
-              </span>
-            </button>
-          )}
+              <label className="sr-only" htmlFor="note-title">
+                Título da nota
+              </label>
+              {/* Textarea e não input: um título longo quebra linha em vez
+                  de sumir pela direita — com o arquivo aberto ao lado, a
+                  coluna da nota fica estreita. `field-sizing` faz a altura
+                  seguir o texto; Enter não quebra linha, porque título é uma
+                  linha só, e desce para o corpo. */}
+              <textarea
+                id="note-title"
+                rows={1}
+                value={title}
+                onChange={(event) =>
+                  handleTitle(event.target.value.replace(/\s*\n\s*/g, " "))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    editor?.commands.focus("start");
+                  }
+                }}
+                placeholder="Sem título"
+                maxLength={200}
+                data-focus-ring="container"
+                // Sem borda, contorno nem anel: o título é texto da página, e o
+                // cursor piscando já diz onde está o foco.
+                className="w-full resize-none border-0 bg-transparent p-0 text-3xl leading-[1.15] font-bold tracking-[-0.02em] text-balance text-foreground shadow-none outline-none [field-sizing:content] placeholder:text-subtle-foreground font-[family-name:var(--font-display)] focus:outline-none focus-visible:outline-none sm:text-4xl"
+              />
 
-          <NoteTags noteId={note.id} initialTags={note.tags} />
+              {/* As propriedades da nota — de onde veio, como está
+                  marcada, onde mora. Recolhível; ver o componente. */}
+              <NoteDetails
+                note={note}
+                tagVocabulary={tagVocabulary}
+                folders={folders}
+                sourceOpen={sourcePanel.open}
+                onToggleSource={() => sourcePanel.setOpen(!sourcePanel.open)}
+              />
 
-          {/* A tipografia do documento vive em `PROSE_EDITOR_CLASS`, por
+              {/* O fim do cabeçalho da página — título, origem e tags — e o
+                  começo do corpo. Vai para o PDF também: separa a ficha do
+                  texto no papel do mesmo jeito. */}
+              <hr className="mt-6 border-0 border-t border-border print:border-neutral-300" />
+
+              {/* A tipografia do documento vive em `PROSE_EDITOR_CLASS`, por
               descendência: o conteúdo é gerado pelo ProseMirror e não passa
               pelas nossas classes um a um. Aqui só a altura e a margem, que
               são desta tela. */}
-          <EditorContent
-            editor={editor}
-            style={{ zoom: textZoom.zoom / 100 }}
-            className={cn("mt-8 [&_.tiptap]:min-h-[60vh]", PROSE_EDITOR_CLASS)}
-          />
-          {/* O rodapé da nota: o resumo da Nexo no canto, o zoom do outro
+              <EditorContent
+                editor={editor}
+                style={{ zoom: textZoom.zoom / 100 }}
+                className={cn(
+                  "mt-6 [&_.tiptap]:min-h-[50vh] print:[&_.tiptap]:min-h-0",
+                  PROSE_EDITOR_CLASS
+                )}
+              />
+
+              <NoteReferences
+                initial={note.references}
+                onChange={(references) => queue({ references })}
+              />
+              {/* O rodapé da nota: o resumo da Nexo no canto, o zoom do outro
               lado. No celular o zoom sobe e o resumo fica embaixo, com a
               largura inteira para ser lido. */}
-          <div className="mt-6 flex flex-col-reverse gap-4 border-t border-border pt-3 sm:flex-row sm:items-start sm:justify-between print:hidden">
-            <NoteAiSummary noteId={note.id} initial={ai} />
-            <EditorZoomControls
-              className="shrink-0 self-end sm:self-auto"
-              zoom={textZoom.zoom}
-              onDecrease={() => {
-                textZoom.decrease();
-                editor?.commands.focus();
-              }}
-              onIncrease={() => {
-                textZoom.increase();
-                editor?.commands.focus();
-              }}
-              onReset={() => {
-                textZoom.reset();
-                editor?.commands.focus();
-              }}
-            />
+              <div className="mt-10 flex flex-col-reverse gap-4 border-t border-border pt-3 font-sans sm:flex-row sm:items-start sm:justify-between print:hidden">
+                <NoteAiSummary noteId={note.id} initial={ai} />
+                <EditorZoomControls
+                  className="shrink-0 self-end sm:self-auto"
+                  zoom={textZoom.zoom}
+                  onDecrease={() => {
+                    textZoom.decrease();
+                    editor?.commands.focus();
+                  }}
+                  onIncrease={() => {
+                    textZoom.increase();
+                    editor?.commands.focus();
+                  }}
+                  onReset={() => {
+                    textZoom.reset();
+                    editor?.commands.focus();
+                  }}
+                />
+              </div>
+            </div>
           </div>
         </div>
+
+        {note.attachment && sourcePanel.open && (
+          <NoteSourcePanel
+            source={note.attachment}
+            wide={sourcePanel.wide}
+            onClose={closeSourcePanel}
+          />
+        )}
       </div>
     </div>
   );
