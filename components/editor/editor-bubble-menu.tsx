@@ -12,15 +12,20 @@ import {
   Strikethrough,
   Underline,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { LinkEditor } from "@/components/editor/link-editor";
+import {
+  ShortcutTip,
+  shortcutProps,
+  useShortcutTip,
+} from "@/components/editor/shortcut-tip";
 import {
   TextColorGlyph,
   TextColorSwatches,
   useActiveTextColor,
 } from "@/components/editor/text-color-picker";
-import { HINTS } from "@/lib/editor/shortcuts";
+import { type Shortcut, SHORTCUTS } from "@/lib/editor/shortcuts";
 import { cn } from "@/lib/utils";
 
 /**
@@ -144,14 +149,14 @@ function BubbleMenuBody({
         ) : (
           <>
             <MarkButton
-              hint={HINTS.bold}
+              shortcut={SHORTCUTS.bold}
               active={editor.isActive("bold")}
               onClick={() => editor.chain().focus().toggleBold().run()}
             >
               <Bold className="size-4" aria-hidden="true" />
             </MarkButton>
             <MarkButton
-              hint={HINTS.italic}
+              shortcut={SHORTCUTS.italic}
               active={editor.isActive("italic")}
               onClick={() => editor.chain().focus().toggleItalic().run()}
             >
@@ -161,14 +166,14 @@ function BubbleMenuBody({
             {!compact && (
               <>
                 <MarkButton
-                  hint={HINTS.underline}
+                  shortcut={SHORTCUTS.underline}
                   active={editor.isActive("underline")}
                   onClick={() => editor.chain().focus().toggleUnderline().run()}
                 >
                   <Underline className="size-4" aria-hidden="true" />
                 </MarkButton>
                 <MarkButton
-                  hint={HINTS.strike}
+                  shortcut={SHORTCUTS.strike}
                   active={editor.isActive("strike")}
                   onClick={() => editor.chain().focus().toggleStrike().run()}
                 >
@@ -178,21 +183,21 @@ function BubbleMenuBody({
             )}
 
             <MarkButton
-              hint={HINTS.code}
+              shortcut={SHORTCUTS.code}
               active={editor.isActive("code")}
               onClick={() => editor.chain().focus().toggleCode().run()}
             >
               <Code className="size-4" aria-hidden="true" />
             </MarkButton>
             <MarkButton
-              hint={HINTS.highlight}
+              shortcut={SHORTCUTS.highlight}
               active={editor.isActive("highlight")}
               onClick={() => editor.chain().focus().toggleHighlight().run()}
             >
               <Highlighter className="size-4" aria-hidden="true" />
             </MarkButton>
             <MarkButton
-              hint="Cor do texto"
+              shortcut={COLOR_TIP}
               active={textColor !== null}
               onClick={() => setColorOpen(true)}
             >
@@ -202,7 +207,7 @@ function BubbleMenuBody({
             <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />
 
             <MarkButton
-              hint={HINTS.link}
+              shortcut={SHORTCUTS.link}
               active={editor.isActive("link")}
               onClick={() => setLinkOpen(true)}
             >
@@ -215,34 +220,54 @@ function BubbleMenuBody({
   );
 }
 
+/** A cor não tem tecla; a dica mostra só o nome, no mesmo desenho. */
+const COLOR_TIP: Shortcut = { label: "Cor do texto", keys: [] };
+
 function MarkButton({
-  hint,
+  shortcut,
   active,
   onClick,
   children,
 }: {
-  hint: string;
+  shortcut: Shortcut;
   active: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const tip = useShortcutTip<HTMLButtonElement>();
+
   return (
-    <button
-      type="button"
-      // O `mousedown` do editor tiraria a seleção antes do `click` chegar.
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onClick}
-      title={hint}
-      aria-pressed={active}
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
-        active
-          ? "bg-tertiary text-foreground"
-          : "text-subtle-foreground hover:bg-tertiary hover:text-foreground"
-      )}
-    >
-      {children}
-      <span className="sr-only">{hint}</span>
-    </button>
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        // O `mousedown` do editor tiraria a seleção antes do `click` chegar.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onClick}
+        aria-pressed={active}
+        {...shortcutProps(shortcut)}
+        {...tip.handlers}
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
+          active
+            ? "bg-tertiary text-foreground"
+            : "text-subtle-foreground hover:bg-tertiary hover:text-foreground"
+        )}
+      >
+        {children}
+        <span className="sr-only">{shortcut.label}</span>
+      </button>
+
+      {/* Acima: o menu já está sobre a seleção, e uma dica embaixo cairia
+          justamente sobre o texto que a pessoa está formatando. */}
+      <ShortcutTip
+        anchorRef={anchorRef}
+        open={tip.open}
+        onClose={tip.hide}
+        shortcut={shortcut}
+        placement="top"
+      />
+    </>
   );
 }

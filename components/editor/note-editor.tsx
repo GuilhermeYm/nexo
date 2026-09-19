@@ -349,8 +349,9 @@ export function NoteEditor({
     // `NOTE_FONT_VARIABLES` publica as `--font-note-*` para a página inteira:
     // o documento as usa, e a barra desenha o nome de cada fonte nela mesma.
     <div
+      data-app-viewport=""
       className={cn(
-        "flex h-[100dvh] flex-col overflow-hidden bg-background print:h-auto print:overflow-visible",
+        "flex h-[100dvh] flex-col overflow-hidden overscroll-contain bg-background print:h-auto print:overflow-visible",
         NOTE_FONT_VARIABLES
       )}
     >

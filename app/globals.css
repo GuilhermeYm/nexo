@@ -146,6 +146,34 @@ body {
     color 0.3s ease;
 }
 
+/* As telas que ocupam a janela inteira não rolam nem quicam.
+
+   No dashboard, no editor e na lousa a página em si não rola: quem rola é um
+   painel lá dentro. Só que o documento continuava sendo uma superfície
+   rolável, e bastava um pixel a mais no `body` para ele andar — a barra de
+   espaço, com o foco fora de um campo, desce uma tela inteira, e a moldura
+   subia deixando uma faixa vazia. (Em dev o indicador do Next é filho do
+   `body` e sozinho já soma ~100px; em produção pode ser outra coisa. A
+   correção não depende de saber qual.)
+
+   `overflow: hidden` no documento resolve a rolagem: sem superfície, não há
+   o que a tecla ou a roda movam. O `overscroll-behavior: none` cuida do
+   quique elástico, que o Chrome faz mesmo sem rolagem nenhuma, e as molduras
+   levam `overscroll-contain` por dentro, para o encadeamento parar antes de
+   chegar aqui.
+
+   Fica preso ao `:has([data-app-viewport])` de propósito: a página de entrada
+   rola de verdade, e lá tudo isso — inclusive o puxar-para-recarregar do
+   celular — é o comportamento certo. E vale só na tela: no papel a nota tem
+   as páginas que tiver, e recortar o documento cortaria o PDF na primeira. */
+@media screen {
+  html:has([data-app-viewport]),
+  body:has([data-app-viewport]) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+}
+
 /* As superfícies que o navegador desenha por nós — seleção, cursor, barra de
    rolagem e anel de foco — vêm com um padrão que não pertence a paleta
    nenhuma. Aqui elas passam a seguir o tema como o resto da página. */

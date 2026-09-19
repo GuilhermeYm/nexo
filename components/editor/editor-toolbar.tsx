@@ -35,8 +35,13 @@ import {
   TextColorSwatches,
   useActiveTextColor,
 } from "@/components/editor/text-color-picker";
+import {
+  ShortcutTip,
+  shortcutProps,
+  useShortcutTip,
+} from "@/components/editor/shortcut-tip";
 import { NOTE_FONTS, type NoteFontId } from "@/lib/editor/note-fonts";
-import { HINTS } from "@/lib/editor/shortcuts";
+import { type Shortcut, SHORTCUTS } from "@/lib/editor/shortcuts";
 import { cn } from "@/lib/utils";
 
 /**
@@ -78,42 +83,42 @@ export function EditorToolbar({
             <Divider />
 
             <ToolbarButton
-              hint={HINTS.bold}
+              shortcut={SHORTCUTS.bold}
               active={editor.isActive("bold")}
               onClick={() => editor.chain().focus().toggleBold().run()}
             >
               <Bold className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.italic}
+              shortcut={SHORTCUTS.italic}
               active={editor.isActive("italic")}
               onClick={() => editor.chain().focus().toggleItalic().run()}
             >
               <Italic className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.underline}
+              shortcut={SHORTCUTS.underline}
               active={editor.isActive("underline")}
               onClick={() => editor.chain().focus().toggleUnderline().run()}
             >
               <Underline className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.strike}
+              shortcut={SHORTCUTS.strike}
               active={editor.isActive("strike")}
               onClick={() => editor.chain().focus().toggleStrike().run()}
             >
               <Strikethrough className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.code}
+              shortcut={SHORTCUTS.code}
               active={editor.isActive("code")}
               onClick={() => editor.chain().focus().toggleCode().run()}
             >
               <Code className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.highlight}
+              shortcut={SHORTCUTS.highlight}
               active={editor.isActive("highlight")}
               onClick={() => editor.chain().focus().toggleHighlight().run()}
             >
@@ -124,7 +129,7 @@ export function EditorToolbar({
             <Divider />
 
             <ToolbarButton
-              hint={HINTS.heading1}
+              shortcut={SHORTCUTS.heading1}
               active={editor.isActive("heading", { level: 1 })}
               onClick={() =>
                 editor.chain().focus().toggleHeading({ level: 1 }).run()
@@ -133,7 +138,7 @@ export function EditorToolbar({
               <Heading1 className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.heading2}
+              shortcut={SHORTCUTS.heading2}
               active={editor.isActive("heading", { level: 2 })}
               onClick={() =>
                 editor.chain().focus().toggleHeading({ level: 2 }).run()
@@ -142,7 +147,7 @@ export function EditorToolbar({
               <Heading2 className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.heading3}
+              shortcut={SHORTCUTS.heading3}
               active={editor.isActive("heading", { level: 3 })}
               onClick={() =>
                 editor.chain().focus().toggleHeading({ level: 3 }).run()
@@ -154,21 +159,21 @@ export function EditorToolbar({
             <Divider />
 
             <ToolbarButton
-              hint={HINTS.bulletList}
+              shortcut={SHORTCUTS.bulletList}
               active={editor.isActive("bulletList")}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
             >
               <List className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.orderedList}
+              shortcut={SHORTCUTS.orderedList}
               active={editor.isActive("orderedList")}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
             >
               <ListOrdered className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.taskList}
+              shortcut={SHORTCUTS.taskList}
               active={editor.isActive("taskList")}
               onClick={() => editor.chain().focus().toggleTaskList().run()}
             >
@@ -178,28 +183,28 @@ export function EditorToolbar({
             <Divider />
 
             <ToolbarButton
-              hint={HINTS.blockquote}
+              shortcut={SHORTCUTS.blockquote}
               active={editor.isActive("blockquote")}
               onClick={() => editor.chain().focus().toggleBlockquote().run()}
             >
               <Quote className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.codeBlock}
+              shortcut={SHORTCUTS.codeBlock}
               active={editor.isActive("codeBlock")}
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
             >
               <SquareCode className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.horizontalRule}
+              shortcut={SHORTCUTS.horizontalRule}
               active={false}
               onClick={() => editor.chain().focus().setHorizontalRule().run()}
             >
               <Minus className="size-4" aria-hidden="true" />
             </ToolbarButton>
             <ToolbarButton
-              hint={HINTS.details}
+              shortcut={SHORTCUTS.details}
               active={editor.isActive("details")}
               onClick={() =>
                 editor.isActive("details")
@@ -221,32 +226,46 @@ export function EditorToolbar({
 }
 
 function ToolbarButton({
-  hint,
+  shortcut,
   active,
   onClick,
   children,
 }: {
-  hint: string;
+  shortcut: Shortcut;
   active: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const tip = useShortcutTip<HTMLButtonElement>();
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={hint}
-      aria-pressed={active}
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
-        active
-          ? "bg-tertiary text-foreground"
-          : "text-subtle-foreground hover:bg-tertiary hover:text-foreground"
-      )}
-    >
-      {children}
-      <span className="sr-only">{hint}</span>
-    </button>
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        {...shortcutProps(shortcut)}
+        {...tip.handlers}
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
+          active
+            ? "bg-tertiary text-foreground"
+            : "text-subtle-foreground hover:bg-tertiary hover:text-foreground"
+        )}
+      >
+        {children}
+        <span className="sr-only">{shortcut.label}</span>
+      </button>
+
+      <ShortcutTip
+        anchorRef={anchorRef}
+        open={tip.open}
+        onClose={tip.hide}
+        shortcut={shortcut}
+      />
+    </>
   );
 }
 
@@ -256,8 +275,10 @@ function ToolbarButton({
  */
 function LinkButton({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
+  // O mesmo botão ancora as duas coisas: a dica e o painel do link.
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const tip = useShortcutTip<HTMLButtonElement>();
 
   return (
     <>
@@ -265,9 +286,10 @@ function LinkButton({ editor }: { editor: Editor }) {
         ref={anchorRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={HINTS.link}
         aria-pressed={editor.isActive("link")}
         aria-expanded={open}
+        {...shortcutProps(SHORTCUTS.link)}
+        {...tip.handlers}
         className={cn(
           "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
           editor.isActive("link")
@@ -276,8 +298,17 @@ function LinkButton({ editor }: { editor: Editor }) {
         )}
       >
         <Link2 className="size-4" aria-hidden="true" />
-        <span className="sr-only">{HINTS.link}</span>
+        <span className="sr-only">{SHORTCUTS.link.label}</span>
       </button>
+
+      {/* Com o painel aberto a dica sobraria: ela explicaria um botão que já
+          virou outra coisa. */}
+      <ShortcutTip
+        anchorRef={anchorRef}
+        open={tip.open && !open}
+        onClose={tip.hide}
+        shortcut={SHORTCUTS.link}
+      />
 
       <FloatingPanel
         anchorRef={anchorRef}
@@ -296,11 +327,14 @@ function LinkButton({ editor }: { editor: Editor }) {
  * A cor do texto selecionado. O traço sob o "A" mostra a cor onde o cursor
  * está; o painel é a paleta inteira, com "padrão" primeiro para desfazer.
  */
+const COLOR_TIP: Shortcut = { label: "Cor do texto", keys: [] };
+
 function ColorButton({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
   const current = useActiveTextColor(editor);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const tip = useShortcutTip<HTMLButtonElement>();
   const hint = "Cor do texto";
 
   return (
@@ -310,9 +344,10 @@ function ColorButton({ editor }: { editor: Editor }) {
         type="button"
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => setOpen((v) => !v)}
-        title={hint}
+        aria-label={hint}
         aria-expanded={open}
         aria-haspopup="dialog"
+        {...tip.handlers}
         className={cn(
           "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-10",
           open || current
@@ -321,8 +356,14 @@ function ColorButton({ editor }: { editor: Editor }) {
         )}
       >
         <TextColorGlyph color={current} />
-        <span className="sr-only">{hint}</span>
       </button>
+
+      <ShortcutTip
+        anchorRef={anchorRef}
+        open={tip.open && !open}
+        onClose={tip.hide}
+        shortcut={COLOR_TIP}
+      />
 
       <FloatingPanel
         anchorRef={anchorRef}
@@ -342,6 +383,8 @@ function ColorButton({ editor }: { editor: Editor }) {
  * das marcas, porque não age sobre a seleção: é uma escolha do documento.
  * Cada opção se desenha na própria fonte; ver é mais rápido que ler o nome.
  */
+const FONT_TIP: Shortcut = { label: "Fonte da nota", keys: [] };
+
 function FontPicker({
   font,
   onChange,
@@ -350,8 +393,9 @@ function FontPicker({
   onChange: (font: NoteFontId) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => setOpen(false), []);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const tip = useShortcutTip<HTMLButtonElement>();
   const current =
     NOTE_FONTS.find((option) => option.id === font) ?? NOTE_FONTS[0];
 
@@ -361,9 +405,10 @@ function FontPicker({
         ref={anchorRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title="Fonte da nota"
+        aria-label={`Fonte da nota: ${current.name}`}
         aria-expanded={open}
         aria-haspopup="dialog"
+        {...tip.handlers}
         className={cn(
           "flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors duration-150 pointer-coarse:h-10",
           open
@@ -371,7 +416,6 @@ function FontPicker({
             : "text-muted-foreground hover:bg-tertiary hover:text-foreground"
         )}
       >
-        <span className="sr-only">Fonte da nota: </span>
         <span style={{ fontFamily: noteFontFamily(current.id) }}>
           {current.name}
         </span>
@@ -380,6 +424,13 @@ function FontPicker({
           aria-hidden="true"
         />
       </button>
+
+      <ShortcutTip
+        anchorRef={anchorRef}
+        open={tip.open && !open}
+        onClose={tip.hide}
+        shortcut={FONT_TIP}
+      />
 
       <FloatingPanel
         anchorRef={anchorRef}

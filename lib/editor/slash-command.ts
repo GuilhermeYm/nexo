@@ -1,7 +1,5 @@
 import { Extension } from "@tiptap/core";
-import Suggestion, {
-  type SuggestionOptions,
-} from "@tiptap/suggestion";
+import Suggestion, { type SuggestionOptions } from "@tiptap/suggestion";
 import { ReactRenderer } from "@tiptap/react";
 import {
   Heading1,
@@ -22,7 +20,7 @@ import {
   type SlashItem,
   type SlashMenuHandle,
 } from "@/components/editor/editor-slash-menu";
-import { HINTS } from "@/lib/editor/shortcuts";
+import { SHORTCUTS } from "@/lib/editor/shortcuts";
 
 /**
  * O menu "/" — inserir um bloco sem soltar o teclado.
@@ -47,31 +45,46 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     title: "Título",
-    hint: HINTS.heading1,
+    shortcut: SHORTCUTS.heading1,
     keywords: ["titulo", "h1", "heading"],
     icon: Heading1,
     run: (editor, range) =>
-      editor.chain().focus().deleteRange(range).setNode("heading", { level: 1 }).run(),
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setNode("heading", { level: 1 })
+        .run(),
   },
   {
     title: "Subtítulo",
-    hint: HINTS.heading2,
+    shortcut: SHORTCUTS.heading2,
     keywords: ["subtitulo", "h2", "heading"],
     icon: Heading2,
     run: (editor, range) =>
-      editor.chain().focus().deleteRange(range).setNode("heading", { level: 2 }).run(),
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setNode("heading", { level: 2 })
+        .run(),
   },
   {
     title: "Subtítulo menor",
-    hint: HINTS.heading3,
+    shortcut: SHORTCUTS.heading3,
     keywords: ["subtitulo", "h3", "heading"],
     icon: Heading3,
     run: (editor, range) =>
-      editor.chain().focus().deleteRange(range).setNode("heading", { level: 3 }).run(),
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setNode("heading", { level: 3 })
+        .run(),
   },
   {
     title: "Lista",
-    hint: HINTS.bulletList,
+    shortcut: SHORTCUTS.bulletList,
     keywords: ["lista", "bullet", "ul", "topicos"],
     icon: List,
     run: (editor, range) =>
@@ -79,7 +92,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     title: "Lista numerada",
-    hint: HINTS.orderedList,
+    shortcut: SHORTCUTS.orderedList,
     keywords: ["lista", "numerada", "ordered", "ol"],
     icon: ListOrdered,
     run: (editor, range) =>
@@ -87,7 +100,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     title: "Lista de tarefas",
-    hint: HINTS.taskList,
+    shortcut: SHORTCUTS.taskList,
     keywords: ["tarefa", "task", "todo", "checkbox", "checklist"],
     icon: ListChecks,
     run: (editor, range) =>
@@ -95,7 +108,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     title: "Citação",
-    hint: HINTS.blockquote,
+    shortcut: SHORTCUTS.blockquote,
     keywords: ["citacao", "quote", "blockquote"],
     icon: Quote,
     run: (editor, range) =>
@@ -103,7 +116,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     title: "Bloco de código",
-    hint: HINTS.codeBlock,
+    shortcut: SHORTCUTS.codeBlock,
     keywords: ["codigo", "code", "pre", "snippet"],
     icon: SquareCode,
     run: (editor, range) =>
@@ -118,7 +131,7 @@ export const SLASH_ITEMS: SlashItem[] = [
   },
   {
     title: "Bloco recolhível",
-    hint: HINTS.details,
+    shortcut: SHORTCUTS.details,
     keywords: ["details", "toggle", "recolhivel", "acordeao", "spoiler"],
     icon: ListTree,
     run: (editor, range) =>

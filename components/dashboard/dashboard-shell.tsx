@@ -373,9 +373,7 @@ export function DashboardShell({
     // Fechar o Início enquanto há uma lousa aberta leva direto ao último
     // lugar que a pessoa deixou à mão. Assim a aba fechada não continua
     // ocupando a janela principal por trás da barra.
-    const lastWorkspaceId = [...tabs]
-      .reverse()
-      .find((tab) => tab !== HOME_TAB);
+    const lastWorkspaceId = [...tabs].reverse().find((tab) => tab !== HOME_TAB);
 
     closeTab(HOME_TAB);
     if (lastWorkspaceId) router.push(`/workspace/${lastWorkspaceId}`);
@@ -385,7 +383,10 @@ export function DashboardShell({
   const name = firstName(userName);
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-secondary">
+    <div
+      data-app-viewport=""
+      className="flex h-dvh overflow-hidden overscroll-contain bg-secondary"
+    >
       <Sidebar
         open={sidebarOpen}
         drawerOpen={drawerOpen}
@@ -525,92 +526,92 @@ export function DashboardShell({
               onOpenSidebar={revealSidebar}
             />
           ) : (
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-14 sm:py-20">
-            <div
-              data-dashboard-enter=""
-              className="flex animate-dashboard-enter items-center gap-3 motion-reduce:animate-none"
-            >
-              <span
-                aria-hidden="true"
-                className="flex size-9 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground font-[family-name:var(--font-display)]"
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-14 sm:py-20">
+              <div
+                data-dashboard-enter=""
+                className="flex animate-dashboard-enter items-center gap-3 motion-reduce:animate-none"
               >
-                n.
-              </span>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
-                {greeting}
-                {name ? `, ${name}` : ""}
-              </h1>
-            </div>
+                <span
+                  aria-hidden="true"
+                  className="flex size-9 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground font-[family-name:var(--font-display)]"
+                >
+                  n.
+                </span>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
+                  {greeting}
+                  {name ? `, ${name}` : ""}
+                </h1>
+              </div>
 
-            <p
-              data-dashboard-enter=""
-              className="mt-2.5 animate-dashboard-enter text-sm leading-relaxed text-muted-foreground motion-reduce:animate-none"
-              style={{ animationDelay: "45ms" }}
-            >
-              Jogue o que chegou aqui dentro. A Nexo lê, classifica e guarda —
-              você só volta quando precisar reencontrar.
-            </p>
+              <p
+                data-dashboard-enter=""
+                className="mt-2.5 animate-dashboard-enter text-sm leading-relaxed text-muted-foreground motion-reduce:animate-none"
+                style={{ animationDelay: "45ms" }}
+              >
+                Jogue o que chegou aqui dentro. A Nexo lê, classifica e guarda —
+                você só volta quando precisar reencontrar.
+              </p>
 
-            <div
-              data-dashboard-enter=""
-              className="mt-7 animate-dashboard-enter motion-reduce:animate-none"
-              style={{ animationDelay: "90ms" }}
-            >
-              <CommandBar
-                onUploaded={handleUploaded}
-                registerPickFile={registerPickFile}
-              />
-              {/* O rascunho fica logo abaixo da barra por ser o outro lado
+              <div
+                data-dashboard-enter=""
+                className="mt-7 animate-dashboard-enter motion-reduce:animate-none"
+                style={{ animationDelay: "90ms" }}
+              >
+                <CommandBar
+                  onUploaded={handleUploaded}
+                  registerPickFile={registerPickFile}
+                />
+                {/* O rascunho fica logo abaixo da barra por ser o outro lado
                   da mesma moeda: ali em cima entra o que já está pronto para
                   a Nexo ler e classificar, aqui embaixo o que ainda não é
                   nada. */}
-              <DraftNote
-                onSaved={handleDraftSaved}
-                registerOpen={registerOpenDraft}
-              />
-            </div>
+                <DraftNote
+                  onSaved={handleDraftSaved}
+                  registerOpen={registerOpenDraft}
+                />
+              </div>
 
-            <div
-              data-dashboard-enter=""
-              className="animate-dashboard-enter motion-reduce:animate-none"
-              style={{ animationDelay: "145ms" }}
-            >
-              <TodayTasks />
-            </div>
-
-            <TopTags tags={topTags} entranceDelay="200ms" />
-
-            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div
                 data-dashboard-enter=""
                 className="animate-dashboard-enter motion-reduce:animate-none"
-                style={{ animationDelay: "255ms" }}
+                style={{ animationDelay: "145ms" }}
               >
-                <TasksPanel
-                  initial={jobs}
-                  renderedAt={renderedAt}
-                  now={now}
-                  registerRefresh={registerRefresh}
-                  onUpload={handlePickFile}
-                  focusJobId={focusJobId}
-                />
+                <TodayTasks />
               </div>
-              <div
-                data-dashboard-enter=""
-                className="animate-dashboard-enter motion-reduce:animate-none"
-                style={{ animationDelay: "300ms" }}
-              >
-                <RecentPanel
-                  initial={notes}
-                  renderedAt={renderedAt}
-                  now={now}
-                  workspaces={workspaces}
-                  onOpenNote={handleOpenNote}
-                  onCreateNote={handleCreateNote}
-                />
+
+              <TopTags tags={topTags} entranceDelay="200ms" />
+
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div
+                  data-dashboard-enter=""
+                  className="animate-dashboard-enter motion-reduce:animate-none"
+                  style={{ animationDelay: "255ms" }}
+                >
+                  <TasksPanel
+                    initial={jobs}
+                    renderedAt={renderedAt}
+                    now={now}
+                    registerRefresh={registerRefresh}
+                    onUpload={handlePickFile}
+                    focusJobId={focusJobId}
+                  />
+                </div>
+                <div
+                  data-dashboard-enter=""
+                  className="animate-dashboard-enter motion-reduce:animate-none"
+                  style={{ animationDelay: "300ms" }}
+                >
+                  <RecentPanel
+                    initial={notes}
+                    renderedAt={renderedAt}
+                    now={now}
+                    workspaces={workspaces}
+                    onOpenNote={handleOpenNote}
+                    onCreateNote={handleCreateNote}
+                  />
+                </div>
               </div>
             </div>
-          </div>
           )}
         </main>
       </div>
@@ -752,7 +753,11 @@ function Tab({
       )}
     >
       {href ? (
-        <Link href={href} title={`Abrir a lousa de ${label}`} className={shared}>
+        <Link
+          href={href}
+          title={`Abrir a lousa de ${label}`}
+          className={shared}
+        >
           {label}
         </Link>
       ) : (

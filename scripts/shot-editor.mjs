@@ -243,13 +243,56 @@ try {
         JSON.stringify(placed ?? null)
       );
 
+      // A dica de atalho: o nome da ação e as teclas em cápsulas.
+      await page.hover('button[aria-keyshortcuts="Control+B"] >> nth=0');
+      await page.waitForSelector("[role='tooltip']", { timeout: 2000 });
+      const tip = await page.evaluate(() => {
+        const node = document.querySelector("[role='tooltip']");
+        if (!node) return null;
+        return {
+          label: node.firstElementChild?.textContent ?? "",
+          keys: [...node.querySelectorAll("kbd")].map((k) => k.textContent),
+        };
+      });
+      check(
+        "a dica do botão mostra a ação e as teclas separadas",
+        tip?.label === "Negrito" && tip?.keys.join("+") === "Ctrl+B",
+        JSON.stringify(tip ?? null)
+      );
+      await page.screenshot({ path: `${OUT}/atalho-dica--desktop-light.png` });
+      await page.mouse.move(0, 0);
+
+      // O menu "/" mostra só as teclas: o nome do bloco já é a linha.
+      await page.click(".tiptap p >> nth=1");
+      await page.keyboard.press("End");
+      // O menu só abre depois de um espaço ou no começo da linha.
+      await page.keyboard.type(" /");
+      await page.waitForSelector("[role='listbox']", { timeout: 3000 });
+      await page.screenshot({ path: `${OUT}/menu-barra--desktop-light.png` });
+      const slashKeys = await page.evaluate(() => {
+        const row = [...document.querySelectorAll("[role='option']")].find(
+          (item) => item.textContent.startsWith("Título")
+        );
+        return [...(row?.querySelectorAll("kbd") ?? [])].map(
+          (k) => k.textContent
+        );
+      });
+      check(
+        "o menu “/” desenha o atalho em teclas",
+        slashKeys.join("+") === "Ctrl+Alt+1",
+        slashKeys.join("+") || "sem teclas"
+      );
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Backspace");
+
       // A cor do texto: uma palavra em azul, gravada como nome da paleta.
       await page.click(".tiptap p >> nth=0");
       await page.keyboard.press("Home");
       for (let i = 0; i < "Conferir".length; i++) {
         await page.keyboard.press("Shift+ArrowRight");
       }
-      await page.click('button[title="Cor do texto"][aria-haspopup]');
+      await page.click('button[aria-label="Cor do texto"]');
       await page.click(
         "[role='dialog'][aria-label='Cor do texto'] button[title='Azul']"
       );
@@ -267,7 +310,7 @@ try {
       );
 
       // A fonte da nota: Literata no corpo e no título.
-      await page.click('button[title="Fonte da nota"]');
+      await page.click('button[aria-label^="Fonte da nota"]');
       await page.screenshot({ path: `${OUT}/fonte-menu--desktop-light.png` });
       await page.click(
         "[role='dialog'][aria-label='Fonte da nota'] button:has-text('Literata')"

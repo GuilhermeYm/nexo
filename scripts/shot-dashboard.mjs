@@ -207,6 +207,41 @@ async function main() {
     await page.addStyleTag({ content: HIDE_DEV_BADGE });
     await page.waitForTimeout(1000);
 
+    // A tela inteira não rola nem quica.
+    //
+    // A conferência força o caso real: qualquer coisa que acabe filha do
+    // `body` (em dev, o indicador do Next) fazia o documento virar superfície
+    // rolável, e a barra de espaço — com o foco fora de um campo — descia uma
+    // tela inteira, deixando uma faixa vazia no lugar da moldura.
+    await page.evaluate(() => {
+      const intruder = document.createElement("div");
+      intruder.id = "qa-intruso";
+      intruder.style.height = "300px";
+      document.body.append(intruder);
+      document.body.focus();
+    });
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(300);
+    const viewport = await page.evaluate(() => {
+      const shell = document.querySelector("[data-app-viewport]");
+      const moved = Math.round(shell.getBoundingClientRect().top);
+      document.getElementById("qa-intruso")?.remove();
+      return {
+        chains: getComputedStyle(document.documentElement).overscrollBehaviorY,
+        frame: getComputedStyle(shell).overscrollBehaviorY,
+        moved,
+        top: document.scrollingElement.scrollTop,
+      };
+    });
+    check(
+      "nem a barra de espaço move a moldura da tela",
+      viewport.chains === "none" &&
+        viewport.frame === "contain" &&
+        viewport.moved === 0 &&
+        viewport.top === 0,
+      JSON.stringify(viewport)
+    );
+
     let tabs = await tabLabels();
     check(
       "a barra abre com Início e os workspaces",
@@ -239,22 +274,40 @@ async function main() {
       `${rail} no trilho, ${alive[0].total} no banco`
     );
 
-    await page.click(
-      'nav[aria-label="Abas abertas"] button[title^="Fechar a aba Início"]'
+    // Fechar o Início com lousa aberta não deixa a pessoa numa tela sem
+    // conteúdo: leva para a última lousa da barra. Quem confere isto é a URL,
+    // porque a partir daqui a página do dashboard já saiu do ar.
+    const { rows: lastBoard } = await sql.query(
+      "select id from workspaces where user_id = $1 and name = $2",
+      [userId, "Pessoal"]
     );
-    await page.waitForTimeout(300);
+    await Promise.all([
+      page.waitForURL("**/workspace/**", { timeout: 20_000 }),
+      page.click(
+        'nav[aria-label="Abas abertas"] button[title^="Fechar a aba Início"]'
+      ),
+    ]);
+    check(
+      "fechar o Início leva para a última lousa aberta",
+      page.url().endsWith(`/workspace/${lastBoard[0].id}`),
+      page.url().replace(BASE, "")
+    );
+
+    // De volta ao Dashboard: a aba fechada continua fechada (a escolha mora
+    // no navegador) e a casinha aparece no lugar dela.
+    await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForTimeout(1000);
     tabs = await tabLabels();
-    check("a aba do Início também fecha", !tabs.includes("Início"), tabs.join(" | "));
+    check(
+      "a aba do Início segue fechada na volta",
+      tabs.length === 1 && !tabs.includes("Início"),
+      tabs.join(" | ")
+    );
     check(
       "o atalho do Início aparece no lugar dela",
       Boolean(await page.$('button[title="Abrir a aba Início"]'))
     );
-
-    await page.reload({ waitUntil: "networkidle" });
-    await page.addStyleTag({ content: HIDE_DEV_BADGE });
-    await page.waitForTimeout(1000);
-    tabs = await tabLabels();
-    check("a escolha sobrevive ao recarregamento", tabs.length === 1, tabs.join(" | "));
     await page.screenshot({ path: `${OUT}/abas-fechadas.png` });
 
     await page.click('button[title="Abrir a aba Início"]');
