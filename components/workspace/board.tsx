@@ -1223,31 +1223,6 @@ export function Board({
     [createWindow, spawnPoint, zenMode]
   );
 
-  // Atalho de saída da lousa. Ele vale inclusive dentro de uma janela sendo
-  // editada: Ctrl + Shift + D não é texto nem formatação e precisa continuar
-  // sendo a porta rápida de volta ao Dashboard. Um diálogo modal, porém,
-  // mantém o próprio foco e as próprias teclas.
-  useEffect(() => {
-    function handleDashboardShortcut(event: KeyboardEvent) {
-      if (
-        event.code !== "KeyD" ||
-        !event.ctrlKey ||
-        !event.shiftKey ||
-        event.altKey ||
-        event.metaKey ||
-        document.querySelector("dialog[open]")
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      router.push("/dashboard");
-    }
-
-    window.addEventListener("keydown", handleDashboardShortcut);
-    return () => window.removeEventListener("keydown", handleDashboardShortcut);
-  }, [router]);
-
   /**
    * Atalhos de uma tecla, como nas ferramentas de desenho conhecidas.
    * Campos de texto, menus e diálogos mantêm as teclas para si; na lousa,

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { headers } from "next/headers";
 
+import { DashboardShortcut } from "@/components/dashboard-shortcut";
 import { InlineScript } from "@/components/inline-script";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
@@ -43,7 +44,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <InlineScript html={THEME_INIT_SCRIPT} nonce={nonce} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <DashboardShortcut />
+        {children}
+      </body>
     </html>
   );
 }
