@@ -212,6 +212,35 @@ export function useBoardWindows(
    * desenho some até a resposta da API chegar.
    */
   const pendingMarks = useRef(new Set<string>());
+  /**
+   * O POST de cada desenho, pelo id temporário que ele carregou na tela.
+   *
+   * Existe por causa de um gesto normalíssimo: desenhar e apagar em seguida.
+   * Nesse intervalo a marca na tela ainda é a temporária (`pending:...`), e a
+   * borracha recolhe esse id. Mandá-lo para o DELETE não apagava nada — pior,
+   * `z.uuid()` recusa o lote **inteiro**, então as outras marcas da mesma
+   * passada também ficavam no banco e todas voltavam no recarregamento.
+   * Guardando a promessa, quem apaga espera o id real e apaga a linha certa.
+   */
+  const markCreations = useRef(new Map<string, Promise<string | null>>());
+  /**
+   * Desenhos que esta tela acabou de apagar — a lápide das janelas, aplicada
+   * às marcas.
+   *
+   * Entre o DELETE sair e o banco responder, um evento de Realtime (o INSERT
+   * do próprio traço, por exemplo) relê as marcas e o retrato ainda traz a
+   * linha: sem a lápide, o desenho apagado pisca de volta na tela. Ela cai
+   * sozinha no primeiro retrato que chegar já sem a linha.
+   */
+  const markTombstones = useRef(new Set<string>());
+  /**
+   * Desenhos que a borracha encostou antes de o POST deles voltar.
+   *
+   * Sem esta marcação, a resposta do POST devolveria para a tela um traço que
+   * a pessoa já tinha apagado — ele reapareceria sozinho, e só sumiria de
+   * novo quando o DELETE do id real chegasse.
+   */
+  const erasedPendingMarks = useRef(new Set<string>());
 
   /**
    * Janelas que esta tela acabou de remover.
@@ -263,6 +292,20 @@ export function useBoardWindows(
    * flechas não têm gesto em andamento, então basta tirar as que esta tela
    * acabou de remover e ainda não foram confirmadas.
    */
+  /**
+   * O retrato das marcas, sem o que esta tela já tirou e sem perder o que
+   * ainda está em voo.
+   */
+  const mergeMarks = useCallback((incoming: BoardMark[], local: BoardMark[]) => {
+    for (const id of markTombstones.current) {
+      if (!incoming.some((mark) => mark.id === id)) markTombstones.current.delete(id);
+    }
+    return [
+      ...incoming.filter((mark) => !markTombstones.current.has(mark.id)),
+      ...local.filter((mark) => pendingMarks.current.has(mark.id)),
+    ];
+  }, []);
+
   const applySnapshot = useCallback((body: unknown) => {
     const snapshot = body as {
       windows?: BoardWindow[];
@@ -288,12 +331,9 @@ export function useBoardWindows(
       );
     }
     if (Array.isArray(snapshot?.marks)) {
-      setMarks((local) => [
-        ...snapshot.marks!,
-        ...local.filter((mark) => pendingMarks.current.has(mark.id)),
-      ]);
+      setMarks((local) => mergeMarks(snapshot.marks!, local));
     }
-  }, []);
+  }, [mergeMarks]);
 
   const refresh = useCallback(async () => {
     inFlight.current?.abort();
@@ -327,15 +367,12 @@ export function useBoardWindows(
       if (!response.ok) return;
       const body = await response.json();
       if (Array.isArray(body?.marks)) {
-        setMarks((local) => [
-          ...body.marks,
-          ...local.filter((mark) => pendingMarks.current.has(mark.id)),
-        ]);
+        setMarks((local) => mergeMarks(body.marks, local));
       }
     } catch {
       // Mantém o último desenho bom; o próximo evento tenta novamente.
     }
-  }, [marksBase]);
+  }, [marksBase, mergeMarks]);
 
   /* ---------------------------------------------------------------- */
   /* Escrita                                                           */
@@ -854,6 +891,34 @@ export function useBoardWindows(
    * requisição por rota quando a pessoa solta, no mesmo princípio do
    * arraste.
    */
+  /**
+   * Troca os ids temporários pelos reais antes de apagar.
+   *
+   * Um traço apagado logo depois de desenhado ainda está com o id do POST em
+   * voo. Esperar aqui custa o resto de uma requisição que já saiu, e é o que
+   * faz a borracha alcançar a linha no banco em vez de deixá-la para trás.
+   * O que falhou ao gravar não existe para apagar, e sai da lista.
+   */
+  const resolveMarkIds = useCallback(async (ids: string[]) => {
+    const resolved = await Promise.all(
+      ids.map(async (id) => {
+        if (!id.startsWith("pending:")) return id;
+        // Antes do await: a resposta do POST não pode devolver para a tela um
+        // desenho que a borracha já levou.
+        erasedPendingMarks.current.add(id);
+        const creation = markCreations.current.get(id);
+        if (!creation) {
+          erasedPendingMarks.current.delete(id);
+          return null;
+        }
+        const realId = await creation;
+        erasedPendingMarks.current.delete(id);
+        return realId;
+      })
+    );
+    return resolved.filter((id): id is string => id !== null);
+  }, []);
+
   const erase = useCallback(
     async (target: EraseTarget) => {
       const windowIds =
@@ -910,7 +975,15 @@ export function useBoardWindows(
         for (const id of ids) set.delete(id);
       };
 
+      // Fora do `try` porque o `catch` também precisa devolver as lápides.
+      let doomedMarks: string[] = [];
+
       try {
+        // O id que a borracha recolheu pode ser o temporário de um traço
+        // recém-desenhado; o DELETE só aceita o real.
+        doomedMarks = clearingMarks ? await resolveMarkIds(markIds) : [];
+        const deletingMarks = doomedMarks.length > 0;
+        for (const id of doomedMarks) markTombstones.current.add(id);
         const [fromWindows, fromConnections, fromMarks] = await Promise.all([
           clearingWindows
             ? readBody(
@@ -934,11 +1007,11 @@ export function useBoardWindows(
                 })
               )
             : null,
-          clearingMarks
+          deletingMarks
             ? readBody(fetch(marksBase, {
                 method: "DELETE",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ids: markIds }),
+                body: JSON.stringify({ ids: doomedMarks }),
               }))
             : null,
         ]);
@@ -957,6 +1030,7 @@ export function useBoardWindows(
           // para a tela na próxima rebusca.
           revive(windowIds, tombstones.current);
           revive(connectionIds, connectionTombstones.current);
+          revive(doomedMarks, markTombstones.current);
           scheduleRefresh();
           return;
         }
@@ -997,10 +1071,19 @@ export function useBoardWindows(
         setError(plainNotice("Sem conexão. Nada foi apagado."));
         revive(windowIds, tombstones.current);
         revive(connectionIds, connectionTombstones.current);
+        revive(doomedMarks, markTombstones.current);
         scheduleRefresh();
       }
     },
-    [base, connectionsBase, marksBase, marks, scheduleRefresh, applySnapshot]
+    [
+      base,
+      connectionsBase,
+      marksBase,
+      marks,
+      scheduleRefresh,
+      applySnapshot,
+      resolveMarkIds,
+    ]
   );
 
   /**
@@ -1033,6 +1116,9 @@ export function useBoardWindows(
       }
 
       if (batch.marks.length > 0) {
+        // A lápide some antes do pedido: o desenho volta com o mesmo id, e
+        // uma lápide de pé filtraria justamente o que o Desfazer trouxe.
+        for (const mark of batch.marks) markTombstones.current.delete(mark.id);
         const markResponse = await fetch(`${marksBase}/restore`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1070,60 +1156,84 @@ export function useBoardWindows(
 
     function removeOptimisticMark() {
       pendingMarks.current.delete(temporaryId);
+      erasedPendingMarks.current.delete(temporaryId);
       setMarks((current) => current.filter((mark) => mark.id !== temporaryId));
     }
 
-    try {
-      const response = await fetch(marksBase, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        removeOptimisticMark();
-        setError(plainNotice(body?.error ?? "Não foi possível guardar o desenho."));
-        return false;
-      }
-      if (body?.mark) {
+    /**
+     * A promessa devolve o id real (ou nulo) porque quem apaga precisa dele:
+     * a borracha pode encostar no traço antes desta resposta chegar.
+     */
+    const creation = (async (): Promise<string | null> => {
+      try {
+        const response = await fetch(marksBase, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          removeOptimisticMark();
+          setError(plainNotice(body?.error ?? "Não foi possível guardar o desenho."));
+          return null;
+        }
+        if (!body?.mark) {
+          removeOptimisticMark();
+          return null;
+        }
         pendingMarks.current.delete(temporaryId);
+        if (erasedPendingMarks.current.has(temporaryId)) {
+          // A borracha já levou este traço. Ele não volta para a tela; a
+          // linha sai do banco pelo DELETE que espera este mesmo id.
+          setMarks((current) => current.filter((mark) => mark.id !== temporaryId));
+          return body.mark.id;
+        }
         setMarks((current) => {
           const withoutTemporary = current.filter((mark) => mark.id !== temporaryId);
           return withoutTemporary.some((mark) => mark.id === body.mark.id)
             ? withoutTemporary
             : [...withoutTemporary, body.mark];
         });
-      } else {
+        return body.mark.id;
+      } catch {
         removeOptimisticMark();
+        setError(plainNotice("Sem conexão. O desenho não foi guardado."));
+        return null;
       }
-      return true;
-    } catch {
-      removeOptimisticMark();
-      setError(plainNotice("Sem conexão. O desenho não foi guardado."));
-      return false;
-    }
+    })();
+
+    markCreations.current.set(temporaryId, creation);
+    return (await creation) !== null;
   }, [marksBase]);
 
   const deleteMarks = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
     const removed = new Set(ids);
     setMarks((current) => current.filter((mark) => !removed.has(mark.id)));
+    let doomed: string[] = [];
     try {
+      // Como na borracha: o traço recém-desenhado só tem id real quando o
+      // POST dele volta.
+      doomed = await resolveMarkIds(ids);
+      if (doomed.length === 0) return;
+      for (const id of doomed) markTombstones.current.add(id);
       const response = await fetch(marksBase, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
+        body: JSON.stringify({ ids: doomed }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {
+        for (const id of doomed) markTombstones.current.delete(id);
         setError(plainNotice(body?.error ?? "Não foi possível apagar o desenho."));
         scheduleRefresh();
       }
     } catch {
+      for (const id of doomed) markTombstones.current.delete(id);
       setError(plainNotice("Sem conexão. O desenho não foi apagado."));
       scheduleRefresh();
     }
-  }, [marksBase, scheduleRefresh]);
+  }, [marksBase, scheduleRefresh, resolveMarkIds]);
 
   /**
    * Liga dois elementos.
