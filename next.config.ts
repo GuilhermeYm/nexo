@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // "standalone" é para o self-host em VPS+nginx (docs/DASHBOARD.md): empacota
+  // um server.js mínimo com só as dependências usadas. Na Vercel ele quebra o
+  // build (ENOENT em next-server.js.nft.json) porque o tracing de arquivos dela
+  // já faz o equivalente por rota — por isso fica de fora quando `VERCEL` está
+  // presente (variável que a própria Vercel define no ambiente de build).
+  ...(process.env.VERCEL ? {} : { output: "standalone" }),
   async headers() {
     return [
       {
