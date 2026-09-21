@@ -15,6 +15,9 @@ import type { BoardWindow } from "@/lib/workspace/queries";
 import { COLLAPSED_WINDOW_WIDTH } from "@/lib/workspace/window-sizes";
 import { cn } from "@/lib/utils";
 
+/** Conjunto vazio compartilhado para selectedWindowIds default. */
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
 /**
  * O quadro de uma janela: barra de título, arraste, redimensionamento e os
  * três controles.
@@ -80,6 +83,14 @@ interface WindowFrameProps extends Omit<
   /** Ao soltar: grava. */
   onCommit: (patch: WindowPatch) => void;
   onClose: () => void;
+  /** Se esta janela está no grupo selecionado. */
+  isSelected?: boolean;
+  /** Move o grupo inteiro de janelas selecionadas. */
+  onMoveGroup?: (ids: string[], dx: number, dy: number) => void;
+  /** Fecha a passada: a "foto" de origem do grupo vale só até aqui. */
+  onMoveGroupEnd?: () => void;
+  /** IDs de todas as janelas selecionadas (para mover em bloco). */
+  selectedWindowIds?: ReadonlySet<string>;
 }
 
 export function WindowFrame({
@@ -96,6 +107,10 @@ export function WindowFrame({
   onPreview,
   onCommit,
   onClose,
+  isSelected = false,
+  onMoveGroup,
+  onMoveGroupEnd,
+  selectedWindowIds = EMPTY_SET,
   ...trigger
 }: WindowFrameProps) {
   // O gesto vive num ref, não em estado: ele muda a cada quadro e nenhum
@@ -210,14 +225,30 @@ export function WindowFrame({
           if (next) onPreview(next);
         });
       }
+
+      // Se a janela arrastada está no grupo selecionado, move o grupo junto.
+      if (
+        isSelected &&
+        current.mode === "move" &&
+        onMoveGroup &&
+        selectedWindowIds.size > 1 &&
+        (dx !== 0 || dy !== 0)
+      ) {
+        onMoveGroup(Array.from(selectedWindowIds), dx, dy);
+      }
     },
-    [zoom, onPreview]
+    [zoom, onPreview, isSelected, onMoveGroup, selectedWindowIds]
   );
 
   const endGesture = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       const current = gesture.current;
       if (!current || current.pointerId !== event.pointerId) return;
+
+      // A "foto" do grupo (ver `moveGesture`) vale só para esta passada — a
+      // próxima tira a dela. Sem isto, um segundo arraste reaproveitaria
+      // posições de origem de um gesto que já acabou.
+      if (isSelected && current.mode === "move") onMoveGroupEnd?.();
 
       gesture.current = null;
       setGesturing(false);
@@ -229,7 +260,7 @@ export function WindowFrame({
       // Um clique sem arrastar não gera escrita nenhuma.
       if (Object.keys(current.latest).length > 0) onCommit(current.latest);
     },
-    [flushPreview, onCommit]
+    [flushPreview, onCommit, isSelected, onMoveGroupEnd]
   );
 
   const handleKeyMove = useCallback(

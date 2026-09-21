@@ -263,6 +263,72 @@ export function Board({
    * quem seleciona uma coisa está desistindo da outra.
    */
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+  /** Janelas selecionadas no modo ponteiro (V) para mover em bloco. */
+  const [selectedWindowIds, setSelectedWindowIds] = useState<ReadonlySet<string>>(
+    EMPTY_SET
+  );
+
+  /**
+   * A "foto" de onde cada janela do grupo estava **no início desta
+   * passada** — tirada uma vez só, na primeira chamada de `handleMoveGroup`.
+   *
+   * Sem ela, cada quadro recalcularia `win.x + dx` sobre o `windows` **já
+   * atualizado pelo quadro anterior**: como `dx` é o deslocamento acumulado
+   * desde o início do gesto (não incremental — mesma conta de
+   * `moveGesture` em `window-frame.tsx`), somar de novo sobre uma base que
+   * já inclui o deslocamento de quadros passados dispara uma progressão
+   * geométrica. Um arraste de 200 unidades de lousa jogava as outras
+   * janelas do grupo a mais de 900 unidades de distância — a lousa parecia
+   * explodir. A janela **diretamente arrastada** não sofre disso porque o
+   * próprio `WindowFrame` dela já guarda `originX`/`originY` do gesto; é só
+   * o resto do grupo, lido daqui, que precisava da mesma garantia.
+   */
+  const groupMoveOrigin = useRef<Map<string, { x: number; y: number }> | null>(
+    null
+  );
+
+  /**
+   * Move todo o grupo selecionado junto com a janela que a pessoa está
+   * arrastando — `dx`/`dy` já vêm em unidades de lousa, acumulados desde o
+   * início do gesto.
+   *
+   * Funções estáveis de propósito: `BoardWindowItem` é memoizado, e uma
+   * função nova a cada render desmancharia a memoização de `moveGesture` em
+   * `WindowFrame` (mesmo argumento de `focusWindow`/`previewWindow` no resto
+   * do arquivo).
+   */
+  const handleMoveGroup = useCallback(
+    (ids: string[], dx: number, dy: number) => {
+      if (!groupMoveOrigin.current) {
+        const origins = new Map<string, { x: number; y: number }>();
+        for (const id of ids) {
+          const win = windows.find((item) => item.id === id);
+          if (win) origins.set(id, { x: win.x, y: win.y });
+        }
+        groupMoveOrigin.current = origins;
+      }
+      for (const windowId of ids) {
+        const origin = groupMoveOrigin.current.get(windowId);
+        if (origin) {
+          updateWindow(windowId, {
+            x: snapToGrid(origin.x + dx),
+            y: snapToGrid(origin.y + dy),
+          });
+        }
+      }
+    },
+    [windows, updateWindow]
+  );
+
+  const handleMoveGroupEnd = useCallback(() => {
+    groupMoveOrigin.current = null;
+  }, []);
+  /** Marquee de seleção no fundo vazio. */
+  const [marquee, setMarquee] = useState<{
+    start: { x: number; y: number };
+    current: { x: number; y: number };
+    active: boolean;
+  } | null>(null);
   const [pointerAt, setPointerAt] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -276,6 +342,10 @@ export function Board({
   const sweptMarksRef = useRef<ReadonlySet<string>>(EMPTY_SET);
   const [sweptMarks, setSweptMarks] = useState<ReadonlySet<string>>(EMPTY_SET);
   const sweeping = useRef(false);
+  /** Espelho da `marquee` para leitura nos handlers sem quebrar `useCallback`. */
+  const marqueeRef = useRef<typeof marquee>(null);
+  /** Espelho de `visibleWindows` para leitura no handler de up. */
+  const visibleWindowsRef = useRef<typeof visibleWindows>([]);
   /**
    * Onde o último botão direito (ou toque longo) aconteceu, em coordenadas
    * da lousa.
@@ -515,68 +585,6 @@ export function Board({
     [toContainer, toBoard]
   );
 
-  const handleBackgroundPointerDown = useCallback(
-    (event: React.PointerEvent) => {
-      // Só o fundo arrasta a lousa. Um `pointerdown` que veio de dentro de
-      // uma janela já foi tratado lá e não pode virar pan.
-      if (event.target !== event.currentTarget) return;
-
-      setFocusedId(null);
-      setSelectedLinkId(null);
-      recordSpawnPoint(event.clientX, event.clientY);
-      event.currentTarget.setPointerCapture(event.pointerId);
-      pointers.current.set(event.pointerId, {
-        x: event.clientX,
-        y: event.clientY,
-      });
-
-      if (pointers.current.size === 2) {
-        const [a, b] = [...pointers.current.values()];
-        pinch.current = {
-          distance: distanceBetween(a, b),
-          zoom: viewport.zoom,
-        };
-      }
-    },
-    [viewport.zoom, recordSpawnPoint]
-  );
-
-  const handleBackgroundPointerMove = useCallback(
-    (event: React.PointerEvent) => {
-      const previous = pointers.current.get(event.pointerId);
-      if (!previous) return;
-
-      const next = { x: event.clientX, y: event.clientY };
-      pointers.current.set(event.pointerId, next);
-
-      if (pointers.current.size >= 2 && pinch.current) {
-        const [a, b] = [...pointers.current.values()];
-        const spread = distanceBetween(a, b);
-        if (pinch.current.distance > 0) {
-          const middle = toContainer((a.x + b.x) / 2, (a.y + b.y) / 2);
-          zoomTo(
-            (pinch.current.zoom * spread) / pinch.current.distance,
-            middle.x,
-            middle.y
-          );
-        }
-        return;
-      }
-
-      panBy(next.x - previous.x, next.y - previous.y);
-    },
-    [panBy, zoomTo, toContainer]
-  );
-
-  const handleBackgroundPointerUp = useCallback((event: React.PointerEvent) => {
-    pointers.current.delete(event.pointerId);
-    if (pointers.current.size < 2) pinch.current = null;
-  }, []);
-
-  /* ---------------------------------------------------------------- */
-  /* Borracha e ligação — as duas ferramentas do ponteiro              */
-  /* ---------------------------------------------------------------- */
-
   /**
    * A janela debaixo do ponteiro.
    *
@@ -611,6 +619,148 @@ export function Board({
     },
     [windows, toContainer, toBoard]
   );
+
+  const boardPointFromEvent = useCallback(
+    (event: React.PointerEvent) => {
+      const point = toContainer(event.clientX, event.clientY);
+      return toBoard(point.x, point.y);
+    },
+    [toBoard, toContainer]
+  );
+
+  const handleBackgroundPointerDown = useCallback(
+    (event: React.PointerEvent) => {
+      // Só o fundo arrasta a lousa. Um `pointerdown` que veio de dentro de
+      // uma janela já foi tratado lá e não pode virar pan.
+      if (event.target !== event.currentTarget) return;
+
+      // Marquee: só no modo ponteiro (tool === "none") e clique esquerdo.
+      // O handler já roda só no fundo vazio (event.target === currentTarget),
+      // então windowAt() == null aqui significa clique no vazio.
+      if (tool === "none" && event.button === 0) {
+        const hit = windowAt(event.clientX, event.clientY);
+        if (!hit) {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          // `handleBackgroundPointerMove` começa recusando qualquer ponteiro
+          // que não esteja aqui — sem esta linha o marquee nasce e trava no
+          // tamanho zero, porque o primeiro `pointermove` sai fora antes de
+          // olhar para `marqueeRef`.
+          pointers.current.set(event.pointerId, {
+            x: event.clientX,
+            y: event.clientY,
+          });
+          const point = boardPointFromEvent(event);
+          const nextMarquee = {
+            start: { x: point.x, y: point.y },
+            current: { x: point.x, y: point.y },
+            active: true,
+          };
+          marqueeRef.current = nextMarquee;
+          setMarquee(nextMarquee);
+          return; // Não inicia pan nem limpa seleção enquanto marquee ativo
+        }
+      }
+
+      setFocusedId(null);
+      setSelectedLinkId(null);
+      setSelectedWindowIds(EMPTY_SET);
+      marqueeRef.current = null;
+      setMarquee(null);
+      recordSpawnPoint(event.clientX, event.clientY);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      pointers.current.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      if (pointers.current.size === 2) {
+        const [a, b] = [...pointers.current.values()];
+        pinch.current = {
+          distance: distanceBetween(a, b),
+          zoom: viewport.zoom,
+        };
+      }
+    },
+    [tool, viewport.zoom, recordSpawnPoint, windowAt, boardPointFromEvent]
+  );
+
+  const handleBackgroundPointerMove = useCallback(
+    (event: React.PointerEvent) => {
+      const previous = pointers.current.get(event.pointerId);
+      if (!previous) return;
+
+      const next = { x: event.clientX, y: event.clientY };
+      pointers.current.set(event.pointerId, next);
+
+      // Marquee ativo: atualiza retângulo e não faz pan
+      if (marqueeRef.current?.active) {
+        const point = boardPointFromEvent(event);
+        const nextMarquee = {
+          ...marqueeRef.current,
+          current: { x: point.x, y: point.y },
+        };
+        marqueeRef.current = nextMarquee;
+        setMarquee(nextMarquee);
+        return;
+      }
+
+      if (pointers.current.size >= 2 && pinch.current) {
+        const [a, b] = [...pointers.current.values()];
+        const spread = distanceBetween(a, b);
+        if (pinch.current.distance > 0) {
+          const middle = toContainer((a.x + b.x) / 2, (a.y + b.y) / 2);
+          zoomTo(
+            (pinch.current.zoom * spread) / pinch.current.distance,
+            middle.x,
+            middle.y
+          );
+        }
+        return;
+      }
+
+      panBy(next.x - previous.x, next.y - previous.y);
+    },
+    [panBy, zoomTo, toContainer, boardPointFromEvent]
+  );
+
+  const handleBackgroundPointerUp = useCallback((event: React.PointerEvent) => {
+    // Marquee ativo: finaliza seleção
+    if (marqueeRef.current?.active) {
+      const m = marqueeRef.current;
+      const minX = Math.min(m.start.x, m.current.x);
+      const maxX = Math.max(m.start.x, m.current.x);
+      const minY = Math.min(m.start.y, m.current.y);
+      const maxY = Math.max(m.start.y, m.current.y);
+
+      const selected = new Set<string>();
+      for (const item of visibleWindowsRef.current) {
+        const itemMinX = item.x;
+        const itemMaxX = item.x + frameWidthOf(item);
+        const itemMinY = item.y;
+        const itemMaxY = item.y + frameHeightOf(item);
+        if (
+          itemMaxX >= minX &&
+          itemMinX <= maxX &&
+          itemMaxY >= minY &&
+          itemMinY <= maxY
+        ) {
+          selected.add(item.id);
+        }
+      }
+      setSelectedWindowIds(selected);
+      marqueeRef.current = null;
+      setMarquee(null);
+      pointers.current.delete(event.pointerId);
+      return;
+    }
+
+    pointers.current.delete(event.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+  }, []);
+
+  /* ---------------------------------------------------------------- */
+  /* Borracha e ligação — as duas ferramentas do ponteiro              */
+  /* ---------------------------------------------------------------- */
 
   /**
    * Uma passada da borracha.
@@ -776,12 +926,25 @@ export function Board({
     [zenMode]
   );
 
-  const boardPointFromEvent = useCallback(
-    (event: React.PointerEvent) => {
-      const point = toContainer(event.clientX, event.clientY);
+  /** A mesma conversão, para quem só tem `clientX`/`clientY` na mão — a
+   * alça da curva, dentro do SVG das ligações, que não recebe o evento do
+   * React na forma de `PointerEvent` da lousa. */
+  const toBoardPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const point = toContainer(clientX, clientY);
       return toBoard(point.x, point.y);
     },
     [toBoard, toContainer]
+  );
+
+  /** A alça da curva grava sempre os dois campos juntos — nunca um sozinho,
+   * senão o CHECK do banco (`(bend_t IS NULL) = (bend_offset IS NULL)`)
+   * derruba o PATCH. */
+  const handleBendChange = useCallback(
+    (id: string, bendT: number, bendOffset: number) => {
+      void updateConnection(id, { bendT, bendOffset });
+    },
+    [updateConnection]
   );
 
   const paintDraft = useCallback(() => {
@@ -984,6 +1147,11 @@ export function Board({
    */
   const visibleWindows =
     swept.size === 0 ? windows : windows.filter((item) => !swept.has(item.id));
+
+  // Espelha visibleWindows no ref para o handler de up ler sem dependência
+  useEffect(() => {
+    visibleWindowsRef.current = visibleWindows;
+  }, [visibleWindows]);
 
   // As flechas da janela encostada somem junto com ela, aqui como no banco:
   // uma flecha apontando para o vazio seria pior do que nenhuma.
@@ -1227,6 +1395,14 @@ export function Board({
    * Atalhos de uma tecla, como nas ferramentas de desenho conhecidas.
    * Campos de texto, menus e diálogos mantêm as teclas para si; na lousa,
    * repetir a tecla da ferramenta guarda-a e V volta ao ponteiro.
+   *
+   * **`button` entra na lista por causa de um Tab perdido.** Da caixa de
+   * título de uma nota, Tab não pousa no corpo — pousa no "+ tag" (é o
+   * próximo elemento focável na ordem do DOM). Um `<button>` não consome
+   * letras para si, então elas seguiam batendo aqui: a primeira tecla que
+   * batesse com um atalho trocava de ferramenta no meio da digitação, sem
+   * a pessoa ter pedido. `role='menuitem'` entra pelo mesmo motivo, para
+   * um item de menu focado por teclado.
    */
   useEffect(() => {
     function handleToolShortcut(event: KeyboardEvent) {
@@ -1245,7 +1421,7 @@ export function Board({
       const target = event.target as HTMLElement | null;
       if (
         target?.closest(
-          "input, textarea, select, [contenteditable='true'], [role='dialog'], [role='menu']"
+          "input, textarea, select, button, [contenteditable='true'], [role='dialog'], [role='menu'], [role='menuitem']"
         )
       ) {
         return;
@@ -1570,7 +1746,7 @@ export function Board({
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <ToolButton
               label="Nova nota"
-              hint="Vira uma nota de verdade: entra na busca e nas tags."
+              hint="Vira nota de verdade — ou 2 cliques na lousa"
               disabled={atCap || creating}
               onClick={() => spawn({ kind: "note", title: "Nova nota" })}
             >
@@ -1794,6 +1970,26 @@ export function Board({
                     quem vem antes no fluxo é pintado embaixo. */}
                 <BoardMarksLayer marks={visibleMarks} draft={draftMark} />
 
+                {/* O retângulo do marquee. Coordenadas de lousa cruas — este
+                    `<div>` já está dentro da camada transformada (pan e
+                    zoom), então `left`/`top`/`width`/`height` em unidades de
+                    lousa bastam, sem conta extra de viewport. Sem isto a
+                    pessoa arrastava às cegas: a seleção acontecia (o
+                    `pointerup` já calculava certo), mas nada na tela mostrava
+                    o retângulo enquanto o gesto estava em curso. */}
+                {marquee?.active && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute rounded-md border-2 border-dashed border-accent bg-accent/10"
+                    style={{
+                      left: Math.min(marquee.start.x, marquee.current.x),
+                      top: Math.min(marquee.start.y, marquee.current.y),
+                      width: Math.abs(marquee.current.x - marquee.start.x),
+                      height: Math.abs(marquee.current.y - marquee.start.y),
+                    }}
+                  />
+                )}
+
                 <ConnectionLayer
                   connections={visibleConnections}
                   windows={visibleWindows}
@@ -1803,6 +1999,8 @@ export function Board({
                   onSelect={selectConnection}
                   onRemove={removeConnection}
                   onLabel={setLabelingId}
+                  onBendChange={handleBendChange}
+                  toBoardPoint={toBoardPoint}
                   inert={usingTool || zenMode}
                 />
 
@@ -1853,6 +2051,9 @@ export function Board({
                       setDeleteAttachments(false);
                       setNotePendingDelete(noteId);
                     }}
+                    selectedWindowIds={selectedWindowIds}
+                    onMoveGroup={handleMoveGroup}
+                    onMoveGroupEnd={handleMoveGroupEnd}
                   />
                 ))}
               </div>
@@ -2507,6 +2708,12 @@ interface BoardWindowItemProps {
   onOpenAttachment: (attachmentId: string) => void;
   onOpenEditor: (noteId: string) => void;
   onDeleteNote: (noteId: string) => void;
+  /** As janelas escolhidas pelo marquee — inclusive esta, se estiver dentro. */
+  selectedWindowIds: ReadonlySet<string>;
+  /** Move o grupo inteiro quando esta janela é a que a pessoa está arrastando. */
+  onMoveGroup: (ids: string[], dx: number, dy: number) => void;
+  /** Fecha a passada do grupo — a "foto" de origem vale só até aqui. */
+  onMoveGroupEnd: () => void;
 }
 
 /**
@@ -2541,6 +2748,9 @@ const BoardWindowItem = memo(function BoardWindowItem({
   onOpenAttachment,
   onOpenEditor,
   onDeleteNote,
+  selectedWindowIds,
+  onMoveGroup,
+  onMoveGroupEnd,
 }: BoardWindowItemProps) {
   const id = item.id;
   const note = item.note;
@@ -2587,6 +2797,10 @@ const BoardWindowItem = memo(function BoardWindowItem({
             onPreview={preview}
             onCommit={commit}
             onClose={close}
+            isSelected={selectedWindowIds.has(id)}
+            selectedWindowIds={selectedWindowIds}
+            onMoveGroup={onMoveGroup}
+            onMoveGroupEnd={onMoveGroupEnd}
           >
             {item.kind === "attachment" && item.attachment ? (
               <AttachmentWindowBody
