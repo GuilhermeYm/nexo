@@ -14,8 +14,9 @@ import { connectionPatchSchema } from "@/lib/validations/workspace";
  *
  * A rota de coleção continua sem `PATCH` — origem e destino não se editam,
  * mudar a direção é apagar e ligar de novo. Esta rota existe para o rótulo
- * (0012) e para a aparência (0019): cor, traço, espessura e pontas. O GRANT
- * por coluna cobre exatamente esses cinco campos, e o schema é `strict`.
+ * (0012) e para a aparência (0019/0034): cor, traço, espessura, pontas,
+ * forma e alça da curva. O GRANT por coluna cobre exatamente esses campos,
+ * e o schema é `strict`.
  *
  * Sem auditoria, e de propósito: o rótulo e a cor são etiqueta de lousa,
  * corrigida enquanto se pensa. Auditar cada tecla afogaria os eventos que a tabela
@@ -37,10 +38,10 @@ export async function PATCH(
     } = await supabase.auth.getUser();
     if (!user) return errorResponse(401, "Não autenticado.");
 
-    // O mesmo teto do salvamento de janela: o rótulo é debounced no cliente,
-    // mas quem chamar a rota à mão não passa disso.
+    // O rótulo e o arraste da curva são debounced no cliente, mas quem chamar
+    // a rota à mão não passa deste teto.
     const limit = await rateLimit({
-      key: `connections:label:${user.id}`,
+      key: `connections:appearance:${user.id}`,
       limit: 600,
       windowMs: 60 * 60 * 1000,
     });

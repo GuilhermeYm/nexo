@@ -59,7 +59,16 @@ const COLUMN_GRANTS = [
   {
     table: "workspace_connections",
     privilege: "UPDATE",
-    columns: ["heads", "label", "stroke", "tone", "weight"],
+    columns: [
+      "bend_offset",
+      "bend_t",
+      "heads",
+      "label",
+      "shape",
+      "stroke",
+      "tone",
+      "weight",
+    ],
   },
   // O único GRANT por coluna que é de **leitura**, e o mais fácil de perder:
   // `message`, `stack`, `context` e `fingerprint` de `error_reports` são texto

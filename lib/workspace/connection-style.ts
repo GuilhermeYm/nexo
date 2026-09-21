@@ -8,11 +8,13 @@ export const CONNECTION_TONES = ["1", "2", "3", "4", "5", "6"] as const;
 export const CONNECTION_STROKES = ["solid", "dashed", "dotted"] as const;
 export const CONNECTION_WEIGHTS = ["thin", "regular", "bold"] as const;
 export const CONNECTION_HEADS = ["none", "end", "both"] as const;
+export const CONNECTION_SHAPES = ["straight", "curved"] as const;
 
 export type ConnectionTone = (typeof CONNECTION_TONES)[number];
 export type ConnectionStroke = (typeof CONNECTION_STROKES)[number];
 export type ConnectionWeight = (typeof CONNECTION_WEIGHTS)[number];
 export type ConnectionHeads = (typeof CONNECTION_HEADS)[number];
+export type ConnectionShape = (typeof CONNECTION_SHAPES)[number];
 
 export interface ConnectionStyle {
   /** Nula é o traço neutro, que acompanha o tema. */
@@ -20,6 +22,7 @@ export interface ConnectionStyle {
   stroke: ConnectionStroke;
   weight: ConnectionWeight;
   heads: ConnectionHeads;
+  shape: ConnectionShape;
 }
 
 /** A flecha de antes de 0019 — e a de toda ligação nova. */
@@ -28,6 +31,7 @@ export const DEFAULT_CONNECTION_STYLE: ConnectionStyle = {
   stroke: "solid",
   weight: "regular",
   heads: "end",
+  shape: "straight",
 };
 
 /** Espessura aparente do traço, em pixels de tela. */
@@ -36,6 +40,18 @@ export const WEIGHT_PX: Record<ConnectionWeight, number> = {
   regular: 1.75,
   bold: 3,
 };
+
+/**
+ * A barriga que a curva ganha ao ser ligada pelo inspetor, em unidades de
+ * lousa — antes de a pessoa arrastar a alça pela primeira vez.
+ *
+ * Sem isto, escolher "Curva" com `bendT`/`bendOffset` ainda nulos desenharia
+ * uma reta idêntica à de antes (`bendOffset` nulo vale zero em
+ * `bendPointOf`): o clique pareceria não ter feito nada. O valor é modesto
+ * de propósito — só o bastante para a curva se anunciar antes do primeiro
+ * ajuste.
+ */
+export const DEFAULT_BEND_OFFSET = 40;
 
 /**
  * O tracejado, em múltiplos da espessura.

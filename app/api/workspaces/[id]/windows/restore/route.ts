@@ -174,6 +174,9 @@ async function restoreConnections(
     stroke?: ConnectionStyle["stroke"];
     weight?: ConnectionStyle["weight"];
     heads?: ConnectionStyle["heads"];
+    shape?: ConnectionStyle["shape"];
+    bendT?: number | null;
+    bendOffset?: number | null;
   }[]
 ): Promise<void> {
   if (connections.length === 0) return;
@@ -209,6 +212,10 @@ async function restoreConnections(
         stroke: row.stroke ?? DEFAULT_CONNECTION_STYLE.stroke,
         weight: row.weight ?? DEFAULT_CONNECTION_STYLE.weight,
         heads: row.heads ?? DEFAULT_CONNECTION_STYLE.heads,
+        shape: row.shape ?? DEFAULT_CONNECTION_STYLE.shape,
+        // Ausentes em um lote criado antes de 0034 voltam como a reta antiga.
+        bendT: row.bendT ?? null,
+        bendOffset: row.bendOffset ?? null,
       }))
     )
     .onConflictDoNothing();

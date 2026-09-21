@@ -330,6 +330,18 @@ export interface BoardConnection extends ConnectionStyle {
   toWindowId: string;
   /** O que a flecha diz. Nulo quando ninguém escreveu nada nela. */
   label: string | null;
+  /**
+   * O ponto do meio da curva, como deslocamento **relativo à reta**: `bendT`
+   * ao longo dela (0 na saída, 1 na chegada) e `bendOffset` perpendicular, em
+   * unidades de lousa.
+   *
+   * Nulos nas duas — o par é indivisível — é a flecha reta de sempre. Não são
+   * coordenadas de propósito: um `x, y` ficaria velho no primeiro arraste,
+   * como a posição das pontas ficaria. Quem os transforma em ponto de tela é
+   * `bendPointOf`, em `lib/workspace/connection-geometry.ts`.
+   */
+  bendT: number | null;
+  bendOffset: number | null;
 }
 
 export type BoardMarkKind = "pen" | "rectangle" | "ellipse" | "diamond";
@@ -379,6 +391,12 @@ export const connectionContentColumns = {
   stroke: workspaceConnections.stroke,
   weight: workspaceConnections.weight,
   heads: workspaceConnections.heads,
+  // A curva (0034). `bendT` e `bendOffset` andam sempre juntos — o banco
+  // exige os dois ou nenhum — e são deslocamento relativo à reta, não
+  // coordenada: por isso sobrevivem ao arraste da janela.
+  shape: workspaceConnections.shape,
+  bendT: workspaceConnections.bendT,
+  bendOffset: workspaceConnections.bendOffset,
 };
 
 /**

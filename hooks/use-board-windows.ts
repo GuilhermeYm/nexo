@@ -88,11 +88,18 @@ export interface RestorableConnection {
   stroke?: ConnectionStyle["stroke"];
   weight?: ConnectionStyle["weight"];
   heads?: ConnectionStyle["heads"];
+  shape?: ConnectionStyle["shape"];
+  /** A alça da curva relativa ao segmento; ambas nulas preservam a reta. */
+  bendT?: number | null;
+  bendOffset?: number | null;
 }
 
 /** O que o inspetor da ligação muda. Origem e destino não estão aqui. */
 export type ConnectionPatch = Partial<
-  Pick<BoardConnection, "label" | keyof ConnectionStyle>
+  Pick<
+    BoardConnection,
+    "label" | keyof ConnectionStyle | "bendT" | "bendOffset"
+  >
 >;
 
 /** O último lote apagado, enquanto o "Desfazer" ainda está de pé. */

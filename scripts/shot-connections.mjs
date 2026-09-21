@@ -11,7 +11,11 @@
  *   - a flecha é desenhada de fato, e continua lá depois de recarregar;
  *   - o botão direito nela remove só ela;
  *   - a borracha encosta na flecha e o Desfazer a traz de volta;
- *   - fechar uma janela leva as flechas dela junto, por cascade.
+ *   - fechar uma janela leva as flechas dela junto, por cascade;
+ *   - a flecha curva: o par `bend_t`/`bend_offset` vai inteiro para o banco,
+ *     a alça para onde o ponteiro soltou, o arraste sai em poucos PATCH (e
+ *     não um por quadro, que estouraria o teto da rota), arrastar além da
+ *     ponta não produz `NaN` no traço, e "Reta" zera o par.
  *
  * Precisa de SUPABASE_SERVICE_ROLE_KEY e DATABASE_URL: roda com
  * `node --env-file=.env`.
@@ -232,6 +236,17 @@ async function main() {
     );
 
     // O destino virou a origem: mais um toque, mais um elo.
+    //
+    // Esperar a **barra**, e não só o banco. O Postgres vê o INSERT antes de
+    // a resposta chegar ao navegador, e nesse intervalo `linkingPending`
+    // ainda é verdadeiro: o toque seguinte é engolido de propósito ("só
+    // encadeia depois da confirmação"). Quem mira pelo banco clica cedo
+    // demais, perde o elo e acusa o produto de um defeito que é do roteiro.
+    await page
+      .waitForSelector("text=De “Hipótese central” para onde?", {
+        timeout: 10000,
+      })
+      .catch(() => null);
     await page.mouse.click(passo.x, passo.y);
     await page.waitForTimeout(2000);
     check(
@@ -360,6 +375,47 @@ async function main() {
     await page.waitForTimeout(1500);
 
     // ---- o rótulo ----
+
+    /**
+     * Escolhe um item no menu da flecha, repetindo se preciso.
+     *
+     * O menu do Radix anima ao abrir, e o item pode ser remontado entre o
+     * `waitForSelector` e o clique: o Playwright vê "element was detached
+     * from the DOM" e **o roteiro inteiro morre**, num ponto que não tem
+     * nada a ver com o que ele está provando. Aconteceu em duas de cinco
+     * rodadas. Reabrir custa um segundo; uma rodada perdida custa três
+     * minutos e um diagnóstico errado.
+     */
+    async function clickMenuItem(at, item, done, tries = 3) {
+      for (let attempt = 1; attempt <= tries; attempt++) {
+        // Deixa a animação de abertura terminar antes de mirar.
+        await page.waitForTimeout(400);
+        try {
+          await page.click(
+            `[role='menu'] [role='menuitem']:has-text('${item}')`,
+            { timeout: 5000 }
+          );
+        } catch {
+          // De propósito sem `continue`: o Playwright desiste de um item que
+          // foi remontado **depois** de o clique valer. Quem decide se deu
+          // certo é o efeito, logo abaixo — repetir por causa do erro
+          // clicaria no item duas vezes e desfaria o que já tinha dado certo.
+        }
+
+        for (let wait = 0; wait < 20; wait++) {
+          if (await done()) return true;
+          await page.waitForTimeout(200);
+        }
+
+        await page.keyboard.press("Escape").catch(() => {});
+        await page.waitForTimeout(300);
+        await page.mouse.click(at.x, at.y, { button: "right" });
+        await page
+          .waitForSelector("[role='menu']", { timeout: 5000 })
+          .catch(() => null);
+      }
+      return false;
+    }
     const between = {
       x: (pesquisa.x + hipotese.x) / 2,
       y: (pesquisa.y + hipotese.y) / 2,
@@ -370,8 +426,11 @@ async function main() {
       "o menu da flecha oferece escrever nela",
       await page.isVisible("[role='menu'] :text('Escrever na ligação')")
     );
-    await page.click(
-      "[role='menu'] [role='menuitem']:has-text('Escrever na ligação')"
+    check(
+      "e o item do menu abre o campo de texto",
+      await clickMenuItem(between, "Escrever na ligação", () =>
+        page.isVisible("input[aria-label='Texto da ligação']")
+      )
     );
     await page.waitForSelector("input[aria-label='Texto da ligação']", {
       timeout: 5000,
@@ -475,6 +534,358 @@ async function main() {
     );
     await page.screenshot({ path: `${OUT}/05b-inspetor-light.png` });
 
+    // ---- a flecha curva ----
+    //
+    // O que este bloco prova, e que a captura de tela ao lado não prova:
+    //
+    //   - "Curva" grava o formato e o par `bend_t`/`bend_offset` **juntos** —
+    //     meio par derruba o CHECK do banco e mata o PATCH com um 500;
+    //   - o traço vira mesmo uma curva (`Q`), e não uma reta com outro nome;
+    //   - a alça só existe na flecha curvada **e** selecionada;
+    //   - arrastar a alça grava o novo par, e a alça para exatamente onde o
+    //     ponteiro soltou — é a prova de que `bendFromPoint` e `bendPointOf`
+    //     são inversas na tela, não só no papel;
+    //   - **o arraste sai como um punhado de PATCH, não um por quadro.** A
+    //     rota tem teto de 600 edições por hora: sem o debounce, dois
+    //     segundos de arraste a 60fps consomem a cota do dia e a pessoa
+    //     começa a tomar 429 no meio do gesto. É a única coisa aqui que
+    //     falha em produção e não na tela de quem programou;
+    //   - arrastar a alça para **além da ponta** não quebra nada: `bend_t`
+    //     fica na faixa desenhável e o traço continua um caminho válido. Uma
+    //     quadrática está presa nas duas pontas, e pedir que ela passe longe
+    //     bem em cima da âncora mandaria o ponto de controle para o infinito
+    //     — um `NaN` no `d` faz o SVG descartar o caminho inteiro em
+    //     silêncio, sem um erro sequer no console;
+    //   - "Reta" zera o par inteiro, e não só o formato.
+    const SHAPE = `${PANEL} [role='group'][aria-label='Formato']`;
+    /** A alça: o único círculo dentro de uma flecha. */
+    const HANDLE = "[data-connection] circle";
+    /** O texto da flecha seleciona a ligação, como clicar no traço — e é
+        onde mirar depois que a curva tirou o traço de debaixo do ponteiro. */
+    const CHIP = "button:has-text('sustenta a hipótese')";
+
+    async function readBend() {
+      const { rows } = await sql.query(
+        `select shape, bend_t, bend_offset from workspace_connections
+          where user_id = $1 and tone is not null`,
+        [userId]
+      );
+      return rows[0] ?? null;
+    }
+
+    /** Espera o banco chegar no estado esperado, em vez de dormir um tempo
+        fixo — o PATCH da alça sai depois de uma pausa, não na hora. */
+    async function waitForBend(predicate, timeout = 10000) {
+      const deadline = Date.now() + timeout;
+      let row = await readBend();
+      while (!predicate(row) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        row = await readBend();
+      }
+      return row;
+    }
+
+    /** Espera o traço chegar ao formato esperado.
+     *
+     * O banco confirma antes do cliente: quem lê o `d` assim que a linha
+     * mudou no Postgres pega o desenho um render atrás — a resposta do PATCH
+     * ainda estava a caminho. Não é lentidão do produto, é a ordem natural
+     * das duas pontas. */
+    async function waitForPath(predicate, timeout = 6000) {
+      const deadline = Date.now() + timeout;
+      let d = await readPath();
+      while (!predicate(d) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        d = await readPath();
+      }
+      return d;
+    }
+
+    /** O `d` do traço desta flecha, como o navegador o tem. */
+    async function readPath() {
+      return page.evaluate(() => {
+        const group = [...document.querySelectorAll("[data-connection]")].find(
+          (node) => node.getAttribute("class")?.includes("tag-3")
+        );
+        return group?.querySelector("path")?.getAttribute("d") ?? null;
+      });
+    }
+
+    /**
+     * O quanto o ponto de controle do traço sai da reta entre as pontas, com
+     * sinal — lido do `d` que o navegador tem, sem passar por nada nosso.
+     *
+     * Reimplementar a conta aqui é de propósito: uma checagem que chamasse
+     * `bendControlOf` passaria feliz se `bendControlOf` estivesse errada.
+     */
+    function controlOffsetOf(d) {
+      const parsed = d?.match(
+        /^M ([-\d.e+]+) ([-\d.e+]+) Q ([-\d.e+]+) ([-\d.e+]+) ([-\d.e+]+) ([-\d.e+]+)$/
+      );
+      if (!parsed) return null;
+      const [x1, y1, cx, cy, x2, y2] = parsed.slice(1).map(Number);
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const span = Math.hypot(dx, dy);
+      if (span === 0) return null;
+      // Projeção na perpendicular à reta — o giro de 90° é (x, y) → (-y, x).
+      return ((cx - x1) * -dy + (cy - y1) * dx) / span;
+    }
+
+    async function handleAt() {
+      return page.$eval(HANDLE, (node) => {
+        const box = node.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      });
+    }
+
+    /**
+     * Arrasta a alça até um ponto, em passos, como um dedo faria.
+     *
+     * Repete uma vez se a alça não saiu do lugar: entre ler a posição dela e
+     * apertar o ponteiro cabe um render, e um `pointerdown` que cai a dois
+     * pixels do círculo não pega nada — o roteiro seguiria e acusaria a
+     * geometria de um erro que foi da mira.
+     */
+    async function dragHandle(to, steps = 24, tries = 2) {
+      let from = null;
+      for (let attempt = 1; attempt <= tries; attempt++) {
+        // Deixa o desenho assentar antes de mirar.
+        await page.waitForTimeout(300);
+        from = await handleAt();
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        for (let step = 1; step <= steps; step++) {
+          await page.mouse.move(
+            from.x + ((to.x - from.x) * step) / steps,
+            from.y + ((to.y - from.y) * step) / steps
+          );
+          await page.waitForTimeout(16);
+        }
+        await page.mouse.up();
+        await page.waitForTimeout(300);
+
+        const landed = await handleAt();
+        if (Math.hypot(landed.x - from.x, landed.y - from.y) > 2) break;
+      }
+      return from;
+    }
+
+    // Só dá para provar o debounce contando o que sai pela rede.
+    let patches = 0;
+    let refused = 0;
+    const PATCH_PATH = /\/connections\/[0-9a-f-]+$/i;
+    page.on("request", (request) => {
+      if (
+        request.method() === "PATCH" &&
+        PATCH_PATH.test(new URL(request.url()).pathname)
+      ) {
+        patches++;
+      }
+    });
+    page.on("response", (response) => {
+      if (
+        response.status() >= 400 &&
+        PATCH_PATH.test(new URL(response.url()).pathname)
+      ) {
+        refused++;
+      }
+    });
+
+    check("a flecha nasce reta", (await readBend())?.shape === "straight");
+
+    await page.click(`${SHAPE} button:has-text('Curva')`);
+    const curved = await waitForBend(
+      (row) => row?.shape === "curved" && row.bend_t !== null
+    );
+    check(
+      "“Curva” grava o formato e a barriga inicial, os dois campos juntos",
+      curved?.shape === "curved" &&
+        curved.bend_t !== null &&
+        curved.bend_offset !== null,
+      JSON.stringify(curved)
+    );
+    const curvedPath = await waitForPath((d) => d?.includes(" Q ") === true);
+    check(
+      "e o traço vira uma curva de verdade (Q, não L)",
+      curvedPath?.includes(" Q ") === true,
+      curvedPath ?? "sem traço"
+    );
+    check(
+      "a alça aparece na flecha curvada e selecionada",
+      (await page.$$(HANDLE)).length === 1
+    );
+    await page.screenshot({ path: `${OUT}/05c-curva-light.png` });
+
+    // ---- o arraste ----
+    const origin = await handleAt();
+    const target = { x: origin.x + 40, y: origin.y - 110 };
+    patches = 0;
+    await dragHandle(target);
+
+    const dragged = await waitForBend(
+      (row) =>
+        row != null &&
+        curved != null &&
+        Math.abs(row.bend_offset - curved.bend_offset) > 8
+    );
+    check(
+      "arrastar a alça grava o novo par",
+      dragged != null &&
+        dragged.shape === "curved" &&
+        dragged.bend_t !== null &&
+        dragged.bend_offset !== null,
+      JSON.stringify(dragged)
+    );
+
+    const landed = await handleAt();
+    check(
+      "e a alça fica exatamente onde o ponteiro soltou",
+      Math.hypot(landed.x - target.x, landed.y - target.y) < 6,
+      `${Math.round(landed.x)},${Math.round(landed.y)} vs ${Math.round(
+        target.x
+      )},${Math.round(target.y)}`
+    );
+
+    // A pausa do debounce já passou (o `waitForBend` acima esperou o banco);
+    // esta sobra é para um PATCH atrasado aparecer na conta em vez de passar
+    // batido e o roteiro dar por certo um debounce que não existe.
+    await page.waitForTimeout(1500);
+    check(
+      "o arraste sai em poucos PATCH, não um por quadro",
+      patches >= 1 && patches <= 4,
+      `${patches} PATCH em 24 quadros de arraste`
+    );
+    check("e nenhum deles é recusado", refused === 0, `${refused} recusado(s)`);
+
+    // ---- veio do Postgres, não da memória ----
+    await page.reload({ waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector(WINDOW, { timeout: 20000 });
+    await page.waitForTimeout(1000);
+    const reloadedPath = await waitForPath((d) => d?.includes(" Q ") === true);
+    check(
+      "a curva continua curva depois de recarregar",
+      reloadedPath?.includes(" Q ") === true,
+      reloadedPath ?? "sem traço"
+    );
+    check(
+      "e a alça não fica boiando na flecha que ninguém selecionou",
+      (await page.$$(HANDLE)).length === 0
+    );
+
+    // ---- arrastar para além da ponta ----
+    //
+    // Uma quadrática está presa nas duas pontas. `bend_t` é preso à faixa
+    // desenhável antes de qualquer conta; sem isso o ponto de controle vai
+    // para o infinito e o traço some da tela sem um erro no console.
+    await page.click(CHIP);
+    await page.waitForSelector(PANEL, { timeout: 5000 }).catch(() => null);
+    await page.waitForSelector(HANDLE, { timeout: 5000 }).catch(() => null);
+    check(
+      "clicar no texto seleciona a ligação e traz a alça de volta",
+      (await page.$$(HANDLE)).length === 1
+    );
+
+    refused = 0;
+    // Bem além da janela de destino, no prolongamento do traço.
+    await dragHandle({ x: passo.x + 600, y: passo.y });
+    await page.waitForTimeout(1500);
+
+    const stretched = await readBend();
+    check(
+      "arrastar além da ponta não escapa da faixa desenhável",
+      stretched != null &&
+        stretched.bend_t >= 0 &&
+        stretched.bend_t <= 1 &&
+        Math.abs(stretched.bend_offset) <= 20000,
+      JSON.stringify(stretched)
+    );
+    const stretchedPath = await readPath();
+    check(
+      "e o traço continua um caminho válido (sem NaN no d)",
+      typeof stretchedPath === "string" &&
+        stretchedPath.includes(" Q ") &&
+        !/NaN|Infinity/.test(stretchedPath),
+      stretchedPath ?? "sem traço"
+    );
+    check(
+      "e o banco não recusou nenhum desses PATCH",
+      refused === 0,
+      `${refused} recusado(s)`
+    );
+
+    // ---- de volta à reta ----
+    await page.click(`${SHAPE} button:has-text('Reta')`);
+    const straightened = await waitForBend(
+      (row) => row?.shape === "straight" && row.bend_t === null
+    );
+    check(
+      "“Reta” desfaz a curva e zera o par inteiro, não só o formato",
+      straightened?.shape === "straight" &&
+        straightened.bend_t === null &&
+        straightened.bend_offset === null,
+      JSON.stringify(straightened)
+    );
+    const straightPath = await waitForPath((d) => d?.includes(" L ") === true);
+    check(
+      "e o traço volta a ser uma reta (L)",
+      straightPath?.includes(" L ") === true,
+      straightPath ?? "sem traço"
+    );
+
+    // ---- a curva de novo, depois de um arraste ----
+    //
+    // O caso que já quebrou uma vez: a alça arrastada ficava guardada no
+    // componente e **sombreava as props para sempre**. A pessoa arrastava,
+    // clicava "Reta", clicava "Curva" — o banco gravava a barriga padrão,
+    // e a tela desenhava a posição velha do arraste. O botão parecia não
+    // ter feito nada.
+    //
+    // A consequência pior era invisível: `updateConnection` é otimista e
+    // devolve os campos quando o PATCH falha, mas a devolução não chegava à
+    // tela, porque o estado local ganhava. Um PATCH recusado deixava a
+    // pessoa olhando uma curva que não estava no banco.
+    //
+    // Por isso a conferência não é "tem um Q": é **o desenho contra a
+    // linha do Postgres**. Só isso separa as duas.
+    await page.click(`${SHAPE} button:has-text('Curva')`);
+    const recurved = await waitForBend(
+      (row) => row?.shape === "curved" && row.bend_t !== null
+    );
+    const recurvedPath = await waitForPath(
+      (d) => controlOffsetOf(d) !== null && Math.abs(controlOffsetOf(d)) > 1
+    );
+    const drawnOffset = controlOffsetOf(recurvedPath);
+    check(
+      "“Curva” depois de um arraste volta à barriga padrão, e não à posição arrastada",
+      recurved != null &&
+        drawnOffset != null &&
+        // Numa quadrática o controle fica ao dobro da distância da barriga:
+        // a curva passa a meio caminho dele. É essa razão que amarra o
+        // traço desenhado ao `bend_offset` gravado.
+        Math.abs(drawnOffset - 2 * recurved.bend_offset) < 2,
+      `desenhado ${drawnOffset?.toFixed(1)} para bend_offset ${
+        recurved?.bend_offset
+      } (esperado ${2 * (recurved?.bend_offset ?? 0)})`
+    );
+
+    // De volta à reta, que é como o resto do roteiro conta encontrar a flecha.
+    await page.click(`${SHAPE} button:has-text('Reta')`);
+    await waitForBend((row) => row?.shape === "straight" && row.bend_t === null);
+    await waitForPath((d) => d?.includes(" L ") === true);
+
+    const { rows: halfPairs } = await sql.query(
+      `select count(*)::int as total from workspace_connections
+        where user_id = $1 and (bend_t is null) <> (bend_offset is null)`,
+      [userId]
+    );
+    check(
+      "nenhuma ligação ficou com meio par",
+      halfPairs[0].total === 0,
+      `${halfPairs[0].total} com meio par`
+    );
+
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
     check("Esc fecha o inspetor", !(await page.isVisible(PANEL)));
@@ -516,7 +927,11 @@ async function main() {
       await page.isVisible("[role='menu'] :text('Remover a ligação')")
     );
 
-    await page.click("[role='menu'] [role='menuitem']:has-text('Remover a ligação')");
+    await clickMenuItem(
+      between,
+      "Remover a ligação",
+      async () => (await countLinks(sql, userId)) === 1
+    );
     check(
       "e remove só ela",
       (await waitForLinks(sql, userId, 1)) === 1
