@@ -1,18 +1,21 @@
 "use client";
 
-import { FileText, Paperclip, Search, Sparkles, X } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { FileText, LoaderCircle, Paperclip, Search, Sparkles, Trash2, X } from "lucide-react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DeleteTagsChoice } from "@/components/notes/delete-tags-choice";
 import { storedChipClass } from "@/lib/tags/palette";
 import type {
   BoardNoteTag,
   OpenableAttachment,
   OpenableNote,
 } from "@/lib/workspace/queries";
+import type { NoteDeletionImpact } from "@/lib/notes/deletion-impact";
 import { cn } from "@/lib/utils";
 
 /**
@@ -71,6 +74,23 @@ export const NotePicker = memo(function NotePicker({
   const [files, setFiles] = useState<OpenableAttachment[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Seleção múltipla para exclusão direta da conta
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting" | "error">(
+    "idle"
+  );
+  const [deleteAttachments, setDeleteAttachments] = useState(false);
+  const [deleteTags, setDeleteTags] = useState(false);
+  const [deletionImpact, setDeletionImpact] = useState<NoteDeletionImpact | null>(
+    null
+  );
+  const [impactStatus, setImpactStatus] = useState<"idle" | "loading" | "error">(
+    "idle"
+  );
   const searchRef = useRef<HTMLInputElement>(null);
   const inFlight = useRef<AbortController | null>(null);
 
@@ -155,6 +175,99 @@ export const NotePicker = memo(function NotePicker({
   const searching = loading && rowCount === 0;
   const isEmpty = rowCount === 0 && loaded && !loading;
 
+  // Seleção múltipla — só na aba Notas
+  const visibleNoteIds = visibleNotes.map((note) => note.id);
+  const everyVisibleNoteSelected =
+    selectionMode &&
+    visibleNotes.length > 0 &&
+    visibleNoteIds.every((id) => selectedNoteIds.has(id));
+
+  function resetSelection() {
+    setSelectedNoteIds(new Set());
+    setSelectionMode(false);
+    setDeleteDialogOpen(false);
+    setDeleteAttachments(false);
+    setDeleteTags(false);
+    setDeletionImpact(null);
+    setImpactStatus("idle");
+  }
+
+  function toggleNoteSelection(noteId: string) {
+    setSelectedNoteIds((current) => {
+      const next = new Set(current);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
+      return next;
+    });
+  }
+
+  function toggleVisibleNotes() {
+    if (everyVisibleNoteSelected) {
+      visibleNoteIds.forEach((id) => selectedNoteIds.delete(id));
+    } else {
+      visibleNoteIds.forEach((id) => selectedNoteIds.add(id));
+    }
+    setSelectedNoteIds(new Set(selectedNoteIds));
+  }
+
+  async function loadDeletionImpact() {
+    setImpactStatus("loading");
+    setDeletionImpact(null);
+    try {
+      const response = await fetch("/api/notes/deletion-impact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...selectedNoteIds] }),
+      });
+      if (!response.ok) throw new Error("impact request failed");
+      const nextImpact = (await response.json()) as NoteDeletionImpact;
+      setDeletionImpact(nextImpact);
+      if (nextImpact.attachmentCount === 0) setDeleteAttachments(false);
+      setImpactStatus("idle");
+    } catch {
+      setImpactStatus("error");
+    }
+  }
+
+  async function openDeleteDialog() {
+    setDeleteStatus("idle");
+    setDeleteAttachments(false);
+    setDeleteTags(false);
+    setDeletionImpact(null);
+    setImpactStatus("loading");
+    setDeleteDialogOpen(true);
+    await loadDeletionImpact();
+  }
+
+  async function deleteSelectedNotes() {
+    if (selectedNoteIds.size === 0) return;
+    setDeleteStatus("deleting");
+
+    try {
+      const response = await fetch("/api/notes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: [...selectedNoteIds],
+          deleteAttachments,
+          deleteTags,
+        }),
+      });
+      if (!response.ok) throw new Error("delete request failed");
+
+      // Remove from local state
+      setNotes((current) =>
+        current.filter((note) => !selectedNoteIds.has(note.id))
+      );
+      setSelectedNoteIds(new Set());
+      setSelectionMode(false);
+      setDeleteDialogOpen(false);
+      setDeleteStatus("idle");
+    } catch {
+      setDeleteStatus("error");
+    }
+  }
+
   return (
     <>
       {/* O véu.
@@ -182,26 +295,80 @@ export const NotePicker = memo(function NotePicker({
         aria-label="Trazer da conta"
         inert={!open}
         className={cn(
-          "absolute inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-border bg-background transition-transform duration-300 ease-out motion-reduce:transition-none lg:max-w-sm",
+          "absolute inset-y-0 right-0 z-30 flex w-[min(24rem,calc(100%-1rem))] flex-col border-l border-border bg-background transition-transform duration-300 ease-out motion-reduce:transition-none",
           open ? "translate-x-0" : "translate-x-full"
         )}
       >
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-          <div>
-            <h2 className="text-sm font-bold text-foreground">Trazer da conta</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Qualquer coisa sua, de qualquer workspace.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Fechar o painel — Esc"
-            className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-lg border border-border text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:size-11"
-          >
-            <X className="size-4" aria-hidden="true" />
-            <span className="sr-only">Fechar painel</span>
-          </button>
+          {!selectionMode ? (
+            <>
+              <div>
+                <h2 className="text-sm font-bold text-foreground">Trazer da conta</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Qualquer coisa sua, de qualquer workspace.
+                </p>
+              </div>
+              {tab === "notes" && (
+                <button
+                  type="button"
+                  onClick={() => setSelectionMode(true)}
+                  className="ml-auto h-9 rounded-lg px-3 text-sm font-semibold text-muted-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 pointer-coarse:h-11"
+                >
+                  Selecionar
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                title="Fechar o painel — Esc"
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:size-11"
+              >
+                <X className="size-4" aria-hidden="true" />
+                <span className="sr-only">Fechar painel</span>
+              </button>
+            </>
+          ) : (
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+              <p className="text-sm font-medium text-foreground" aria-live="polite">
+                {selectedNoteIds.size === 0
+                  ? "Escolha as notas que deseja apagar"
+                  : `${selectedNoteIds.size} ${
+                      selectedNoteIds.size === 1
+                        ? "nota selecionada"
+                        : "notas selecionadas"
+                    }`}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleVisibleNotes}
+                  className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  {everyVisibleNoteSelected
+                    ? "Limpar seleção"
+                    : "Selecionar visíveis"}
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedNoteIds.size === 0}
+                  onClick={() => void openDeleteDialog()}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45"
+                >
+                  <Trash2 className="size-4" aria-hidden="true" />
+                  Apagar
+                </button>
+                <button
+                  type="button"
+                  onClick={resetSelection}
+                  title="Cancelar — Esc"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:size-11"
+                >
+                  <X className="size-4" aria-hidden="true" />
+                  <span className="sr-only">Cancelar seleção</span>
+                </button>
+              </div>
+            </div>
+          )}
         </header>
 
         <div
@@ -218,7 +385,10 @@ export const NotePicker = memo(function NotePicker({
           </TabButton>
           <TabButton
             active={tab === "files"}
-            onClick={() => setTab("files")}
+            onClick={() => {
+              resetSelection();
+              setTab("files");
+            }}
             icon={<Paperclip className="size-3.5" aria-hidden="true" />}
           >
             Arquivos
@@ -306,6 +476,9 @@ export const NotePicker = memo(function NotePicker({
                       ) : null
                     }
                     onClick={() => onPick(note)}
+                    selectionMode={selectionMode}
+                    checked={selectedNoteIds.has(note.id)}
+                    onCheckedChange={() => toggleNoteSelection(note.id)}
                   />
                 </li>
               ))}
@@ -341,6 +514,75 @@ export const NotePicker = memo(function NotePicker({
           )}
         </div>
       </aside>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Excluir notas selecionadas?"
+        description="Elas sairão da sua conta, da busca e de todas as lousas em que estiverem abertas."
+        subject={`${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`}
+        confirmLabel="Excluir notas"
+        busyLabel="Excluindo notas…"
+        busy={deleteStatus === "deleting"}
+        error={deleteStatus === "error" ? "Não foi possível excluir as notas. Tente novamente." : undefined}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={() => void deleteSelectedNotes()}
+      >
+        <label
+          className={cn(
+            "flex items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm transition-opacity",
+            deletionImpact?.attachmentCount
+              ? "cursor-pointer text-foreground"
+              : "cursor-default text-muted-foreground opacity-70"
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={deleteAttachments}
+            onChange={(event) => setDeleteAttachments(event.target.checked)}
+            disabled={
+              deleteStatus === "deleting" ||
+              impactStatus !== "idle" ||
+              !deletionImpact?.attachmentCount
+            }
+            className="mt-0.5 size-4 accent-error"
+          />
+          <span>
+            <span className="block font-medium">Apagar também os arquivos associados</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              {impactStatus === "loading"
+                ? "Verificando os arquivos destas notas…"
+                : deletionImpact?.attachmentCount
+                ? `${deletionImpact.attachmentCount} ${
+                    deletionImpact.attachmentCount === 1
+                      ? "arquivo associado será removido"
+                      : "arquivos associados serão removidos"
+                  } permanentemente.`
+                : impactStatus === "error"
+                ? "Não foi possível verificar os arquivos; esta opção permanece indisponível."
+                : "As notas selecionadas não têm arquivos associados."}
+            </span>
+          </span>
+          {impactStatus === "loading" && (
+            <LoaderCircle
+              className="mt-0.5 ml-auto size-4 shrink-0 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          )}
+        </label>
+        <DeleteTagsChoice
+          impact={deletionImpact}
+          status={impactStatus}
+          checked={deleteTags}
+          disabled={deleteStatus === "deleting"}
+          onCheckedChange={setDeleteTags}
+          onRetry={() => void loadDeletionImpact()}
+          subject={{
+            these: "destas notas",
+            outside: "da seleção",
+            empty: "Estas notas não têm tags para apagar.",
+          }}
+        />
+      </ConfirmDialog>
     </>
   );
 });
@@ -393,6 +635,9 @@ function PickerRow({
   tags = [],
   badge,
   onClick,
+  selectionMode = false,
+  checked = false,
+  onCheckedChange,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -402,51 +647,71 @@ function PickerRow({
   tags?: BoardNoteTag[];
   badge: React.ReactNode;
   onClick: () => void;
+  selectionMode?: boolean;
+  checked?: boolean;
+  onCheckedChange?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2.5 text-left transition-colors duration-150 hover:bg-tertiary"
-    >
-      {icon}
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {title}
-          </span>
-          {badge}
-        </span>
-        {excerpt && (
-          <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-muted-foreground">
-            {excerpt}
-          </span>
+    <div className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2.5 text-left transition-colors duration-150 hover:bg-tertiary">
+      {selectionMode && (
+        <label className="flex shrink-0 cursor-pointer items-start pt-1" title={`Selecionar ${title}`}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => onCheckedChange?.()}
+            onClick={(e) => e.stopPropagation()}
+            className="size-4 rounded border-border accent-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          />
+          <span className="sr-only">Selecionar {title}</span>
+        </label>
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "flex min-w-0 flex-1 items-start gap-2.5 text-left transition-colors duration-150 hover:bg-tertiary",
+          selectionMode && "pr-2"
         )}
-        {tags.length > 0 && (
-          <span className="mt-1.5 flex flex-wrap items-center gap-1">
-            {tags.slice(0, 4).map((tag) => (
-              <span
-                key={tag.id}
-                className={cn(
-                  "max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                  storedChipClass(tag)
-                )}
-              >
-                #{tag.name}
-              </span>
-            ))}
-            {tags.length > 4 && (
-              <span className="text-[10px] font-medium text-subtle-foreground">
-                +{tags.length - 4}
-              </span>
-            )}
+      >
+        {icon}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {title}
+            </span>
+            {badge}
           </span>
-        )}
-        <span className="mt-1 block text-[11px] text-subtle-foreground">
-          {meta}
+          {excerpt && (
+            <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-muted-foreground">
+              {excerpt}
+            </span>
+          )}
+          {tags.length > 0 && (
+            <span className="mt-1.5 flex flex-wrap items-center gap-1">
+              {tags.slice(0, 4).map((tag) => (
+                <span
+                  key={tag.id}
+                  className={cn(
+                    "max-w-[10rem] truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                    storedChipClass(tag)
+                  )}
+                >
+                  #{tag.name}
+                </span>
+              ))}
+              {tags.length > 4 && (
+                <span className="text-[10px] font-medium text-subtle-foreground">
+                  +{tags.length - 4}
+                </span>
+              )}
+            </span>
+          )}
+          <span className="mt-1 block text-[11px] text-subtle-foreground">
+            {meta}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
 
