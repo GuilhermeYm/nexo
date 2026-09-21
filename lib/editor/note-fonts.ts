@@ -17,11 +17,8 @@
  */
 export const NOTE_FONT_IDS = [
   "default",
-  "literata",
-  "lora",
-  "atkinson",
-  "nunito",
   "mono",
+  "manuscrita",
 ] as const;
 
 export type NoteFontId = (typeof NOTE_FONT_IDS)[number];
@@ -33,11 +30,8 @@ export const NOTE_FONTS: {
   hint: string;
 }[] = [
   { id: "default", name: "Padrão", hint: "Geist, a fonte do Nexo" },
-  { id: "literata", name: "Literata", hint: "Serifada, para leitura longa" },
-  { id: "lora", name: "Lora", hint: "Serifada, mais caligráfica" },
-  { id: "atkinson", name: "Atkinson", hint: "Feita para ler sem esforço" },
-  { id: "nunito", name: "Nunito", hint: "Arredondada e leve" },
-  { id: "mono", name: "Geist Mono", hint: "Monoespaçada, de máquina" },
+  { id: "mono", name: "JetBrains Mono", hint: "Monoespaçada, de máquina" },
+  { id: "manuscrita", name: "Caveat", hint: "Manuscrita, para anotações à mão" },
 ];
 
 /** Um id que saiu da lista (ou nunca esteve nela) volta a ser o padrão. */

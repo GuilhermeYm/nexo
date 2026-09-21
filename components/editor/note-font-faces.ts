@@ -1,9 +1,4 @@
-import {
-  Atkinson_Hyperlegible_Next,
-  Literata,
-  Lora,
-  Nunito,
-} from "next/font/google";
+import { Caveat, JetBrains_Mono } from "next/font/google";
 import type { CSSProperties } from "react";
 
 import type { NoteFontId } from "@/lib/editor/note-fonts";
@@ -15,48 +10,28 @@ import type { NoteFontId } from "@/lib/editor/note-fonts";
  * arquivo só desce quando algum texto passa a usar a família — quem nunca
  * troca a fonte não paga por nenhuma. Geist e Geist Mono já vêm do layout.
  */
-const literata = Literata({
+const caveat = Caveat({
   subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-note-literata",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-note-manuscrita",
   preload: false,
 });
 
-const lora = Lora({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-note-lora",
-  preload: false,
-});
-
-const atkinson = Atkinson_Hyperlegible_Next({
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-note-atkinson",
-  preload: false,
-});
-
-const nunito = Nunito({
-  subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-note-nunito",
+  variable: "--font-note-mono",
   preload: false,
 });
 
 /** As classes que publicam as variáveis `--font-note-*`. Vão num ancestral. */
 export const NOTE_FONT_VARIABLES = [
-  literata.variable,
-  lora.variable,
-  atkinson.variable,
-  nunito.variable,
+  caveat.variable,
+  jetbrainsMono.variable,
 ].join(" ");
 
 const FAMILY: Record<Exclude<NoteFontId, "default">, string> = {
-  literata: "var(--font-note-literata)",
-  lora: "var(--font-note-lora)",
-  atkinson: "var(--font-note-atkinson)",
-  nunito: "var(--font-note-nunito)",
-  mono: "var(--font-geist-mono)",
+  mono: "var(--font-note-mono)",
+  manuscrita: "var(--font-note-manuscrita)",
 };
 
 /** A família de uma fonte, para desenhar o nome dela no próprio menu. */
