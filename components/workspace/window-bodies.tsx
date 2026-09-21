@@ -134,7 +134,7 @@ export function NoteWindowBody({
 
   useEffect(() => {
     if (!autoFocus) return;
-    titleRef.current?.focus();
+    titleRef.current?.focus({ preventScroll: true });
     titleRef.current?.select();
   }, [autoFocus]);
 
@@ -270,7 +270,7 @@ function TagRow({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (adding) inputRef.current?.focus();
+    if (adding) inputRef.current?.focus({ preventScroll: true });
   }, [adding]);
 
   function commit() {
@@ -560,7 +560,7 @@ export function ElementWindowBody({
   const textTone = item.content?.textTone ?? "default";
 
   useEffect(() => {
-    if (autoFocus) textRef.current?.focus();
+    if (autoFocus) textRef.current?.focus({ preventScroll: true });
   }, [autoFocus]);
 
   return (

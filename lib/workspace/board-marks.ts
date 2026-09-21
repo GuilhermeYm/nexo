@@ -77,6 +77,9 @@ export function markContains(mark: BoardMark, point: BoardPoint, padding: number
   if (point.x < mark.x - padding || point.x > mark.x + mark.width + padding || point.y < mark.y - padding || point.y > mark.y + mark.height + padding) return false;
   if (mark.kind !== "pen") return true;
   const local = { x: point.x - mark.x, y: point.y - mark.y };
+  if (mark.points.length === 1) {
+    return distanceSquared(local, mark.points[0]) <= (padding + mark.weight / 2) ** 2;
+  }
   for (let index = 1; index < mark.points.length; index += 1) {
     if (segmentDistance(local, mark.points[index - 1], mark.points[index]) <= padding + mark.weight / 2) return true;
   }
