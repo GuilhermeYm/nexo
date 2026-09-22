@@ -58,15 +58,19 @@ export function NoteTags({
   initialTags,
   vocabulary,
   onCountChange,
+  onTagsChange,
 }: {
   noteId: string;
   initialTags: EditableTag[];
   /** Quantas tags a nota tem agora — o resumo da ficha recolhida mostra. */
   onCountChange?: (count: number) => void;
+  /** A lista final depois de cada mudança, inclusive reversão de erro. */
+  onTagsChange?: (tags: EditableTag[]) => void;
   /** As tags que a pessoa já tem, das mais usadas às menos — as sugestões. */
   vocabulary: EditableTag[];
 }) {
   const [tags, setTags] = useState(initialTags);
+  const tagsRef = useRef(initialTags);
   const [known, setKnown] = useState(vocabulary);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -75,6 +79,17 @@ export function NoteTags({
   const inputRef = useRef<HTMLInputElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
+
+  const changeTags = useCallback(
+    (update: (current: EditableTag[]) => EditableTag[]) => {
+      const next = update(tagsRef.current);
+      if (next === tagsRef.current) return;
+      tagsRef.current = next;
+      setTags(next);
+      onTagsChange?.(next);
+    },
+    [onTagsChange]
+  );
 
   useEffect(() => {
     if (adding) inputRef.current?.focus();
@@ -96,7 +111,7 @@ export function NoteTags({
         const body = (await response.json()) as { tag: EditableTag };
         // A rota é idempotente (`onConflictDoNothing`): marcar de novo uma
         // tag que a nota já tem não duplica o chip.
-        setTags((current) =>
+        changeTags((current) =>
           current.some((tag) => tag.id === body.tag.id)
             ? current
             : [...current, body.tag]
@@ -110,14 +125,14 @@ export function NoteTags({
         // A linha simplesmente não aparece; a nota em si nunca é afetada.
       }
     },
-    [noteId]
+    [noteId, changeTags]
   );
 
   const remove = useCallback(
     async (tagId: string) => {
       // Otimista: o chip sai na hora e volta se a rota recusar.
       let previous: EditableTag[] = [];
-      setTags((current) => {
+      changeTags((current) => {
         previous = current;
         return current.filter((tag) => tag.id !== tagId);
       });
@@ -126,12 +141,12 @@ export function NoteTags({
           `/api/notes/${noteId}/tags?tagId=${tagId}`,
           { method: "DELETE" }
         );
-        if (!response.ok) setTags(previous);
+        if (!response.ok) changeTags(() => previous);
       } catch {
-        setTags(previous);
+        changeTags(() => previous);
       }
     },
-    [noteId]
+    [noteId, changeTags]
   );
 
   const update = useCallback(
@@ -139,7 +154,7 @@ export function NoteTags({
       // Otimista pelo mesmo motivo: uma amostra de cor é um gesto só, e o
       // resultado tem que se ver imediatamente.
       let previous: EditableTag[] = [];
-      setTags((current) => {
+      changeTags((current) => {
         previous = current;
         return current.map((tag) =>
           tag.id === tagId ? { ...tag, ...patch } : tag
@@ -152,21 +167,21 @@ export function NoteTags({
           body: JSON.stringify(patch),
         });
         if (!response.ok) {
-          setTags(previous);
+          changeTags(() => previous);
           return;
         }
         const body = (await response.json()) as { tag: EditableTag };
-        setTags((current) =>
+        changeTags((current) =>
           current.map((tag) => (tag.id === tagId ? body.tag : tag))
         );
         setKnown((current) =>
           current.map((tag) => (tag.id === tagId ? body.tag : tag))
         );
       } catch {
-        setTags(previous);
+        changeTags(() => previous);
       }
     },
-    []
+    [changeTags]
   );
 
   const closePanel = useCallback(() => setEditingId(null), []);

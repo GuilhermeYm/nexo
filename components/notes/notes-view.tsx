@@ -23,18 +23,20 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithRef } from "react";
 
 import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { AiReviewCard } from "@/components/notes/ai-review-card";
-import { NoteContextMenu, useNoteDeletion } from "@/components/dashboard/note-context-menu";
+import { NoteContextMenu, useNoteDeletion, useNoteTagsEditor } from "@/components/dashboard/note-context-menu";
+import type { EditableTag } from "@/components/editor/note-tags";
 import { CreateFolderDialog } from "@/components/notes/create-folder-dialog";
 import { DeleteTagsChoice } from "@/components/notes/delete-tags-choice";
 import { FolderFilterBar, NoteFolderPicker } from "@/components/notes/folder-controls";
 import { FolderPreviewDialog } from "@/components/notes/folder-preview-dialog";
+import { MoveNotice, type MoveNoticeState } from "@/components/notes/move-notice";
 import { KANBAN_UNFILED, NotesKanbanBoard, type KanbanColumnData } from "@/components/notes/notes-kanban";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -69,6 +71,7 @@ const EMPTY_NOTE_LIST: NoteListResult = {
 };
 
 type TypeFilter = NoteListType | "all";
+type NotePreviewWithTags = NotePreview & { tags?: EditableTag[] };
 
 const SORT_OPTIONS: { value: NoteListSort; label: string }[] = [
   { value: "updated", label: "Atualizadas recentemente" },
@@ -80,11 +83,13 @@ export function NotesView({
   initial,
   renderedAt,
   initialFolder = "all",
+  tagVocabulary,
 }: {
   initial: NoteListResult | null;
   renderedAt: number;
   /** A pasta pedida na URL (`?folder=`), vinda da barra lateral. */
   initialFolder?: FolderFilter;
+  tagVocabulary: EditableTag[];
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -95,13 +100,14 @@ export function NotesView({
   const [type, setType] = useState<TypeFilter>("all");
   const [sort, setSort] = useState<NoteListSort>("updated");
   const [result, setResult] = useState(initial ?? EMPTY_NOTE_LIST);
+  const [availableTags, setAvailableTags] = useState(tagVocabulary);
   const [status, setStatus] = useState<"idle" | "loading" | "more" | "error">(
     initial ? "idle" : "loading"
   );
   const [hasLoadedInitial, setHasLoadedInitial] = useState(initial !== null);
   const [now, setNow] = useState(renderedAt);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<NotePreview | null>(null);
+  const [preview, setPreview] = useState<NotePreviewWithTags | null>(null);
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">(
     "idle"
   );
@@ -127,6 +133,13 @@ export function NotesView({
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [noteWaitingForFolder, setNoteWaitingForFolder] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Kanban: a nota cujo PUT ainda está em voo, a que acabou de chegar na
+  // coluna de destino (para animar a entrada) e o aviso transitório da
+  // operação — neutro, ao lado do `notice`, que continua sendo só erro.
+  const [movingNoteId, setMovingNoteId] = useState<string | null>(null);
+  const [arrivedNoteId, setArrivedNoteId] = useState<string | null>(null);
+  const [moveNotice, setMoveNotice] = useState<MoveNoticeState | null>(null);
+  const moveNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
   const [kanbanNotes, setKanbanNotes] = useState<NoteListItem[]>([]);
   const [kanbanStatus, setKanbanStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -136,6 +149,15 @@ export function NotesView({
   const [previewFolder, setPreviewFolder] = useState<FolderItem | null>(null);
   const firstRequest = useRef(true);
 
+  // O "Nota movida." some sozinho depois de ~2s; o timer não pode
+  // sobreviver ao componente.
+  useEffect(
+    () => () => {
+      if (moveNoticeTimerRef.current) clearTimeout(moveNoticeTimerRef.current);
+    },
+    []
+  );
+
   const singleDeletion = useNoteDeletion({
     onDeleted: (note) => {
       if (selectedNoteId === note.id) closePreview();
@@ -144,6 +166,27 @@ export function NotesView({
     },
     onError: setNotice,
   });
+  const tagEditor = useNoteTagsEditor({
+    vocabulary: availableTags,
+    onChanged: (noteId, tags) => {
+      setResult((current) => ({
+        ...current,
+        notes: current.notes.map((note) => (note.id === noteId ? { ...note, tags } : note)),
+      }));
+      setKanbanNotes((current) =>
+        current.map((note) => (note.id === noteId ? { ...note, tags } : note))
+      );
+      setPreview((current) =>
+        current && current.id === noteId ? { ...current, tags } : current
+      );
+      setAvailableTags((current) => {
+        const byId = new Map(current.map((tag) => [tag.id, tag]));
+        for (const tag of tags) byId.set(tag.id, tag);
+        return [...byId.values()];
+      });
+    },
+  });
+
 
   const loadFolders = useCallback(async () => {
     try {
@@ -278,7 +321,10 @@ export function NotesView({
       if (!response.ok) throw new Error("preview request failed");
       const body = (await response.json()) as { note: NotePreview };
       if (!controller.signal.aborted) {
-        setPreview(body.note);
+        const tags = result.notes.find((note) => note.id === noteId)?.tags
+          ?? kanbanNotes.find((note) => note.id === noteId)?.tags
+          ?? [];
+        setPreview({ ...body.note, tags });
         setPreviewStatus("idle");
       }
     } catch (error) {
@@ -320,17 +366,56 @@ export function NotesView({
 
   async function moveNoteFromMenu(noteId: string, folderId: string | null) {
     setNotice(null);
+    // O estado "movendo" e o aviso valem só no Kanban — é onde o card tem
+    // aparência própria para mostrar o voo; a lista mantém o silêncio de sempre.
+    const inKanban = viewMode === "kanban";
+    if (inKanban) {
+      // Uma mudança por vez: o estado visual e o aviso são de uma nota só.
+      if (movingNoteId) return;
+      if (moveNoticeTimerRef.current) {
+        clearTimeout(moveNoticeTimerRef.current);
+        moveNoticeTimerRef.current = null;
+      }
+      const note = kanbanNotes.find((item) => item.id === noteId);
+      const folderName = folderId
+        ? folders.find((item) => item.id === folderId)?.name ?? "outra pasta"
+        : "Sem pasta";
+      setMovingNoteId(noteId);
+      setMoveNotice({
+        phase: "moving",
+        message: note
+          ? `Movendo “${note.title || "Sem título"}” para ${folderName}…`
+          : `Movendo a nota para ${folderName}…`,
+      });
+    }
     const response = await fetch(`/api/notes/${noteId}/folder`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folderId }),
     }).catch(() => null);
     if (!response?.ok) {
+      if (inKanban) {
+        // A falha cancela só o aviso de andamento: o banner de erro assume.
+        setMovingNoteId(null);
+        setMoveNotice(null);
+      }
       setNotice(response ? "Não deu para organizar a nota." : "Sem conexão.");
       return;
     }
     const body = (await response.json()) as { folder: NoteListItem["folder"] };
+    // O card só muda de coluna aqui, depois da confirmação do servidor —
+    // nada de movimento otimista (mesmo critério de `noteMoved`).
     noteMoved(noteId, body.folder);
+    if (inKanban) {
+      setMovingNoteId(null);
+      setArrivedNoteId(noteId);
+      setMoveNotice({ phase: "done", message: "Nota movida." });
+      moveNoticeTimerRef.current = setTimeout(() => {
+        setMoveNotice(null);
+        setArrivedNoteId(null);
+        moveNoticeTimerRef.current = null;
+      }, 2000);
+    }
     if (folderFilter !== "all") void loadPage(1, false);
   }
 
@@ -543,6 +628,11 @@ export function NotesView({
             </p>
           )}
 
+          {/* Sempre montado, sem `key`: é a região viva do leitor de tela,
+              e só a troca de texto dentro dela é anunciada. Flutua no
+              rodapé — só existe estado no modo Kanban. */}
+          <MoveNotice state={moveNotice} />
+
           <section aria-label="Filtros de notas" className="mt-8">
             <div className="relative">
               <Search
@@ -694,6 +784,10 @@ export function NotesView({
                       onMoveNote={(noteId, folderId) => void moveNoteFromMenu(noteId, folderId)}
                       onCreateFolder={() => { setNoteWaitingForFolder(null); setCreateFolderOpen(true); }}
                       onDeleteRequest={singleDeletion.request}
+                      vocabulary={availableTags}
+                      onEditTags={tagEditor.request}
+                      movingNoteId={movingNoteId}
+                      arrivedNoteId={arrivedNoteId}
                       onError={setNotice}
                     />
                     {selectedNoteId && (
@@ -805,6 +899,8 @@ export function NotesView({
                                 setCreateFolderOpen(true);
                               }}
                               onDelete={singleDeletion.request}
+                              vocabulary={availableTags}
+                              onEditTags={tagEditor.request}
                               onError={setNotice}
                             >
                               <NoteRow
@@ -876,6 +972,7 @@ export function NotesView({
         </div>
       </main>
       {singleDeletion.dialog}
+      {tagEditor.dialog}
       <CreateFolderDialog
         open={createFolderOpen}
         onOpenChange={(open) => {
@@ -1098,7 +1195,8 @@ function NoteRow({
   checked,
   onCheckedChange,
   onSelect,
-}: {
+  ...triggerProps
+}: Omit<ComponentPropsWithRef<"li">, "onSelect" | "children"> & {
   note: NoteListItem;
   now: number;
   selected: boolean;
@@ -1108,7 +1206,7 @@ function NoteRow({
   onSelect: () => void;
 }) {
   return (
-    <li className="flex">
+    <li {...triggerProps} className={cn("flex", triggerProps.className)}>
       {selectionMode && (
         <label className="flex shrink-0 cursor-pointer items-start px-3 pt-7 sm:px-4" title={`Selecionar ${note.title}`}>
           <input
@@ -1218,7 +1316,7 @@ export function NotePreviewPanel({
   onClose,
   onRetry,
 }: {
-  preview: NotePreview | null;
+  preview: NotePreviewWithTags | null;
   status: "idle" | "loading" | "error";
   /** A busca global só lê; em Notas, a prévia também permite mover de pasta. */
   folders?: FolderItem[];
@@ -1289,6 +1387,21 @@ export function NotePreviewPanel({
                 folders={folders}
                 onMoved={(folder) => onMoved(preview.id, folder)}
               />
+            )}
+            {preview.tags && preview.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {preview.tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 text-[11px]",
+                      TAG_CHIP_CLASS[tagTone(tag)]
+                    )}
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
         </div>

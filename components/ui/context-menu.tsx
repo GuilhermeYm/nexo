@@ -30,10 +30,16 @@ export function ContextMenuContent({
 }: ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
     <ContextMenuPrimitive.Portal>
+      {/* A largura cede ao espaço do lado em que o menu abriu. O Radix vira
+          o menu para a esquerda do ponteiro, mas só o desloca no eixo
+          vertical: no celular, um toque longo no meio de uma linha deixava
+          o `min-w-56` mais a dica do "Excluir" sem caber em nenhum dos lados,
+          e o menu nascia cortado na borda esquerda. */}
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
+        collisionPadding={8}
         className={cn(
-          "z-50 min-w-56 origin-(--radix-context-menu-content-transform-origin) overflow-hidden rounded-xl border border-border bg-background p-1 shadow-[0_16px_48px_-16px] shadow-black/35",
+          "z-50 min-w-[min(14rem,var(--radix-context-menu-content-available-width))] max-w-(--radix-context-menu-content-available-width) origin-(--radix-context-menu-content-transform-origin) overflow-hidden rounded-xl border border-border bg-background p-1 shadow-[0_16px_48px_-16px] shadow-black/35",
           "data-[state=open]:animate-menu-in data-[state=closed]:animate-menu-out",
           className
         )}

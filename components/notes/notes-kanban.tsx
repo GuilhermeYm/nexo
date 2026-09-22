@@ -1,9 +1,10 @@
 "use client";
 
-import { FolderClosed, Inbox } from "lucide-react";
+import { FolderClosed, Inbox, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 
-import { NoteContextMenu, useNoteDeletion } from "@/components/dashboard/note-context-menu";
+import { NoteContextMenu, useNoteDeletion, type NoteMenuTarget } from "@/components/dashboard/note-context-menu";
+import type { EditableTag } from "@/components/editor/note-tags";
 import { NOTE_TYPE_LABEL, NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { formatRelative } from "@/lib/dashboard/format";
 import type { FolderItem } from "@/lib/folders/types";
@@ -41,6 +42,10 @@ export function NotesKanbanBoard({
   onMoveNote,
   onCreateFolder,
   onDeleteRequest,
+  vocabulary,
+  onEditTags,
+  movingNoteId,
+  arrivedNoteId,
   onError,
 }: {
   columns: KanbanColumnData[];
@@ -50,6 +55,12 @@ export function NotesKanbanBoard({
   onMoveNote: (noteId: string, folderId: string | null) => void;
   onCreateFolder: () => void;
   onDeleteRequest: ReturnType<typeof useNoteDeletion>["request"];
+  vocabulary: EditableTag[];
+  onEditTags: (note: NoteMenuTarget) => void;
+  /** A nota cujo PUT de pasta ainda está em voo — o card esmaece e gira. */
+  movingNoteId: string | null;
+  /** A nota que acabou de ser confirmada: entra na coluna nova com `row-in`. */
+  arrivedNoteId: string | null;
   onError: (message: string) => void;
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -123,7 +134,9 @@ export function NotesKanbanBoard({
                   Arraste uma nota para cá
                 </li>
               ) : (
-                column.notes.map((note) => (
+                column.notes.map((note) => {
+                  const isMoving = movingNoteId === note.id;
+                  return (
                   <NoteContextMenu
                     key={note.id}
                     note={note}
@@ -136,11 +149,14 @@ export function NotesKanbanBoard({
                     onMoveToFolder={(folderId) => onMoveNote(note.id, folderId)}
                     onCreateFolder={onCreateFolder}
                     onDelete={onDeleteRequest}
+                    vocabulary={vocabulary}
+                    onEditTags={onEditTags}
                     onError={onError}
                   >
                     <li>
                       <article
-                        draggable
+                        draggable={!isMoving}
+                        aria-busy={isMoving}
                         onDragStart={(event) => {
                           event.dataTransfer.setData("text/plain", note.id);
                           event.dataTransfer.effectAllowed = "move";
@@ -162,12 +178,27 @@ export function NotesKanbanBoard({
                         title={note.title || "Sem título"}
                         className={cn(
                           "cursor-grab rounded-xl border border-border bg-background p-3 text-left shadow-sm transition-[opacity,border-color] duration-150 active:cursor-grabbing hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
-                          draggingId === note.id && "opacity-40"
+                          // Em voo o card fica esmaecido e com o giro no lugar do
+                          // ícone de tipo; o drop não é otimista — ele só troca de
+                          // coluna quando o servidor confirma (ver `noteMoved`).
+                          isMoving && "opacity-40",
+                          draggingId === note.id && "opacity-40",
+                          // Quem acabou de chegar entra com a mesma linguagem de
+                          // `animate-row-in` usada nas linhas do dashboard.
+                          arrivedNoteId === note.id &&
+                            "animate-row-in motion-reduce:animate-none"
                         )}
                       >
                         <div className="flex items-start gap-2">
                           <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-secondary text-subtle-foreground">
-                            <NoteTypeIcon type={note.type} className="size-3.5" />
+                            {isMoving ? (
+                              <LoaderCircle
+                                className="size-3.5 animate-spin motion-reduce:animate-none"
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <NoteTypeIcon type={note.type} className="size-3.5" />
+                            )}
                           </span>
                           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                             {note.title || "Sem título"}
@@ -202,7 +233,8 @@ export function NotesKanbanBoard({
                       </article>
                     </li>
                   </NoteContextMenu>
-                ))
+                  );
+                })
               )}
             </ul>
           </section>

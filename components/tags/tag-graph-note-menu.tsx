@@ -308,13 +308,20 @@ function NoteTagsDialog({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const doneRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const open = note !== null;
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      // O `autoFocus` do React roda antes do `showModal()`, e o navegador
+      // então leva o foco ao primeiro focável — o "×". "Pronto" é o gesto
+      // esperado depois de mexer nas tags.
+      doneRef.current?.focus();
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
@@ -369,8 +376,8 @@ function NoteTagsDialog({
 
           <div className="flex items-center justify-end border-t border-border p-3.5">
             <button
+              ref={doneRef}
               type="button"
-              autoFocus
               onClick={onClose}
               className="h-9 rounded-xl bg-accent px-3.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
