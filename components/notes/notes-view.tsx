@@ -780,7 +780,7 @@ export function NotesView({
                             if (folder) {
                               items.push(
                                 <li
-                                  key={`folder-header-${currentFolderId}`}
+                                  key={`folder-header-${currentFolderId}-${note.id}`}
                                   className="flex items-center gap-1.5 px-1 pt-4 pb-1 text-xs font-medium text-subtle-foreground sm:px-4"
                                 >
                                   <FolderClosed className="size-3.5" aria-hidden="true" />
