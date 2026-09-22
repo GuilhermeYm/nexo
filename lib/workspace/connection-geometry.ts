@@ -199,3 +199,210 @@ export function distanceToSegment(point: Point, segment: Segment): number {
     point.y - (segment.from.y + t * dy)
   );
 }
+
+/* ---------------------------------------------------------------------- */
+/* A curva: o ponto do meio                                               */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * O deslocamento perpendicular máximo de uma curva, em unidades de lousa.
+ *
+ * O mesmo teto do CHECK de `bend_offset` (0034) e do Zod da rota PATCH: um
+ * valor maior é recusado pelo banco, então `bendFromPoint` prende o arraste
+ * aqui em vez de montar um PATCH que volta 400.
+ */
+export const MAX_BEND_OFFSET = 20_000;
+
+/**
+ * Onde a alça pode ficar, ao longo da reta.
+ *
+ * **Mais estreito que o CHECK do banco, de propósito.** A coluna aceita
+ * `0..1` porque ali é o domínio do valor; aqui é o que dá para desenhar, e
+ * as duas coisas não são a mesma. Uma curva quadrática está presa nas duas
+ * pontas: em `t = 0` ela *é* a ponta de saída, e nenhum ponto de controle a
+ * faz passar por um lugar afastado dali. Pedir isso resolve a inversão de
+ * `bendControlOf` dividindo por `2t(1 − t)`, que tende a zero — o controle
+ * vai para o infinito e o traço some da tela.
+ *
+ * Por isso a trava é aplicada **na entrada das três funções**, e não só no
+ * controle: se a alça fosse desenhada no `t` cru e a curva resolvida no `t`
+ * preso, as duas falariam de pontos diferentes e a alça ficaria fora da
+ * própria curva justamente nos extremos. Uma trava só, e as três concordam.
+ *
+ * Uma linha que já traga `bend_t = 0` (escrita por outra versão, ou à mão)
+ * não quebra nada: ela é desenhada em `0.05`.
+ */
+const BEND_T_MIN = 0.05;
+const BEND_T_MAX = 0.95;
+
+/** O `bendT` como o desenho o usa. Nulo — a ligação reta — é o meio. */
+function drawableBendT(bendT: number | null): number {
+  if (bendT === null || !Number.isFinite(bendT)) return 0.5;
+  return Math.min(BEND_T_MAX, Math.max(BEND_T_MIN, bendT));
+}
+
+/** O `bendOffset` como o desenho o usa. Nulo é sem barriga: a reta. */
+function drawableBendOffset(bendOffset: number | null): number {
+  if (bendOffset === null || !Number.isFinite(bendOffset)) return 0;
+  return Math.min(MAX_BEND_OFFSET, Math.max(-MAX_BEND_OFFSET, bendOffset));
+}
+
+/**
+ * O ponto do meio de uma ligação curva, no espaço do segmento recebido.
+ *
+ * ## Assinatura
+ *
+ * ```ts
+ * bendPointOf(segment: Segment, bendT: number | null, bendOffset: number | null): Point
+ * ```
+ *
+ * - `segment` — o traço **já recortado nas bordas e já deslocado**, isto é, o
+ *   que `segmentBetween` devolveu e que está sendo desenhado. Tem de ser o
+ *   mesmo nas três funções deste bloco: medir numa reta e desenhar noutra
+ *   devolve a curva deslocada da alça que a pessoa está segurando.
+ * - `bendT` — a posição **ao longo da reta**: `0` é a ponta de saída, `1` a de
+ *   chegada. Nulo (a ligação sem curva) vale `0.5`, o meio. Preso a
+ *   `BEND_T_MIN..BEND_T_MAX` — ver o porquê lá.
+ * - `bendOffset` — o deslocamento **perpendicular à reta**, em unidades de
+ *   lousa. Nulo vale `0`. O sinal segue a mesma perpendicular do `shift` do
+ *   par recíproco — o giro de 90° é `(x, y) → (-y, x)`.
+ * - Devolve o ponto no mesmo espaço do segmento (a lousa aplica o zoom na
+ *   camada, não aqui).
+ *
+ * Nada disto é coordenada absoluta, e é o ponto inteiro do desenho: guardados
+ * `bendT` e `bendOffset` em vez de um `x, y`, a curva continua com a mesma
+ * cara depois que a janela for arrastada. Um par de coordenadas ficaria velho
+ * no primeiro arraste, como a posição das pontas já ficaria — é o mesmo
+ * argumento do topo deste arquivo, aplicado ao meio do traço.
+ *
+ * Com `bendT` e `bendOffset` nulos, o resultado é exatamente `midpointOf` — a
+ * ligação de sempre, sem mudança nenhuma.
+ */
+export function bendPointOf(
+  segment: Segment,
+  bendT: number | null,
+  bendOffset: number | null
+): Point {
+  const dx = segment.to.x - segment.from.x;
+  const dy = segment.to.y - segment.from.y;
+  const span = Math.hypot(dx, dy);
+
+  const t = drawableBendT(bendT);
+  const offset = drawableBendOffset(bendOffset);
+
+  // Sem comprimento não há direção, e sem direção não há perpendicular: o
+  // ponto do meio é a própria ponta. Não acontece com um segmento vindo de
+  // `segmentBetween` (ele devolve `null` abaixo de `MIN_SPAN`), mas quem
+  // chama pode ter um traço em construção na mão.
+  if (span === 0) return { x: segment.from.x, y: segment.from.y };
+
+  const ux = dx / span;
+  const uy = dy / span;
+
+  return {
+    x: segment.from.x + dx * t - uy * offset,
+    y: segment.from.y + dy * t + ux * offset,
+  };
+}
+
+/**
+ * O ponto de controle da curva quadrática que **passa** pelo ponto do meio.
+ *
+ * ## Assinatura
+ *
+ * ```ts
+ * bendControlOf(segment: Segment, bendT: number | null, bendOffset: number | null): Point
+ * ```
+ *
+ * Mesmos argumentos de `bendPointOf`, mesmo espaço de saída. É este o ponto
+ * que vai no `Q` do `<path>`:
+ *
+ * ```ts
+ * const bend = bendPointOf(segment, c.bendT, c.bendOffset);     // a alça
+ * const control = bendControlOf(segment, c.bendT, c.bendOffset); // o "Q"
+ * const d = `M ${segment.from.x} ${segment.from.y} Q ${control.x} ${control.y} ${segment.to.x} ${segment.to.y}`;
+ * ```
+ *
+ * As duas são funções diferentes de propósito, e usar uma no lugar da outra é
+ * o engano que mais custa aqui: numa quadrática o ponto de controle **não
+ * fica sobre a curva** — em `t = 0.5` a curva passa a meio caminho dele, e
+ * desenhar com `bendPointOf` como controle daria metade da barriga pedida. A
+ * alça que a pessoa arrasta é `bendPointOf`; quem faz a curva encostar nela é
+ * este.
+ *
+ * A garantia vale para **todo** valor aceito pelo banco, inclusive `0` e `1`:
+ * as duas funções leem o `bendT` pela mesma trava (`drawableBendT`), então a
+ * curva passa pela alça também nos extremos — é a alça que para um pouco
+ * antes da ponta, não a curva que foge dela.
+ *
+ * Com `bendOffset` nulo ou zero o controle cai no meio da reta, e a
+ * quadrática degenera na reta de sempre.
+ */
+export function bendControlOf(
+  segment: Segment,
+  bendT: number | null,
+  bendOffset: number | null
+): Point {
+  const t = drawableBendT(bendT);
+  const bend = bendPointOf(segment, bendT, bendOffset);
+
+  // Inverte B(t) = (1-t)²·P0 + 2(1-t)t·C + t²·P2 para C.
+  const inverse = 1 - t;
+  const weight = 2 * inverse * t;
+
+  return {
+    x:
+      (bend.x - inverse * inverse * segment.from.x - t * t * segment.to.x) /
+      weight,
+    y:
+      (bend.y - inverse * inverse * segment.from.y - t * t * segment.to.y) /
+      weight,
+  };
+}
+
+/**
+ * O caminho inverso: um ponto na tela vira `(bendT, bendOffset)`.
+ *
+ * ## Assinatura
+ *
+ * ```ts
+ * bendFromPoint(segment: Segment, point: Point): { bendT: number; bendOffset: number }
+ * ```
+ *
+ * - `segment` — de novo o traço que está sendo desenhado, o mesmo que foi
+ *   dado a `bendPointOf`.
+ * - `point` — onde o ponteiro está, já convertido para o espaço da lousa
+ *   (descontados o enquadramento e o zoom). É o que sai do arraste da alça.
+ * - Devolve o par pronto para o `PATCH`, preso ao que dá para desenhar:
+ *   `bendT` em `BEND_T_MIN..BEND_T_MAX` e `bendOffset` em
+ *   `±MAX_BEND_OFFSET`. Os dois cabem folgados nos limites do Zod da rota e
+ *   do CHECK do banco, então nenhum arraste consegue montar um corpo que
+ *   volte 400.
+ *
+ * É o inverso exato de `bendPointOf` dentro da faixa desenhável: alimentar o
+ * resultado de volta nela devolve o mesmo ponto. Os dois valores andam sempre
+ * juntos, porque o banco exige os dois ou nenhum
+ * (`(bend_t IS NULL) = (bend_offset IS NULL)`).
+ */
+export function bendFromPoint(
+  segment: Segment,
+  point: Point
+): { bendT: number; bendOffset: number } {
+  const dx = segment.to.x - segment.from.x;
+  const dy = segment.to.y - segment.from.y;
+  const span = Math.hypot(dx, dy);
+
+  if (span === 0) return { bendT: 0.5, bendOffset: 0 };
+
+  const ux = dx / span;
+  const uy = dy / span;
+  const px = point.x - segment.from.x;
+  const py = point.y - segment.from.y;
+
+  return {
+    // A projeção sobre a direção do traço, em fração do comprimento.
+    bendT: drawableBendT((px * ux + py * uy) / span),
+    // E sobre a perpendicular — o mesmo giro de 90° de `bendPointOf`.
+    bendOffset: drawableBendOffset(px * -uy + py * ux),
+  };
+}

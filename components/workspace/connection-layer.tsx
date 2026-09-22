@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useRef, useState } from "react";
 
 import {
   ContextMenu,
@@ -11,6 +11,9 @@ import {
 } from "@/components/ui/context-menu";
 import {
   arrowHead,
+  bendControlOf,
+  bendFromPoint,
+  bendPointOf,
   distanceToSegment,
   segmentBetween,
   type Point,
@@ -21,6 +24,7 @@ import {
   WEIGHT_PX,
   dashArrayOf,
   type ConnectionHeads,
+  type ConnectionShape,
   type ConnectionStroke,
   type ConnectionTone,
   type ConnectionWeight,
@@ -75,6 +79,19 @@ const GAP = 12;
  * direito sempre pegando a mesma das duas.
  */
 const SEPARATION = 9;
+/**
+ * Raio aparente da alça da curva, em pixels de tela — dividido pelo zoom,
+ * como a espessura do traço, para não encolher a ponto de fugir do dedo.
+ */
+const BEND_HANDLE_RADIUS = 6;
+/**
+ * Pausa antes de gravar o arraste da alça, como o rótulo (`LABEL_DELAY` no
+ * inspetor). Cada quadro de arraste vira `onBendChange` na hora — para a
+ * curva acompanhar o dedo — mas só o valor depois da pausa vira PATCH: a
+ * rota tem teto de 600 edições por hora, e um arraste de dois segundos a
+ * 60fps estouraria isso sozinho bem antes de a pessoa soltar.
+ */
+const BEND_COMMIT_DELAY = 500;
 
 interface ConnectionLayerProps {
   connections: BoardConnection[];
@@ -88,6 +105,10 @@ interface ConnectionLayerProps {
   onRemove: (id: string) => void;
   /** Abre o campo de rótulo desta flecha. */
   onLabel: (id: string) => void;
+  /** Grava a posição da alça da curva — sempre os dois campos juntos. */
+  onBendChange: (id: string, bendT: number, bendOffset: number) => void;
+  /** Cliente → lousa, para o arraste da alça converter o ponteiro sozinho. */
+  toBoardPoint: (clientX: number, clientY: number) => Point;
   /** Enquanto a borracha está na mão, a flecha não abre menu nem recebe clique. */
   inert: boolean;
 }
@@ -101,6 +122,8 @@ export function ConnectionLayer({
   onSelect,
   onRemove,
   onLabel,
+  onBendChange,
+  toBoardPoint,
   inert,
 }: ConnectionLayerProps) {
   const drawn = drawableConnections(connections, windows, zoom);
@@ -123,6 +146,9 @@ export function ConnectionLayer({
           stroke={connection.stroke}
           weight={connection.weight}
           heads={connection.heads}
+          shape={connection.shape}
+          bendT={connection.bendT}
+          bendOffset={connection.bendOffset}
           x1={segment.from.x}
           y1={segment.from.y}
           x2={segment.to.x}
@@ -134,6 +160,8 @@ export function ConnectionLayer({
           onSelect={onSelect}
           onRemove={onRemove}
           onLabel={onLabel}
+          onBendChange={onBendChange}
+          toBoardPoint={toBoardPoint}
         />
       ))}
     </svg>
@@ -149,6 +177,9 @@ interface ArrowProps {
   stroke: ConnectionStroke;
   weight: ConnectionWeight;
   heads: ConnectionHeads;
+  shape: ConnectionShape;
+  bendT: number | null;
+  bendOffset: number | null;
   x1: number;
   y1: number;
   x2: number;
@@ -160,6 +191,8 @@ interface ArrowProps {
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onLabel: (id: string) => void;
+  onBendChange: (id: string, bendT: number, bendOffset: number) => void;
+  toBoardPoint: (clientX: number, clientY: number) => Point;
 }
 
 /**
@@ -174,6 +207,9 @@ const ConnectionArrow = memo(function ConnectionArrow({
   stroke,
   weight,
   heads,
+  shape,
+  bendT,
+  bendOffset,
   x1,
   y1,
   x2,
@@ -185,16 +221,132 @@ const ConnectionArrow = memo(function ConnectionArrow({
   onSelect,
   onRemove,
   onLabel,
+  onBendChange,
+  toBoardPoint,
 }: ArrowProps) {
   const segment: Segment = { from: { x: x1, y: y1 }, to: { x: x2, y: y2 } };
   const reversed: Segment = { from: segment.to, to: segment.from };
-  const path = `M ${x1} ${y1} L ${x2} ${y2}`;
+
+  /**
+   * A alça segue o dedo a cada quadro; só o valor depois de uma pausa vira
+   * PATCH (`BEND_COMMIT_DELAY`, mesmo raciocínio do rótulo). Sem este estado
+   * local a curva ficaria presa ao último valor gravado, um passo atrás do
+   * ponteiro a cada arraste.
+   */
+  const [dragBend, setDragBend] = useState<{
+    bendT: number;
+    bendOffset: number;
+  } | null>(null);
+  const gesture = useRef<{ pointerId: number } | null>(null);
+  const pendingFrame = useRef<number | null>(null);
+  const pendingBend = useRef<{ bendT: number; bendOffset: number } | null>(
+    null
+  );
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Solta a sombra assim que a prop alcança o que foi arrastado.
+   *
+   * Sem isto `dragBend` nunca voltava a `null`: uma vez arrastada, a alça
+   * ficava presa naquele ponto para sempre, porque `drawnBendT`/
+   * `drawnBendOffset` sempre preferem o valor local quando ele existe. Um
+   * "Reta" ou um "Curva" clicado depois mudava o banco (confirmado por quem
+   * chamou `onChange`) e a tela continuava mostrando a curva antiga — e pior:
+   * `updateConnection` é otimista, então um PATCH que falhasse e desfizesse a
+   * mudança também não apareceria aqui, porque a sombra local ganha da prop
+   * revertida do mesmo jeito. Zerar quando a prop muda cobre os dois
+   * caminhos: o sucesso (a prop alcança o que foi arrastado) e a falha (a
+   * prop volta ao que era antes).
+   *
+   * Ajustado durante a renderização (não num `useEffect`) seguindo o padrão
+   * do próprio React para "resetar estado quando uma prop muda": evita o
+   * efeito extra e o render em cascata que ele causaria.
+   */
+  const [prevBendProp, setPrevBendProp] = useState({ bendT, bendOffset });
+  if (prevBendProp.bendT !== bendT || prevBendProp.bendOffset !== bendOffset) {
+    setPrevBendProp({ bendT, bendOffset });
+    setDragBend(null);
+  }
+
+  const drawnBendT = dragBend?.bendT ?? bendT;
+  const drawnBendOffset = dragBend?.bendOffset ?? bendOffset;
+  const isCurved = shape === "curved";
+  const bend = isCurved
+    ? bendPointOf(segment, drawnBendT, drawnBendOffset)
+    : null;
+  const control = isCurved
+    ? bendControlOf(segment, drawnBendT, drawnBendOffset)
+    : null;
+
+  const path =
+    isCurved && control
+      ? `M ${x1} ${y1} Q ${control.x} ${control.y} ${x2} ${y2}`
+      : `M ${x1} ${y1} L ${x2} ${y2}`;
 
   const width = WEIGHT_PX[weight] / zoom;
   // A ponta acompanha a espessura, mas devagar: proporcional, uma flecha
   // grossa ganharia uma ponta do tamanho de um ícone.
   const head = (HEAD + (WEIGHT_PX[weight] - WEIGHT_PX.regular) * 2) / zoom;
   const dash = dashArrayOf(stroke, width);
+
+  // A ponta segue a tangente da curva, não a reta entre os centros — numa
+  // quadrática a direção de chegada é o segmento controle→ponta, não
+  // início→fim. Retas continuam usando `segment`/`reversed` como sempre.
+  const endHead = control ? arrowHead({ from: control, to: segment.to }, head) : arrowHead(segment, head);
+  const startHead = control
+    ? arrowHead({ from: control, to: segment.from }, head)
+    : arrowHead(reversed, head);
+
+  function scheduleCommit(next: { bendT: number; bendOffset: number }) {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    commitTimer.current = setTimeout(() => {
+      commitTimer.current = null;
+      onBendChange(id, next.bendT, next.bendOffset);
+    }, BEND_COMMIT_DELAY);
+  }
+
+  function handleBendPointerDown(event: React.PointerEvent) {
+    // Não pode borbulhar para o traço (selecionaria de novo) nem para o
+    // fundo (começaria pan da lousa).
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gesture.current = { pointerId: event.pointerId };
+  }
+
+  function handleBendPointerMove(event: React.PointerEvent) {
+    if (!gesture.current || gesture.current.pointerId !== event.pointerId) {
+      return;
+    }
+    event.stopPropagation();
+    const point = toBoardPoint(event.clientX, event.clientY);
+    const next = bendFromPoint(segment, point);
+    pendingBend.current = next;
+    if (pendingFrame.current === null) {
+      pendingFrame.current = requestAnimationFrame(() => {
+        pendingFrame.current = null;
+        const value = pendingBend.current;
+        pendingBend.current = null;
+        if (!value) return;
+        setDragBend(value);
+        scheduleCommit(value);
+      });
+    }
+  }
+
+  function handleBendPointerUp(event: React.PointerEvent) {
+    if (!gesture.current || gesture.current.pointerId !== event.pointerId) {
+      return;
+    }
+    event.stopPropagation();
+    gesture.current = null;
+    // Solta entre dois quadros de animação: o último `dragBend` ainda não
+    // tinha sido agendado. Grava na hora, sem esperar a pausa.
+    if (dragBend) {
+      if (commitTimer.current) clearTimeout(commitTimer.current);
+      commitTimer.current = null;
+      onBendChange(id, dragBend.bendT, dragBend.bendOffset);
+    }
+  }
 
   const arrow = (
     <g
@@ -230,7 +382,9 @@ const ConnectionArrow = memo(function ConnectionArrow({
         />
       )}
       {/* A faixa de acerto: invisível, larga, e a única que recebe ponteiro.
-          Sem ela seria preciso mirar num traço de 1,75px. */}
+          Sem ela seria preciso mirar num traço de 1,75px. Segue a mesma
+          curva do traço visível — sem isso, uma flecha bem curvada teria
+          metade do arco fora do alcance do clique. */}
       {!inert && (
         <path
           d={path}
@@ -252,7 +406,7 @@ const ConnectionArrow = memo(function ConnectionArrow({
       />
       {heads !== "none" && (
         <path
-          d={arrowHead(segment, head)}
+          d={endHead}
           stroke="currentColor"
           strokeWidth={width}
           strokeLinecap="round"
@@ -262,13 +416,34 @@ const ConnectionArrow = memo(function ConnectionArrow({
       )}
       {heads === "both" && (
         <path
-          d={arrowHead(reversed, head)}
+          d={startHead}
           stroke="currentColor"
           strokeWidth={width}
           strokeLinecap="round"
           strokeLinejoin="round"
           fill="none"
         />
+      )}
+      {/* A alça da curva. Só existe curvada e selecionada — o inspetor já
+          está aberto, então aparecer junto com ele é o mesmo gesto de olhar
+          para a direita e ver o que dá para ajustar. Fora disso ela seria
+          um ponto estranho boiando no meio de toda flecha curva da lousa. */}
+      {isCurved && selected && !inert && bend && (
+        <circle
+          cx={bend.x}
+          cy={bend.y}
+          r={BEND_HANDLE_RADIUS / zoom}
+          className="fill-background stroke-accent pointer-events-auto cursor-grab active:cursor-grabbing"
+          strokeWidth={2 / zoom}
+          onPointerDown={handleBendPointerDown}
+          onPointerMove={handleBendPointerMove}
+          onPointerUp={handleBendPointerUp}
+          onPointerCancel={handleBendPointerUp}
+          onClick={(event) => event.stopPropagation()}
+          style={{ touchAction: "none" }}
+        >
+          <title>Arraste para curvar a flecha</title>
+        </circle>
       )}
     </g>
   );

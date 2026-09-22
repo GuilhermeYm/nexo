@@ -9,6 +9,7 @@ import {
 } from "@/lib/limits";
 import {
   CONNECTION_HEADS,
+  CONNECTION_SHAPES,
   CONNECTION_STROKES,
   CONNECTION_TONES,
   CONNECTION_WEIGHTS,
@@ -268,7 +269,37 @@ const connectionStyleShape = {
   stroke: z.enum(CONNECTION_STROKES),
   weight: z.enum(CONNECTION_WEIGHTS),
   heads: z.enum(CONNECTION_HEADS),
+  shape: z.enum(CONNECTION_SHAPES),
 };
+
+const connectionBend = z.number().finite();
+
+function hasCompleteConnectionBend(
+  value: { bendT?: number | null; bendOffset?: number | null },
+  ctx: z.RefinementCtx
+): void {
+  const hasBendT = value.bendT !== undefined;
+  const hasBendOffset = value.bendOffset !== undefined;
+
+  if (hasBendT !== hasBendOffset) {
+    ctx.addIssue({
+      code: "custom",
+      message: "A posição e o deslocamento da curva precisam ser enviados juntos.",
+    });
+    return;
+  }
+
+  if (
+    hasBendT &&
+    hasBendOffset &&
+    (value.bendT === null) !== (value.bendOffset === null)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "A posição e o deslocamento da curva precisam ser ambos nulos ou numéricos.",
+    });
+  }
+}
 
 /**
  * O que o inspetor da ligação muda: o rótulo e a aparência, cada campo
@@ -282,8 +313,12 @@ export const connectionPatchSchema = z
     stroke: connectionStyleShape.stroke.optional(),
     weight: connectionStyleShape.weight.optional(),
     heads: connectionStyleShape.heads.optional(),
+    shape: connectionStyleShape.shape.optional(),
+    bendT: connectionBend.min(0).max(1).nullable().optional(),
+    bendOffset: connectionBend.min(-20_000).max(20_000).nullable().optional(),
   })
   .strict()
+  .superRefine(hasCompleteConnectionBend)
   .refine((value) => Object.keys(value).length > 0, {
     message: "Nada para mudar.",
   });
@@ -345,7 +380,11 @@ const restorableConnectionSchema = z
     stroke: connectionStyleShape.stroke.optional(),
     weight: connectionStyleShape.weight.optional(),
     heads: connectionStyleShape.heads.optional(),
+    shape: connectionStyleShape.shape.optional(),
+    bendT: connectionBend.min(0).max(1).nullable().optional(),
+    bendOffset: connectionBend.min(-20_000).max(20_000).nullable().optional(),
   })
+  .superRefine(hasCompleteConnectionBend)
   .refine((value) => value.fromWindowId !== value.toWindowId);
 
 export type CreateConnectionInput = z.infer<typeof createConnectionSchema>;

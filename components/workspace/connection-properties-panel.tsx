@@ -7,13 +7,16 @@ import { ColorSection } from "@/components/workspace/tool-properties-panel";
 import type { ConnectionPatch } from "@/hooks/use-board-windows";
 import {
   CONNECTION_HEADS,
+  CONNECTION_SHAPES,
   CONNECTION_STROKES,
   CONNECTION_TONES,
   CONNECTION_TONE_CLASS,
   CONNECTION_WEIGHTS,
+  DEFAULT_BEND_OFFSET,
   WEIGHT_PX,
   dashArrayOf,
   type ConnectionHeads,
+  type ConnectionShape,
   type ConnectionStroke,
   type ConnectionTone,
   type ConnectionWeight,
@@ -117,6 +120,33 @@ export function ConnectionPropertiesPanel({
             })
           }
         />
+
+        <OptionSection<ConnectionShape>
+          title="Formato"
+          value={connection.shape}
+          options={CONNECTION_SHAPES}
+          labelOf={(value) => ({ straight: "Reta", curved: "Curva" })[value]}
+          renderPreview={(value) => <ShapePreview shape={value} />}
+          onChange={(shape) =>
+            onChange(
+              shape === "straight"
+                ? { shape, bendT: null, bendOffset: null }
+                : {
+                    shape,
+                    // Só entra com uma barriga se ainda não tinha nenhuma —
+                    // reencostar em "Curva" depois de arrastar a alça não
+                    // pode jogar fora o ajuste que a pessoa já fez.
+                    bendT: connection.bendT ?? 0.5,
+                    bendOffset: connection.bendOffset ?? DEFAULT_BEND_OFFSET,
+                  }
+            )
+          }
+        />
+        {connection.shape === "curved" && (
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Arraste a alça no meio da flecha, na lousa, para ajustar a curva.
+          </p>
+        )}
 
         <OptionSection<ConnectionStroke>
           title="Traço"
@@ -287,6 +317,24 @@ function OptionSection<T extends string>({
         ))}
       </div>
     </section>
+  );
+}
+
+/** Reta contra curva, em miniatura — a mesma curva que a lousa desenharia
+ * com uma barriga de `DEFAULT_BEND_OFFSET`. */
+function ShapePreview({ shape }: { shape: ConnectionShape }) {
+  return (
+    <svg
+      viewBox="0 0 40 12"
+      className="h-3 w-10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d={shape === "curved" ? "M 4 9 Q 20 -3 36 9" : "M 4 6 L 36 6"} />
+    </svg>
   );
 }
 

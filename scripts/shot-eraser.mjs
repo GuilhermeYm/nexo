@@ -10,7 +10,9 @@
  *   - o que saiu da lousa **continua na conta** — é a promessa da ferramenta;
  *   - o post-it, que só existe na lousa, some de verdade;
  *   - o "Desfazer" traz tudo de volta, no lugar em que estava;
- *   - "Apagar tudo" esvazia a lousa sem tocar em nota nenhuma.
+ *   - "Apagar tudo" esvazia a lousa sem tocar em nota nenhuma;
+ *   - o traço apagado **logo depois** de desenhado sai do banco, e não volta
+ *     no recarregamento.
  *
  * Mesmo contrato dos outros roteiros: cria o usuário pelo service role, entra
  * pela interface e apaga o usuário no fim.
@@ -99,6 +101,25 @@ async function countWindows(sql, userId) {
     [userId]
   );
   return rows[0].total;
+}
+
+/** Quantos desenhos a lousa tem no banco. */
+async function countMarks(sql, userId) {
+  const { rows } = await sql.query(
+    "select count(*)::int as total from workspace_board_marks where user_id = $1",
+    [userId]
+  );
+  return rows[0].total;
+}
+
+async function waitForMarkCount(sql, userId, expected, timeout = 20000) {
+  const deadline = Date.now() + timeout;
+  let total = await countMarks(sql, userId);
+  while (total !== expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    total = await countMarks(sql, userId);
+  }
+  return total;
 }
 
 async function countNotes(sql, userId) {
@@ -368,6 +389,66 @@ async function main() {
       `${onScreen} na tela`
     );
     await page.screenshot({ path: `${OUT}/07-restaurada-light.png` });
+
+    // ---- desenhar e apagar em seguida ----
+    // O gesto que o defeito escondia: entre o `pointerup` da caneta e a
+    // resposta do POST, o traço na tela ainda carrega o id temporário. A
+    // borracha recolhia esse id, o DELETE recusava o lote inteiro, e o
+    // desenho — junto com o que mais tivesse na passada — voltava no
+    // recarregamento.
+    await page.keyboard.press("Escape");
+    await page.click('button[title^="Caneta"]');
+    await page.waitForTimeout(400);
+
+    const STROKE_Y = 760;
+    await page.mouse.move(340, STROKE_Y);
+    await page.mouse.down();
+    for (let step = 1; step <= 20; step++) {
+      await page.mouse.move(340 + step * 15, STROKE_Y);
+    }
+    await page.mouse.up();
+
+    const marksDrawn = await waitForMarkCount(sql, userId, 1);
+    check("a caneta grava o traço", marksDrawn === 1, `${marksDrawn} no banco`);
+    await page.screenshot({ path: `${OUT}/09-traco-light.png` });
+
+    // Um segundo traço, apagado **sem esperar** a resposta do POST dele.
+    await page.mouse.move(340, STROKE_Y - 80);
+    await page.mouse.down();
+    for (let step = 1; step <= 20; step++) {
+      await page.mouse.move(340 + step * 15, STROKE_Y - 80);
+    }
+    await page.mouse.up();
+    await page.click('button[title^="Borracha"]');
+    await page.waitForTimeout(400);
+    await page.mouse.move(340, STROKE_Y - 80);
+    await page.mouse.down();
+    for (let step = 1; step <= 20; step++) {
+      await page.mouse.move(340 + step * 15, STROKE_Y - 80);
+    }
+    await page.mouse.up();
+
+    // Espera fixa, e não sondagem até "1": o defeito deixava a linha no
+    // banco, e a contagem passa por 1 no caminho — o POST do segundo traço
+    // ainda nem tinha chegado quando a borracha passou.
+    await page.waitForTimeout(3000);
+    const marksAfterErase = await countMarks(sql, userId);
+    check(
+      "o traço apagado logo depois de desenhado sai do banco",
+      marksAfterErase === 1,
+      `${marksAfterErase} no banco`
+    );
+
+    await page.reload({ waitUntil: "networkidle" });
+    await page.addStyleTag({ content: HIDE_DEV_BADGE });
+    await page.waitForSelector(WINDOW, { timeout: 20000 });
+    await page.waitForTimeout(1200);
+    check(
+      "e não volta no recarregamento",
+      (await countMarks(sql, userId)) === 1,
+      `${await countMarks(sql, userId)} no banco`
+    );
+    await page.screenshot({ path: `${OUT}/10-traco-apagado-light.png` });
 
     await page.evaluate(() => {
       try {

@@ -2,6 +2,7 @@ import {
   pgTable,
   uuid,
   text,
+  doublePrecision,
   timestamp,
   boolean,
   bigint,
@@ -25,6 +26,7 @@ import type {
 } from "@/lib/workspace/board-background";
 import type {
   ConnectionHeads,
+  ConnectionShape,
   ConnectionStroke,
   ConnectionTone,
   ConnectionWeight,
@@ -672,6 +674,13 @@ export const workspaceConnections = pgTable(
       .notNull()
       .default("regular"),
     heads: text("heads").$type<ConnectionHeads>().notNull().default("end"),
+    /**
+     * Forma e alça da curva (0034). As pontas continuam calculadas a cada
+     * quadro; só a alça relativa ao segmento é persistida.
+     */
+    shape: text("shape").$type<ConnectionShape>().notNull().default("straight"),
+    bendT: doublePrecision("bend_t"),
+    bendOffset: doublePrecision("bend_offset"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
