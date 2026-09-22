@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 
 import {
   ContextMenu,
@@ -257,10 +257,16 @@ const ConnectionArrow = memo(function ConnectionArrow({
    * revertida do mesmo jeito. Zerar quando a prop muda cobre os dois
    * caminhos: o sucesso (a prop alcança o que foi arrastado) e a falha (a
    * prop volta ao que era antes).
+   *
+   * Ajustado durante a renderização (não num `useEffect`) seguindo o padrão
+   * do próprio React para "resetar estado quando uma prop muda": evita o
+   * efeito extra e o render em cascata que ele causaria.
    */
-  useEffect(() => {
+  const [prevBendProp, setPrevBendProp] = useState({ bendT, bendOffset });
+  if (prevBendProp.bendT !== bendT || prevBendProp.bendOffset !== bendOffset) {
+    setPrevBendProp({ bendT, bendOffset });
     setDragBend(null);
-  }, [bendT, bendOffset]);
+  }
 
   const drawnBendT = dragBend?.bendT ?? bendT;
   const drawnBendOffset = dragBend?.bendOffset ?? bendOffset;

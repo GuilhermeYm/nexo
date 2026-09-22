@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText, LoaderCircle, Paperclip, Search, Sparkles, Trash2, X } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import {
   NOTE_TYPE_LABEL,
