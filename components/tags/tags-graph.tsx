@@ -16,6 +16,11 @@ import { TAG_PALETTE, paletteFromName } from "@/lib/tags/palette";
 import type { TagGraph } from "@/lib/tags/queries";
 import { cn } from "@/lib/utils";
 
+import {
+  TagGraphNoteMenu,
+  type GraphNoteMenuTarget,
+} from "./tag-graph-note-menu";
+
 /**
  * A lib de força é pesada (d3 + canvas): só desce quando o modo grafo abre.
  * O cast para `ForceGraph2DComponent` (em vez de `ComponentType`) preserva o
@@ -226,9 +231,12 @@ export function TagsGraph({
   tags,
   links,
   onTagColorChange,
+  onNoteTagsEdited,
 }: TagGraph & {
   /** Avisa a tela quando uma cor grava de verdade, para a lista acompanhar. */
   onTagColorChange?: (tagId: string, color: string | null) => void;
+  /** As tags de uma nota podem ter mudado pelo menu: o grafo precisa se refazer. */
+  onNoteTagsEdited?: () => void;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -246,6 +254,11 @@ export function TagsGraph({
   const [savingColor, setSavingColor] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [zoomK, setZoomK] = useState(1);
+  const [noteMenu, setNoteMenu] = useState<GraphNoteMenuTarget | null>(null);
+  const [notice, setNotice] = useState<{
+    message: string;
+    tone: "info" | "error";
+  } | null>(null);
   const [width, setWidth] = useState(800);
 
   // A altura acompanha a largura: em telas largas o grafo respira, em
@@ -352,6 +365,14 @@ export function TagsGraph({
 
   const nodes = layout?.nodes ?? [];
   const graphLinks = links as GraphLink[];
+
+  // A lib compara as props por identidade: um objeto novo a cada render era
+  // um conjunto de dados novo, e cada hover, zoom ou menu aberto reaquecia a
+  // simulação — os nós saíam andando debaixo do mouse.
+  const graphData = useMemo(
+    () => ({ nodes: layout?.nodes ?? [], links: links as GraphLink[] }),
+    [layout, links]
+  );
 
   // Em hover, o foco é o nó e a sua vizinhança; o resto do grafo recua.
   const highlightIds = useMemo(() => {
@@ -611,6 +632,57 @@ export function TagsGraph({
     }
   }
 
+  // O vocabulário do editor de tags: as da conta, das mais ligadas às menos —
+  // a mesma ordem de sugestão que o editor da nota usa.
+  const vocabulary = useMemo(
+    () =>
+      (layout?.nodes ?? [])
+        .filter((node) => node.kind === "tag")
+        .sort((a, b) => b.degree - a.degree)
+        .map((node) => ({
+          id: String(node.id),
+          name: node.name,
+          color: node.color,
+        })),
+    [layout]
+  );
+
+  /**
+   * Botão direito numa nota abre o menu dela. As tags saem das arestas que o
+   * grafo já tem — a rota do grafo traz todas as ligações das notas
+   * carregadas, então não há o que buscar.
+   */
+  const handleNodeRightClick = useCallback(
+    (node: GraphNode, event: MouseEvent) => {
+      if (node.kind !== "note" || typeof node.id !== "string") return;
+      const noteId = node.id;
+      const tagIds = new Set<string>();
+      for (const link of graphLinks) {
+        const source = link.source as unknown as GraphNode | string;
+        const target = link.target as unknown as GraphNode | string;
+        const sourceId = typeof source === "string" ? source : String(source.id);
+        const targetId = typeof target === "string" ? target : String(target.id);
+        if (sourceId === noteId) tagIds.add(targetId);
+      }
+      setSelectedTag(null);
+      setNoteMenu({
+        id: noteId,
+        title: node.name,
+        tags: vocabulary.filter((tag) => tagIds.has(tag.id)),
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+    },
+    [graphLinks, vocabulary]
+  );
+
+  // O recado do menu some sozinho: é confirmação, não algo para dispensar.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   /* --- Controles de zoom -------------------------------------------------- */
 
   function zoomBy(factor: number) {
@@ -655,12 +727,13 @@ export function TagsGraph({
             duplicaria a informação. Daí o nodeLabel vazio. */}
         <ForceGraph2D
           ref={fgRef}
-          graphData={{ nodes, links: graphLinks }}
+          graphData={graphData}
           nodeCanvasObject={drawNode}
           nodePointerAreaPaint={paintPointerArea}
           linkColor={linkColor}
           linkWidth={linkWidth}
           onNodeClick={handleNodeClick}
+          onNodeRightClick={handleNodeRightClick}
           onNodeHover={(node) => setHoveredNode(node as GraphNode | null)}
           onBackgroundClick={() => setSelectedTag(null)}
           onZoom={({ k }) => setZoomK(k)}
@@ -709,8 +782,24 @@ export function TagsGraph({
                 ? "1 ligação"
                 : `${hoveredNode.degree} ligações`}
               {" · "}
-              {hoveredNode.kind === "tag" ? "trocar a cor" : "abrir a nota"}
+              {hoveredNode.kind === "tag"
+                ? "trocar a cor"
+                : "abrir a nota · botão direito para mais"}
             </span>
+          </div>
+        )}
+
+        {/* O recado do menu da nota: mover de pasta não muda nada no
+            canvas, então sem ele a pessoa não saberia se deu certo. */}
+        {notice && !selectedTag && (
+          <div
+            role="status"
+            className={cn(
+              "absolute bottom-3 left-1/2 -translate-x-1/2 rounded-xl border border-border bg-background/95 px-3.5 py-2 text-sm whitespace-nowrap shadow-lg backdrop-blur-sm",
+              notice.tone === "error" ? "text-error" : "text-foreground"
+            )}
+          >
+            {notice.message}
           </div>
         )}
 
@@ -801,6 +890,13 @@ export function TagsGraph({
           Quanto maior o ponto, mais ligações ele tem
         </span>
       </div>
+
+      <TagGraphNoteMenu
+        target={noteMenu}
+        vocabulary={vocabulary}
+        onTagsDialogClose={() => onNoteTagsEdited?.()}
+        onNotice={(message, tone) => setNotice({ message, tone })}
+      />
     </div>
   );
 }

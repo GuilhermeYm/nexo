@@ -87,6 +87,22 @@ export function TagsView({
     );
   }
 
+  /**
+   * O menu da nota no grafo pode ter tirado, posto ou criado tags. Relê o
+   * grafo em silêncio: se falhar, o desenho de antes continua valendo — e as
+   * posições sobrevivem, porque o grafo carrega x/y pelo id.
+   */
+  async function refreshGraph() {
+    try {
+      const response = await fetch("/api/tags/graph");
+      if (!response.ok) return;
+      const payload = (await response.json()) as TagGraph;
+      setGraphData(payload);
+    } catch {
+      // O grafo anterior fica na tela.
+    }
+  }
+
   // Relógio no padrão do dashboard: começa no instante do servidor para o
   // HTML bater, e só depois de montado passa a marcar o tempo de verdade.
   const [now, setNow] = useState(renderedAt);
@@ -358,7 +374,11 @@ export function TagsView({
                     </span>
                   </div>
                 ) : graphData ? (
-                  <TagsGraph {...graphData} onTagColorChange={handleTagColorChange} />
+                  <TagsGraph
+                    {...graphData}
+                    onTagColorChange={handleTagColorChange}
+                    onNoteTagsEdited={() => void refreshGraph()}
+                  />
                 ) : (
                   <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">
                     <span className="flex items-center gap-2 text-sm text-muted-foreground">
