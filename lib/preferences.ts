@@ -97,3 +97,27 @@ export function writeSidebarView(view: SidebarView): void {
   }
   window.dispatchEvent(new Event(PREFERENCES_EVENT));
 }
+
+export const COLLAPSED_NOTE_FOLDERS_KEY = "nexo-collapsed-note-folders";
+
+/** A vista compacta das pastas em Notas é uma escolha deste aparelho. */
+export function readCollapsedNoteFolders(): string[] {
+  try {
+    const value = window.localStorage.getItem(COLLAPSED_NOTE_FOLDERS_KEY);
+    const parsed: unknown = value ? JSON.parse(value) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeCollapsedNoteFolders(ids: string[]): void {
+  try {
+    window.localStorage.setItem(COLLAPSED_NOTE_FOLDERS_KEY, JSON.stringify(ids));
+  } catch {
+    // localStorage indisponível: a escolha vale só para esta sessão.
+  }
+  window.dispatchEvent(new Event(PREFERENCES_EVENT));
+}

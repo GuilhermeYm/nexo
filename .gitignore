@@ -45,6 +45,7 @@ next-env.d.ts
 # Agentes IA e arquivos de sessão — não versionados.
 .claude/
 .impeccable/
+.maestri/
 AGENTS.md
 CLAUDE.md
 PRODUCT.md

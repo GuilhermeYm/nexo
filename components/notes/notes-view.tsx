@@ -13,6 +13,8 @@ import {
   FolderClosed,
   FolderPlus,
   Folders,
+  LayoutGrid,
+  List,
   LoaderCircle,
   Search,
   Sparkles,
@@ -21,17 +23,21 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef } from "react";
 
 import {
   NOTE_TYPE_LABEL,
   NoteTypeIcon,
 } from "@/components/dashboard/note-type-icon";
 import { AiReviewCard } from "@/components/notes/ai-review-card";
-import { NoteContextMenu, useNoteDeletion } from "@/components/dashboard/note-context-menu";
+import { NoteContextMenu, useNoteDeletion, useNoteTagsEditor } from "@/components/dashboard/note-context-menu";
+import type { EditableTag } from "@/components/editor/note-tags";
 import { CreateFolderDialog } from "@/components/notes/create-folder-dialog";
 import { DeleteTagsChoice } from "@/components/notes/delete-tags-choice";
 import { FolderFilterBar, NoteFolderPicker } from "@/components/notes/folder-controls";
+import { FolderPreviewDialog } from "@/components/notes/folder-preview-dialog";
+import { MoveNotice, type MoveNoticeState } from "@/components/notes/move-notice";
+import { KANBAN_UNFILED, NotesKanbanBoard, type KanbanColumnData } from "@/components/notes/notes-kanban";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -51,10 +57,37 @@ import {
   type NoteListSource,
   type NoteListType,
 } from "@/lib/notes/list";
+import {
+  COLLAPSED_NOTE_FOLDERS_KEY,
+  PREFERENCES_EVENT,
+  readCollapsedNoteFolders,
+  writeCollapsedNoteFolders,
+} from "@/lib/preferences";
 import { TAG_CHIP_CLASS, tagTone } from "@/lib/tags/palette";
 import { cn } from "@/lib/utils";
 
 const SEARCH_DELAY_MS = 250;
+
+/** O servidor desenha tudo aberto; o navegador aplica a preferência após hidratar. */
+function collapsedNoteFoldersSnapshot(): string {
+  return JSON.stringify(readCollapsedNoteFolders());
+}
+
+function subscribeCollapsedNoteFolders(onChange: () => void): () => void {
+  function onStorage(event: StorageEvent) {
+    if (event.key === COLLAPSED_NOTE_FOLDERS_KEY || event.key === null) onChange();
+  }
+  window.addEventListener(PREFERENCES_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(PREFERENCES_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function openNoteFoldersSnapshot(): string {
+  return "[]";
+}
 
 const EMPTY_NOTE_LIST: NoteListResult = {
   notes: [],
@@ -65,6 +98,7 @@ const EMPTY_NOTE_LIST: NoteListResult = {
 };
 
 type TypeFilter = NoteListType | "all";
+type NotePreviewWithTags = NotePreview & { tags?: EditableTag[] };
 
 const SORT_OPTIONS: { value: NoteListSort; label: string }[] = [
   { value: "updated", label: "Atualizadas recentemente" },
@@ -76,11 +110,13 @@ export function NotesView({
   initial,
   renderedAt,
   initialFolder = "all",
+  tagVocabulary,
 }: {
   initial: NoteListResult | null;
   renderedAt: number;
   /** A pasta pedida na URL (`?folder=`), vinda da barra lateral. */
   initialFolder?: FolderFilter;
+  tagVocabulary: EditableTag[];
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -91,13 +127,14 @@ export function NotesView({
   const [type, setType] = useState<TypeFilter>("all");
   const [sort, setSort] = useState<NoteListSort>("updated");
   const [result, setResult] = useState(initial ?? EMPTY_NOTE_LIST);
+  const [availableTags, setAvailableTags] = useState(tagVocabulary);
   const [status, setStatus] = useState<"idle" | "loading" | "more" | "error">(
     initial ? "idle" : "loading"
   );
   const [hasLoadedInitial, setHasLoadedInitial] = useState(initial !== null);
   const [now, setNow] = useState(renderedAt);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<NotePreview | null>(null);
+  const [preview, setPreview] = useState<NotePreviewWithTags | null>(null);
   const [previewStatus, setPreviewStatus] = useState<"idle" | "loading" | "error">(
     "idle"
   );
@@ -115,6 +152,18 @@ export function NotesView({
   const [impactStatus, setImpactStatus] = useState<"idle" | "loading" | "error">("idle");
   const [folderFilter, setFolderFilter] = useState<FolderFilter>(initialFolder);
   const [folders, setFolders] = useState<FolderItem[]>([]);
+  const collapsedSnapshot = useSyncExternalStore(
+    subscribeCollapsedNoteFolders,
+    collapsedNoteFoldersSnapshot,
+    openNoteFoldersSnapshot
+  );
+  const storedCollapsedFolderIds = useMemo(
+    () => new Set<string>(JSON.parse(collapsedSnapshot) as string[]),
+    [collapsedSnapshot]
+  );
+  // Sem storage, a escolha continua valendo até sair desta tela.
+  const [pickedCollapsedFolderIds, setPickedCollapsedFolderIds] = useState<Set<string> | null>(null);
+  const collapsedFolderIds = pickedCollapsedFolderIds ?? storedCollapsedFolderIds;
   // Muda quando pastas ou pertenças mudam: o cartão da Nexo reconta.
   const [reviewKey, setReviewKey] = useState(0);
   const [forceReview, setForceReview] = useState(false);
@@ -123,7 +172,37 @@ export function NotesView({
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [noteWaitingForFolder, setNoteWaitingForFolder] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Kanban: a nota cujo PUT ainda está em voo, a que acabou de chegar na
+  // coluna de destino (para animar a entrada) e o aviso transitório da
+  // operação — neutro, ao lado do `notice`, que continua sendo só erro.
+  const [movingNoteId, setMovingNoteId] = useState<string | null>(null);
+  const [arrivedNoteId, setArrivedNoteId] = useState<string | null>(null);
+  const [moveNotice, setMoveNotice] = useState<MoveNoticeState | null>(null);
+  const moveNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
+  const [kanbanNotes, setKanbanNotes] = useState<NoteListItem[]>([]);
+  const [kanbanStatus, setKanbanStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [kanbanCapped, setKanbanCapped] = useState(false);
+  const kanbanRequestRef = useRef<AbortController | null>(null);
+  /** A pasta aberta na galeria, para a pré-visualização antes de "Ver melhor". */
+  const [previewFolder, setPreviewFolder] = useState<FolderItem | null>(null);
   const firstRequest = useRef(true);
+  function toggleFolder(folderId: string) {
+    const next = new Set(collapsedFolderIds);
+    if (next.has(folderId)) next.delete(folderId);
+    else next.add(folderId);
+    setPickedCollapsedFolderIds(next);
+    writeCollapsedNoteFolders([...next]);
+  }
+
+  // O "Nota movida." some sozinho depois de ~2s; o timer não pode
+  // sobreviver ao componente.
+  useEffect(
+    () => () => {
+      if (moveNoticeTimerRef.current) clearTimeout(moveNoticeTimerRef.current);
+    },
+    []
+  );
 
   const singleDeletion = useNoteDeletion({
     onDeleted: (note) => {
@@ -133,6 +212,27 @@ export function NotesView({
     },
     onError: setNotice,
   });
+  const tagEditor = useNoteTagsEditor({
+    vocabulary: availableTags,
+    onChanged: (noteId, tags) => {
+      setResult((current) => ({
+        ...current,
+        notes: current.notes.map((note) => (note.id === noteId ? { ...note, tags } : note)),
+      }));
+      setKanbanNotes((current) =>
+        current.map((note) => (note.id === noteId ? { ...note, tags } : note))
+      );
+      setPreview((current) =>
+        current && current.id === noteId ? { ...current, tags } : current
+      );
+      setAvailableTags((current) => {
+        const byId = new Map(current.map((tag) => [tag.id, tag]));
+        for (const tag of tags) byId.set(tag.id, tag);
+        return [...byId.values()];
+      });
+    },
+  });
+
 
   const loadFolders = useCallback(async () => {
     try {
@@ -205,6 +305,44 @@ export function NotesView({
     }
   }
 
+  const MAX_KANBAN_PAGES = 6;
+
+  const loadKanban = useCallback(async () => {
+    kanbanRequestRef.current?.abort();
+    const controller = new AbortController();
+    kanbanRequestRef.current = controller;
+    setKanbanStatus("loading");
+    try {
+      let accumulated: NoteListItem[] = [];
+      let page = 1;
+      let hasMore = true;
+      let capped = false;
+      while (hasMore && page <= MAX_KANBAN_PAGES) {
+        const params = new URLSearchParams({ q: query.trim(), source, type, sort, folder: "all", page: String(page) });
+        const response = await fetch(`/api/notes?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("kanban request failed");
+        const body: NoteListResult = await response.json();
+        accumulated = accumulated.concat(body.notes);
+        hasMore = body.hasMore;
+        capped = hasMore && page === MAX_KANBAN_PAGES;
+        page += 1;
+      }
+      if (!controller.signal.aborted) {
+        setKanbanNotes(accumulated);
+        setKanbanCapped(capped);
+        setKanbanStatus("idle");
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") setKanbanStatus("error");
+    }
+  }, [query, source, type, sort]);
+
+  useEffect(() => {
+    if (viewMode !== "kanban") return;
+    const timer = setTimeout(() => void loadKanban(), query.trim() ? SEARCH_DELAY_MS : 0);
+    return () => clearTimeout(timer);
+  }, [viewMode, loadKanban, query]);
+
   async function showPreview(noteId: string) {
     previewRequestRef.current?.abort();
     const controller = new AbortController();
@@ -229,7 +367,10 @@ export function NotesView({
       if (!response.ok) throw new Error("preview request failed");
       const body = (await response.json()) as { note: NotePreview };
       if (!controller.signal.aborted) {
-        setPreview(body.note);
+        const tags = result.notes.find((note) => note.id === noteId)?.tags
+          ?? kanbanNotes.find((note) => note.id === noteId)?.tags
+          ?? [];
+        setPreview({ ...body.note, tags });
         setPreviewStatus("idle");
       }
     } catch (error) {
@@ -263,6 +404,7 @@ export function NotesView({
       ...current,
       notes: current.notes.map((note) => (note.id === noteId ? { ...note, folder } : note)),
     }));
+    setKanbanNotes((current) => current.map((note) => (note.id === noteId ? { ...note, folder } : note)));
     setPreview((current) => (current && current.id === noteId ? { ...current, folder } : current));
     void loadFolders();
     setReviewKey((key) => key + 1);
@@ -270,17 +412,56 @@ export function NotesView({
 
   async function moveNoteFromMenu(noteId: string, folderId: string | null) {
     setNotice(null);
+    // O estado "movendo" e o aviso valem só no Kanban — é onde o card tem
+    // aparência própria para mostrar o voo; a lista mantém o silêncio de sempre.
+    const inKanban = viewMode === "kanban";
+    if (inKanban) {
+      // Uma mudança por vez: o estado visual e o aviso são de uma nota só.
+      if (movingNoteId) return;
+      if (moveNoticeTimerRef.current) {
+        clearTimeout(moveNoticeTimerRef.current);
+        moveNoticeTimerRef.current = null;
+      }
+      const note = kanbanNotes.find((item) => item.id === noteId);
+      const folderName = folderId
+        ? folders.find((item) => item.id === folderId)?.name ?? "outra pasta"
+        : "Sem pasta";
+      setMovingNoteId(noteId);
+      setMoveNotice({
+        phase: "moving",
+        message: note
+          ? `Movendo “${note.title || "Sem título"}” para ${folderName}…`
+          : `Movendo a nota para ${folderName}…`,
+      });
+    }
     const response = await fetch(`/api/notes/${noteId}/folder`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folderId }),
     }).catch(() => null);
     if (!response?.ok) {
+      if (inKanban) {
+        // A falha cancela só o aviso de andamento: o banner de erro assume.
+        setMovingNoteId(null);
+        setMoveNotice(null);
+      }
       setNotice(response ? "Não deu para organizar a nota." : "Sem conexão.");
       return;
     }
     const body = (await response.json()) as { folder: NoteListItem["folder"] };
+    // O card só muda de coluna aqui, depois da confirmação do servidor —
+    // nada de movimento otimista (mesmo critério de `noteMoved`).
     noteMoved(noteId, body.folder);
+    if (inKanban) {
+      setMovingNoteId(null);
+      setArrivedNoteId(noteId);
+      setMoveNotice({ phase: "done", message: "Nota movida." });
+      moveNoticeTimerRef.current = setTimeout(() => {
+        setMoveNotice(null);
+        setArrivedNoteId(null);
+        moveNoticeTimerRef.current = null;
+      }, 2000);
+    }
     if (folderFilter !== "all") void loadPage(1, false);
   }
 
@@ -384,6 +565,20 @@ export function NotesView({
   const everyVisibleNoteIsSelected =
     result.notes.length > 0 && result.notes.every((note) => selectedNoteIds.has(note.id));
 
+  const kanbanColumns: KanbanColumnData[] = useMemo(() => {
+    const byFolder = new Map<string, NoteListItem[]>();
+    for (const note of kanbanNotes) {
+      const key = note.folder?.id ?? KANBAN_UNFILED;
+      const bucket = byFolder.get(key);
+      if (bucket) bucket.push(note);
+      else byFolder.set(key, [note]);
+    }
+    return [
+      ...folders.map((folder) => ({ id: folder.id, name: folder.name, notes: byFolder.get(folder.id) ?? [] })),
+      { id: KANBAN_UNFILED, name: "Sem pasta", notes: byFolder.get(KANBAN_UNFILED) ?? [] },
+    ];
+  }, [folders, kanbanNotes]);
+
   return (
     <div className="flex min-h-dvh bg-secondary p-2 sm:p-3">
       <main className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-background">
@@ -416,7 +611,9 @@ export function NotesView({
                 aria-live="polite"
                 className="text-sm tabular-nums text-subtle-foreground"
               >
-                {status === "loading"
+                {viewMode === "kanban"
+                  ? `${kanbanNotes.length} ${kanbanNotes.length === 1 ? "nota" : "notas"}${kanbanCapped ? " (mostrando as mais recentes)" : ""}`
+                  : status === "loading"
                   ? hasLoadedInitial
                     ? "Atualizando…"
                     : "Buscando no servidor…"
@@ -476,6 +673,11 @@ export function NotesView({
               {notice}
             </p>
           )}
+
+          {/* Sempre montado, sem `key`: é a região viva do leitor de tela,
+              e só a troca de texto dentro dela é anunciada. Flutua no
+              rodapé — só existe estado no modo Kanban. */}
+          <MoveNotice state={moveNotice} />
 
           <section aria-label="Filtros de notas" className="mt-8">
             <div className="relative">
@@ -544,6 +746,19 @@ export function NotesView({
                 </SourceButton>
               </div>
 
+              <div className="flex w-fit rounded-xl bg-secondary p-1" aria-label="Alternar visualização">
+                <SourceButton active={viewMode === "list"} onClick={() => setViewMode("list")}>
+                  <List className="size-3.5" aria-hidden="true" /> Lista
+                </SourceButton>
+                <SourceButton active={viewMode === "kanban"} onClick={() => {
+                  setViewMode("kanban");
+                  setSelectionMode(false);
+                  setSelectedNoteIds(new Set());
+                }}>
+                  <LayoutGrid className="size-3.5" aria-hidden="true" /> Kanban
+                </SourceButton>
+              </div>
+
               <div className="flex flex-col gap-2 sm:flex-row">
                 <SelectControl
                   label="Tipo"
@@ -573,147 +788,239 @@ export function NotesView({
               </div>
             </div>
 
-            <FolderFilterBar
-              folders={folders}
-              value={folderFilter}
-              showAskNexo={!reviewVisible}
-              onChange={(value) => {
-                resetSelection();
-                setFolderFilter(value);
-              }}
-              onFoldersChanged={(removedId) => {
-                if (removedId && folderFilter === removedId) setFolderFilter("all");
-                refreshAfterFolders();
-              }}
-              onAskNexo={() => setForceReview(true)}
-            />
+            {viewMode === "list" && (
+              <FolderFilterBar
+                folders={folders}
+                value={folderFilter}
+                showAskNexo={!reviewVisible}
+                onChange={(value) => {
+                  resetSelection();
+                  setFolderFilter(value);
+                }}
+                onFoldersChanged={(removedId) => {
+                  if (removedId && folderFilter === removedId) setFolderFilter("all");
+                  refreshAfterFolders();
+                }}
+                onAskNexo={() => setForceReview(true)}
+              />
+            )}
           </section>
 
           <section className="mt-8 flex flex-1 flex-col" aria-busy={status === "loading"}>
-            {status === "error" ? (
-              <MessageState
-                title="As notas não carregaram"
-                description="Confira a conexão e tente de novo. Seus filtros continuam aqui."
-                action={{ label: "Tentar novamente", onClick: () => void loadPage(1, false) }}
-              />
-            ) : status === "loading" ? (
-              <NotesSkeleton
-                message={
-                  hasLoadedInitial
-                    ? "Atualizando suas notas…"
-                    : "Buscando suas notas no servidor…"
-                }
-              />
-            ) : result.notes.length === 0 ? (
-              <MessageState
-                title={filtered ? "Nenhuma nota combina com isso" : "Seu acervo começa aqui"}
-                description={
-                  filtered
-                    ? "Tente outra palavra ou remova um dos filtros."
-                    : "Quando você escrever ou a Nexo criar uma nota, ela vai aparecer aqui."
-                }
-                action={filtered ? { label: "Limpar filtros", onClick: clearFilters } : undefined}
-              />
-            ) : (
-              <>
-                {selectionMode && (
-                  <div className="mb-4 flex flex-col gap-3 rounded-xl bg-secondary px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                    <p className="text-sm font-medium text-foreground" aria-live="polite">
-                      {selectedNoteIds.size === 0
-                        ? "Escolha as notas que deseja apagar"
-                        : `${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`}
+            {viewMode === "kanban" ? (
+              kanbanStatus === "error" ? (
+                <MessageState title="As notas não carregaram" description="Confira a conexão e tente de novo." action={{ label: "Tentar novamente", onClick: () => void loadKanban() }} />
+              ) : kanbanStatus === "loading" && kanbanNotes.length === 0 ? (
+                <NotesSkeleton message="Buscando suas notas no servidor…" />
+              ) : kanbanNotes.length === 0 ? (
+                <MessageState title="Nenhuma nota por aqui" description="Quando você escrever ou a Nexo criar uma nota, ela aparece numa coluna." />
+              ) : (
+                <>
+                  {kanbanCapped && (
+                    <p className="mb-3 text-xs text-subtle-foreground">
+                      Mostrando as {kanbanNotes.length} notas mais recentes. Refine a busca para ver as demais.
                     </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={toggleVisibleNotes}
-                        className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                      >
-                        {everyVisibleNoteIsSelected ? "Limpar seleção" : "Selecionar visíveis"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={selectedNoteIds.size === 0}
-                        onClick={() => void openDeleteDialog()}
-                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
-                      >
-                        <Trash2 className="size-4" aria-hidden="true" />
-                        Apagar
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div
-                  className={cn(
-                    "grid min-h-0 gap-6",
-                    selectedNoteId && "lg:grid-cols-[minmax(0,1fr)_minmax(21rem,0.8fr)]"
                   )}
-                >
-                  <ul className="divide-y divide-border border-y border-border">
-                    {result.notes.map((note) => (
-                      <NoteContextMenu
-                        key={note.id}
-                        note={note}
-                        workspaces={[]}
-                        hideWorkspace
-                        openLabel="Abrir prévia"
-                        folders={folders}
-                        currentFolderId={note.folder?.id ?? null}
-                        onOpen={() => void showPreview(note.id)}
-                        onMoveToFolder={(folderId) => void moveNoteFromMenu(note.id, folderId)}
-                        onCreateFolder={() => {
-                          setNoteWaitingForFolder(note.id);
-                          setCreateFolderOpen(true);
-                        }}
-                        onDelete={singleDeletion.request}
-                        onError={setNotice}
-                      >
-                        <NoteRow
-                          note={note}
-                          now={now}
-                          selected={note.id === selectedNoteId}
-                          selectionMode={selectionMode}
-                          checked={selectedNoteIds.has(note.id)}
-                          onCheckedChange={() => toggleNoteSelection(note.id)}
-                          onSelect={() => void showPreview(note.id)}
-                        />
-                      </NoteContextMenu>
-                    ))}
-                  </ul>
-
-                  {selectedNoteId && (
-                    <aside
-                      ref={previewRef}
-                      className="order-first lg:order-none lg:sticky lg:top-5 lg:max-h-[calc(100dvh-3.5rem)]"
-                      aria-label="Prévia da nota"
-                    >
-                      <NotePreviewPanel
-                        preview={preview}
-                        status={previewStatus}
-                        folders={folders}
-                        onMoved={noteMoved}
-                        now={now}
-                        onClose={closePreview}
-                        onRetry={() => void showPreview(selectedNoteId)}
-                      />
-                    </aside>
-                  )}
-                </div>
-
-                {result.hasMore && (
-                  <button
-                    type="button"
-                    onClick={() => void loadPage(result.page + 1, true)}
-                    disabled={status === "more"}
-                    className="mx-auto mt-7 flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:pointer-events-none disabled:opacity-60"
-                  >
-                    {status === "more" && (
-                      <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  <div className={cn("grid min-h-0 gap-6", selectedNoteId && "lg:grid-cols-[minmax(0,1fr)_minmax(21rem,0.8fr)]")}>
+                    <NotesKanbanBoard
+                      columns={kanbanColumns}
+                      folders={folders}
+                      now={now}
+                      onOpenNote={(noteId) => void showPreview(noteId)}
+                      onMoveNote={(noteId, folderId) => void moveNoteFromMenu(noteId, folderId)}
+                      onCreateFolder={() => { setNoteWaitingForFolder(null); setCreateFolderOpen(true); }}
+                      onDeleteRequest={singleDeletion.request}
+                      vocabulary={availableTags}
+                      onEditTags={tagEditor.request}
+                      movingNoteId={movingNoteId}
+                      arrivedNoteId={arrivedNoteId}
+                      onError={setNotice}
+                    />
+                    {selectedNoteId && (
+                      <aside ref={previewRef} className="order-first lg:order-none lg:sticky lg:top-5 lg:max-h-[calc(100dvh-3.5rem)]" aria-label="Prévia da nota">
+                        <NotePreviewPanel preview={preview} status={previewStatus} folders={folders} onMoved={noteMoved} now={now} onClose={closePreview} onRetry={() => void showPreview(selectedNoteId)} />
+                      </aside>
                     )}
-                    {status === "more" ? "Carregando…" : "Mostrar mais"}
-                  </button>
-                )}
-              </>
+                  </div>
+                </>
+              )
+            ) : (
+              status === "error" ? (
+                <MessageState
+                  title="As notas não carregaram"
+                  description="Confira a conexão e tente de novo. Seus filtros continuam aqui."
+                  action={{ label: "Tentar novamente", onClick: () => void loadPage(1, false) }}
+                />
+              ) : status === "loading" ? (
+                <NotesSkeleton
+                  message={
+                    hasLoadedInitial
+                      ? "Atualizando suas notas…"
+                      : "Buscando suas notas no servidor…"
+                  }
+                />
+              ) : result.notes.length === 0 ? (
+                <MessageState
+                  title={filtered ? "Nenhuma nota combina com isso" : "Seu acervo começa aqui"}
+                  description={
+                    filtered
+                      ? "Tente outra palavra ou remova um dos filtros."
+                      : "Quando você escrever ou a Nexo criar uma nota, ela vai aparecer aqui."
+                  }
+                  action={filtered ? { label: "Limpar filtros", onClick: clearFilters } : undefined}
+                />
+              ) : (
+                <>
+                  {selectionMode && (
+                    <div className="mb-4 flex flex-col gap-3 rounded-xl bg-secondary px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                      <p className="text-sm font-medium text-foreground" aria-live="polite">
+                        {selectedNoteIds.size === 0
+                          ? "Escolha as notas que deseja apagar"
+                          : `${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={toggleVisibleNotes}
+                          className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                        >
+                          {everyVisibleNoteIsSelected ? "Limpar seleção" : "Selecionar visíveis"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={selectedNoteIds.size === 0}
+                          onClick={() => void openDeleteDialog()}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
+                        >
+                          <Trash2 className="size-4" aria-hidden="true" />
+                          Apagar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div
+                    className={cn(
+                      "grid min-h-0 gap-6",
+                      selectedNoteId && "lg:grid-cols-[minmax(0,1fr)_minmax(21rem,0.8fr)]"
+                    )}
+                  >
+                    <ul className="divide-y divide-border border-y border-border">
+                      {(() => {
+                        const showFolderHeaders = folderFilter === "all";
+                        let previousFolderId: string | null = null;
+                        const items: React.ReactNode[] = [];
+                        for (const [index, note] of result.notes.entries()) {
+                          const currentFolderId = note.folder?.id ?? null;
+                          const folder = showFolderHeaders && currentFolderId !== null
+                            ? folders.find((item) => item.id === currentFolderId)
+                            : undefined;
+                          const collapsed = folder ? collapsedFolderIds.has(folder.id) : false;
+                          if (folder && currentFolderId !== previousFolderId) {
+                            // Conta o que este bloco esconde, não a pasta inteira:
+                            // a lista pode estar filtrada ou partida em vários blocos.
+                            let blockSize = 1;
+                            while (result.notes[index + blockSize]?.folder?.id === currentFolderId) blockSize += 1;
+                            items.push(
+                              <li
+                                key={`folder-header-${currentFolderId}-${note.id}`}
+                                className="pt-3 pb-1 sm:px-3"
+                              >
+                                <button
+                                  type="button"
+                                  aria-expanded={!collapsed}
+                                  onClick={() => toggleFolder(folder.id)}
+                                  className="flex min-h-8 w-full items-center gap-1.5 rounded-lg px-1 py-1 text-left text-xs font-medium text-subtle-foreground transition-colors duration-150 hover:bg-secondary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transition-none pointer-coarse:min-h-11"
+                                >
+                                  <FolderClosed className="size-3.5 shrink-0" aria-hidden="true" />
+                                  <span className="min-w-0 truncate">{folder.name}</span>
+                                  {collapsed && (
+                                    <span className="font-normal tabular-nums text-muted-foreground">
+                                      · {blockSize} {blockSize === 1 ? "nota" : "notas"}
+                                    </span>
+                                  )}
+                                  <ChevronDown
+                                    className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none", collapsed && "-rotate-90")}
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              </li>
+                            );
+                          }
+                          if (collapsed) {
+                            previousFolderId = currentFolderId;
+                            continue;
+                          }
+                          items.push(
+                            <NoteContextMenu
+                              key={note.id}
+                              note={note}
+                              workspaces={[]}
+                              hideWorkspace
+                              openLabel="Abrir prévia"
+                              folders={folders}
+                              currentFolderId={note.folder?.id ?? null}
+                              onOpen={() => void showPreview(note.id)}
+                              onMoveToFolder={(folderId) => void moveNoteFromMenu(note.id, folderId)}
+                              onCreateFolder={() => {
+                                setNoteWaitingForFolder(note.id);
+                                setCreateFolderOpen(true);
+                              }}
+                              onDelete={singleDeletion.request}
+                              vocabulary={availableTags}
+                              onEditTags={tagEditor.request}
+                              onError={setNotice}
+                            >
+                              <NoteRow
+                                note={note}
+                                now={now}
+                                selected={note.id === selectedNoteId}
+                                selectionMode={selectionMode}
+                                checked={selectedNoteIds.has(note.id)}
+                                onCheckedChange={() => toggleNoteSelection(note.id)}
+                                onSelect={() => void showPreview(note.id)}
+                              />
+                            </NoteContextMenu>
+                          );
+                          previousFolderId = currentFolderId;
+                        }
+                        return items;
+                      })()}
+                    </ul>
+
+                    {selectedNoteId && (
+                      <aside
+                        ref={previewRef}
+                        className="order-first lg:order-none lg:sticky lg:top-5 lg:max-h-[calc(100dvh-3.5rem)]"
+                        aria-label="Prévia da nota"
+                      >
+                        <NotePreviewPanel
+                          preview={preview}
+                          status={previewStatus}
+                          folders={folders}
+                          onMoved={noteMoved}
+                          now={now}
+                          onClose={closePreview}
+                          onRetry={() => void showPreview(selectedNoteId)}
+                        />
+                      </aside>
+                    )}
+                  </div>
+
+                  {result.hasMore && (
+                    <button
+                      type="button"
+                      onClick={() => void loadPage(result.page + 1, true)}
+                      disabled={status === "more"}
+                      className="mx-auto mt-7 flex h-10 items-center gap-2 rounded-xl border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:pointer-events-none disabled:opacity-60"
+                    >
+                      {status === "more" && (
+                        <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                      )}
+                      {status === "more" ? "Carregando…" : "Mostrar mais"}
+                    </button>
+                  )}
+                </>
+              )
             )}
           </section>
           </TabsContent>
@@ -725,17 +1032,14 @@ export function NotesView({
                   setNoteWaitingForFolder(null);
                   setCreateFolderOpen(true);
                 }}
-                onOpen={(folderId) => {
-                  resetSelection();
-                  setFolderFilter(folderId);
-                  setSection("notes");
-                }}
+                onPreview={(folderId) => setPreviewFolder(folders.find((item) => item.id === folderId) ?? null)}
               />
           </TabsContent>
           </Tabs>
         </div>
       </main>
       {singleDeletion.dialog}
+      {tagEditor.dialog}
       <CreateFolderDialog
         open={createFolderOpen}
         onOpenChange={(open) => {
@@ -807,6 +1111,16 @@ export function NotesView({
           onRetry={() => void loadDeletionImpact()}
         />
       </ConfirmDialog>
+      <FolderPreviewDialog
+        folder={previewFolder}
+        onOpenChange={(open) => { if (!open) setPreviewFolder(null); }}
+        onViewAll={(folderId) => {
+          setPreviewFolder(null);
+          resetSelection();
+          setFolderFilter(folderId);
+          setSection("notes");
+        }}
+      />
     </div>
   );
 }
@@ -814,11 +1128,11 @@ export function NotesView({
 function FolderGallery({
   folders,
   onCreate,
-  onOpen,
+  onPreview,
 }: {
   folders: FolderItem[];
   onCreate: () => void;
-  onOpen: (folderId: string) => void;
+  onPreview: (folderId: string) => void;
 }) {
   return (
     <section aria-labelledby="folders-heading">
@@ -858,7 +1172,7 @@ function FolderGallery({
             <li key={folder.id}>
               <button
                 type="button"
-                onClick={() => onOpen(folder.id)}
+                onClick={() => onPreview(folder.id)}
                 className="group flex min-h-36 w-full flex-col rounded-2xl border border-border bg-background p-4 text-left transition-[border-color,background-color,transform] duration-150 hover:-translate-y-0.5 hover:border-accent/45 hover:bg-secondary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transform-none"
               >
                 <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-colors group-hover:bg-accent/10 group-hover:text-accent">
@@ -918,14 +1232,14 @@ function SelectControl({
   icon?: typeof CalendarClock;
 }) {
   return (
-    <label className="relative flex items-center">
+    <label className="relative flex items-center w-full sm:w-auto min-w-0">
       <span className="sr-only">{label}</span>
       {Icon && <Icon className="pointer-events-none absolute left-3 size-4 text-subtle-foreground" aria-hidden="true" />}
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={cn(
-          "h-9 min-w-44 appearance-none rounded-xl border border-border bg-background pr-9 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-accent/40",
+          "h-9 min-w-44 w-full sm:w-auto appearance-none rounded-xl border border-border bg-background pr-9 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-accent/40",
           Icon ? "pl-9" : "pl-3"
         )}
       >
@@ -948,7 +1262,8 @@ function NoteRow({
   checked,
   onCheckedChange,
   onSelect,
-}: {
+  ...triggerProps
+}: Omit<ComponentPropsWithRef<"li">, "onSelect" | "children"> & {
   note: NoteListItem;
   now: number;
   selected: boolean;
@@ -958,7 +1273,7 @@ function NoteRow({
   onSelect: () => void;
 }) {
   return (
-    <li className="flex">
+    <li {...triggerProps} className={cn("flex", triggerProps.className)}>
       {selectionMode && (
         <label className="flex shrink-0 cursor-pointer items-start px-3 pt-7 sm:px-4" title={`Selecionar ${note.title}`}>
           <input
@@ -1068,7 +1383,7 @@ export function NotePreviewPanel({
   onClose,
   onRetry,
 }: {
-  preview: NotePreview | null;
+  preview: NotePreviewWithTags | null;
   status: "idle" | "loading" | "error";
   /** A busca global só lê; em Notas, a prévia também permite mover de pasta. */
   folders?: FolderItem[];
@@ -1139,6 +1454,21 @@ export function NotePreviewPanel({
                 folders={folders}
                 onMoved={(folder) => onMoved(preview.id, folder)}
               />
+            )}
+            {preview.tags && preview.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {preview.tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 text-[11px]",
+                      TAG_CHIP_CLASS[tagTone(tag)]
+                    )}
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+              </div>
             )}
           </div>
         </div>

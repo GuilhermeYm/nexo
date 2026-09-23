@@ -1,9 +1,10 @@
 "use client";
 
-import { Check, FolderClosed, FolderPlus, LayoutGrid, LoaderCircle, SquarePen, Trash2 } from "lucide-react";
+import { Check, FolderClosed, FolderPlus, Hash, LayoutGrid, LoaderCircle, SquarePen, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
+import { NoteTags, type EditableTag } from "@/components/editor/note-tags";
 import { DeleteTagsChoice } from "@/components/notes/delete-tags-choice";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -36,6 +37,7 @@ const WORKSPACE_DOT: Record<string, string> = {
 export interface NoteMenuTarget {
   id: string;
   title: string;
+  tags: EditableTag[];
 }
 
 /**
@@ -57,6 +59,8 @@ export interface NoteMenuTarget {
 export function NoteContextMenu({
   note,
   workspaces,
+  vocabulary,
+  onEditTags,
   onOpen,
   onDelete,
   onError,
@@ -71,6 +75,9 @@ export function NoteContextMenu({
   note: NoteMenuTarget;
   /** Alimenta o submenu "Abrir no workspace". */
   workspaces: WorkspaceSummary[];
+  /** Sugestões para editar tags; sem elas, o item não aparece. */
+  vocabulary?: EditableTag[];
+  onEditTags?: (note: NoteMenuTarget) => void;
   /** O clique de sempre: abrir a nota para ler e escrever. */
   onOpen: () => void;
   /** Pede a exclusão — normalmente o `request` de `useNoteDeletion`. */
@@ -202,12 +209,28 @@ export function NoteContextMenu({
           </ContextMenuSub>
         )}
 
+        {vocabulary && onEditTags && (
+          <ContextMenuItem onSelect={() => onEditTags(note)}>
+            <Hash className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
+            <ContextMenuItemLabel
+              label="Tags"
+              hint={
+                note.tags.length === 0
+                  ? "Nenhuma ainda"
+                  : note.tags.length === 1
+                    ? "1 tag"
+                    : `${note.tags.length} tags`
+              }
+            />
+          </ContextMenuItem>
+        )}
+
         <ContextMenuSeparator />
 
-        {/* Excluir é o único item que abre diálogo: a escolha sobre os
-            arquivos e as tags não cabe num rótulo de menu. O menu ainda pede
-            o segundo clique, como vinha fazendo em Recentes — é o que impede
-            que um toque longo desastrado chegue até o diálogo. */}
+        {/* Excluir pede confirmação: escolher arquivos e apagar tags globais
+            exige contexto fora do menu. O segundo clique, como em Recentes,
+            impede que um toque longo desastrado abra a confirmação sem
+            intenção. */}
         <ContextMenuItem
           destructive
           confirmLabel="Excluir para valer"
@@ -222,6 +245,111 @@ export function NoteContextMenu({
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+/** Um editor de tags por lista: o menu só pede a abertura e pode desmontar. */
+export function useNoteTagsEditor({
+  vocabulary,
+  onChanged,
+}: {
+  vocabulary: EditableTag[];
+  onChanged?: (noteId: string, tags: EditableTag[]) => void;
+}) {
+  const [note, setNote] = useState<NoteMenuTarget | null>(null);
+  const tagsRef = useRef<EditableTag[]>([]);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const doneRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const open = note !== null;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      dialog.showModal();
+      // O `autoFocus` do React roda antes do `showModal()`, e o navegador
+      // então leva o foco ao primeiro focável — o "×". "Pronto" é o gesto
+      // esperado depois de mexer nas tags.
+      doneRef.current?.focus();
+    }
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  function request(target: NoteMenuTarget) {
+    tagsRef.current = target.tags;
+    setNote(target);
+  }
+
+  function close() {
+    if (!note) return;
+    onChanged?.(note.id, tagsRef.current);
+    setNote(null);
+  }
+
+  const dialog = (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
+      onClose={close}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+      className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-visible rounded-2xl bg-background p-0 text-foreground shadow-2xl backdrop:bg-black/45"
+    >
+      {note && (
+        <div className="flex flex-col">
+          <div className="flex items-start gap-3.5 border-b border-border p-5">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-subtle-foreground">
+              <Hash className="size-[18px]" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 id={titleId} className="text-base font-semibold text-foreground">
+                Tags da nota
+              </h2>
+              <p className="mt-1 truncate text-sm text-muted-foreground">
+                {note.title.trim() || "Sem título"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={close}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-subtle-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <X className="size-4" aria-hidden="true" />
+              <span className="sr-only">Fechar</span>
+            </button>
+          </div>
+
+          <div className="px-5 py-4">
+            <NoteTags
+              key={note.id}
+              noteId={note.id}
+              initialTags={note.tags}
+              vocabulary={vocabulary}
+              onTagsChange={(tags) => { tagsRef.current = tags; }}
+            />
+          </div>
+
+          <div className="flex items-center justify-end border-t border-border p-3.5">
+            <button
+              ref={doneRef}
+              type="button"
+              onClick={close}
+              className="h-9 rounded-xl bg-accent px-3.5 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              Pronto
+            </button>
+          </div>
+        </div>
+      )}
+    </dialog>
+  );
+
+  return { request, dialog };
 }
 
 /**
