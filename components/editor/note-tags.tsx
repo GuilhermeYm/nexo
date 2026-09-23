@@ -34,6 +34,9 @@ import { cn } from "@/lib/utils";
  * e enquanto isso um chip-fantasma com spinner ocupa o lugar dele (estado de
  * espera). Quando a resposta chega, o chip real nasce com a animação de
  * entrada (`animate-tag-in`); se o POST falhar, o texto volta ao campo.
+ * Quem confirma uma segunda tag enquanto a primeira ainda voa não é
+ * descartado: o pedido entra na fila e dispara quando o voo terminar — texto
+ * digitado nessa janela nunca some sem virar chip nem voltar ao campo.
  *
  * **Botão direito no chip abre o menu da tag** (`TagMenuContent`): editar ou
  * apagar. Apagar é da **conta**, não só desta nota — o fluxo mede o impacto
@@ -99,6 +102,9 @@ export function NoteTags({
   // O chip-fantasma enquanto o POST de adicionar não responde.
   const [pendingName, setPendingName] = useState<string | null>(null);
   const pendingRef = useRef(false);
+  // A fila de quem confirmou durante a espera: o texto já saiu do campo, então
+  // devolver agora apagaria o gesto. Vira chip assim que o voo terminar.
+  const filaRef = useRef<string[]>([]);
 
   // O menu de contexto é um portal: dentro de um `<dialog>` (top layer) ele
   // precisa nascer dentro do próprio diálogo, senão fica atrás dele e some.
@@ -134,8 +140,13 @@ export function NoteTags({
     async (name: string) => {
       // Uma espera de cada vez: dois POSTs simultâneos trocariam o
       // chip-fantasma no meio do voo, e o segundo terminaria sem sinal na
-      // tela. O fantasma visível já diz que está em curso.
-      if (pendingRef.current) return;
+      // tela. O fantasma visível já diz que está em curso — e o chamador que
+      // o guard bloqueia não some: o pedido vai para a fila, e o efeito logo
+      // abaixo o dispara quando este POST terminar.
+      if (pendingRef.current) {
+        filaRef.current.push(name);
+        return;
+      }
       pendingRef.current = true;
       setPendingName(name);
       try {
@@ -173,6 +184,16 @@ export function NoteTags({
     },
     [noteId, changeTags]
   );
+
+  // A fila esvazia uma entrada por voo, e é o `null` do `finally` acima que
+  // dispara o próximo — não o clique. Os dois writes vêm sempre juntos
+  // (`pendingRef = true` antes de `setPendingName(nome)`), então, com o
+  // chip-fantasma fora da tela, não há espera em curso e o add passa.
+  useEffect(() => {
+    if (pendingName !== null) return;
+    const proximo = filaRef.current.shift();
+    if (proximo !== undefined) void add(proximo);
+  }, [pendingName, add]);
 
   const remove = useCallback(
     async (tagId: string) => {
@@ -276,6 +297,8 @@ export function NoteTags({
 
   function choose(name: string) {
     void add(name);
+    // Limpar aqui é seguro: `add` nunca descarta o pedido — roda agora ou
+    // enfileira.
     setValue("");
     setActive(0);
     inputRef.current?.focus();
