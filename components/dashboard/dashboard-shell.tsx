@@ -451,10 +451,15 @@ export function DashboardShell({
 
               A lista é a das abas abertas, não a de todos os workspaces. A
               lista completa está no trilho, ao lado; esta barra é o que a
-              pessoa deixou à mão. */}
+              pessoa deixou à mão.
+
+              O `relative` não é enfeite: sem ele, o `sr-only` do "+" (um
+              `absolute`) tomava o documento como referência e escapava da
+              rolagem da barra. No celular, isso alargava a página inteira
+              (`innerWidth` 618 numa tela de 360). */}
           <nav
             aria-label="Abas abertas"
-            className="flex min-w-0 items-end gap-1 overflow-x-auto"
+            className="relative flex min-w-0 items-end gap-1 overflow-x-auto"
           >
             {tabs.map((id) => {
               if (id === HOME_TAB) {

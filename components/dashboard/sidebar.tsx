@@ -1,20 +1,15 @@
 "use client";
 
 import {
-  CalendarDays,
   ExternalLink,
   FileText,
   FolderClosed,
-  House,
   LayoutGrid,
-  Inbox,
   LogOut,
   MoreHorizontal,
-  Paperclip,
   Pencil,
   Plus,
   Settings,
-  Tags,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -34,32 +29,16 @@ import {
 } from "@/components/ui/context-menu";
 import type { WorkspaceSummary } from "@/lib/dashboard/queries";
 import {
+  DASHBOARD_NAV_ITEMS,
+  type DashboardNavItem,
+} from "@/lib/dashboard/navigation";
+import {
   PREFERENCES_EVENT,
   readSidebarView,
   writeSidebarView,
   type SidebarView,
 } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
-
-interface NavItem {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  /** Rotas que ainda não existem entram desabilitadas, não escondidas: o
-   *  usuário vê para onde o produto vai sem esbarrar em link morto. */
-  ready?: boolean;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { label: "Início", href: "/dashboard", icon: House, ready: true },
-  { label: "Entrada", href: "/dashboard/entrada", icon: Inbox, ready: true },
-  // Logo abaixo de Entrada: é sala de uso diário, e não pode ficar depois de
-  // dois links que ainda não existem.
-  { label: "Agenda", href: "/dashboard/agenda", icon: CalendarDays, ready: true },
-  { label: "Notas e pastas", href: "/dashboard/notas", icon: FileText, ready: true },
-  { label: "Tags", href: "/dashboard/tags", icon: Tags, ready: true },
-  { label: "Arquivos", href: "/dashboard/arquivos", icon: Paperclip, ready: true },
-];
 
 /**
  * O seletor do que a barra lista.
@@ -233,9 +212,16 @@ export function Sidebar({
         </div>
 
         {/* Navegação */}
-        <nav className="mt-2 px-3">
+        <nav aria-label="Páginas" className="mt-2 px-3">
+          {labelsVisible && (
+            <div className="mb-1 flex h-4 items-center justify-end pr-2">
+              <span className="text-[10px] leading-none text-hint-foreground" aria-label="Atalho: Alt mais N">
+                Alt+N
+              </span>
+            </div>
+          )}
           <ul className="flex flex-col gap-0.5">
-            {NAV_ITEMS.map((item) => (
+            {DASHBOARD_NAV_ITEMS.map((item) => (
               <li key={item.href}>
                 <NavRow
                   item={item}
@@ -312,6 +298,9 @@ export function Sidebar({
                     <SideLabel open>
                       <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
                         Workspaces
+                      </span>
+                      <span className="ml-2 text-[10px] text-hint-foreground" aria-label="Atalho: Alt mais W">
+                        Alt+W
                       </span>
                     </SideLabel>
                   )}
@@ -471,7 +460,7 @@ function NavRow({
   open,
   badge,
 }: {
-  item: NavItem;
+  item: DashboardNavItem;
   open: boolean;
   badge?: number;
 }) {

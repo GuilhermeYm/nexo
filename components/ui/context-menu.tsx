@@ -26,10 +26,18 @@ export const ContextMenuSub = ContextMenuPrimitive.Sub;
 
 export function ContextMenuContent({
   className,
+  container,
   ...props
-}: ComponentProps<typeof ContextMenuPrimitive.Content>) {
+}: ComponentProps<typeof ContextMenuPrimitive.Content> & {
+  /**
+   * Para onde o portal do menu aponta. `<dialog>` vive na top layer, e um
+   * portal para o `body` ficaria **atrás** dela — invisível e intocável.
+   * Quem desenha menu dentro de diálogo nativo passa o próprio diálogo aqui.
+   */
+  container?: ComponentProps<typeof ContextMenuPrimitive.Portal>["container"];
+}) {
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={container}>
       {/* A largura cede ao espaço do lado em que o menu abriu. O Radix vira
           o menu para a esquerda do ponteiro, mas só o desloca no eixo
           vertical: no celular, um toque longo no meio de uma linha deixava

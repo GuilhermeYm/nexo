@@ -146,6 +146,9 @@ async function main() {
     // própria tag, e a exclusão pelo trilho precisa oferecer levá-la junto.
     const loose = await note("Nota com tag própria", keepFolder);
     const looseTag = await tag("sódela", "3", [loose]);
+    // A mais recente de todas, e sem pasta: na visão "todas as pastas" ela
+    // ainda assim vem depois das notas com pasta.
+    const orphan = await note("Nota sem pasta recente", null);
 
     browser = await chromium.launch({ executablePath: findChrome() });
     const context = await browser.newContext({
@@ -192,6 +195,31 @@ async function main() {
     console.log("→ o trilho");
     check("as pastas aparecem com a contagem", await folderRow("Sumir").isVisible());
     await page.screenshot({ path: `${OUT}/trilho.png` });
+
+    console.log("→ a ordem da lista em todas as pastas");
+    {
+      const response = await page.request.get(`${BASE}/api/notes`);
+      const listed = (await response.json()).notes ?? [];
+      const firstLoose = listed.findIndex((item) => !item.folder);
+      const lastFiled = listed.findLastIndex((item) => item.folder);
+      const order = listed.map((item) => `${item.title} [${item.folder?.name ?? "—"}]`).join(", ");
+      check(
+        "as notas sem pasta vêm depois de todas as que têm pasta",
+        listed.length > 0 && firstLoose > lastFiled && listed[firstLoose]?.id === orphan,
+        order
+      );
+      // Cada pasta vira um bloco só, em ordem alfabética: o cabeçalho de
+      // pasta da lista não pode aparecer duas vezes.
+      const blocks = listed
+        .filter((item) => item.folder)
+        .map((item) => item.folder.name)
+        .filter((name, index, names) => name !== names[index - 1]);
+      check(
+        "as notas de cada pasta vêm juntas, pastas pelo nome",
+        blocks.join() === ["Guardar", "Sumir"].join(),
+        blocks.join(" → ")
+      );
+    }
 
     console.log("→ o cache da lista de pastas");
     if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {

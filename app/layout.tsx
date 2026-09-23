@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { headers } from "next/headers";
 
 import { DashboardShortcut } from "@/components/dashboard-shortcut";
+import { NavigationPalette } from "@/components/dashboard/navigation-palette";
 import { InlineScript } from "@/components/inline-script";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
@@ -46,6 +47,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="min-h-full flex flex-col">
         <DashboardShortcut />
+        <NavigationPalette />
         {children}
       </body>
     </html>

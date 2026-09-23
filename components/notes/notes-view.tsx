@@ -37,6 +37,7 @@ import { DeleteTagsChoice } from "@/components/notes/delete-tags-choice";
 import { FolderFilterBar, NoteFolderPicker } from "@/components/notes/folder-controls";
 import { FolderPreviewDialog } from "@/components/notes/folder-preview-dialog";
 import { MoveNotice, type MoveNoticeState } from "@/components/notes/move-notice";
+import { SelectionMark } from "@/components/notes/selection-mark";
 import { KANBAN_UNFILED, NotesKanbanBoard, type KanbanColumnData } from "@/components/notes/notes-kanban";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -150,6 +151,12 @@ export function NotesView({
   const [deleteTags, setDeleteTags] = useState(false);
   const [deletionImpact, setDeletionImpact] = useState<NoteDeletionImpact | null>(null);
   const [impactStatus, setImpactStatus] = useState<"idle" | "loading" | "error">("idle");
+  // Na aba Pastas o mesmo modo "Apagar" escolhe pastas, não notas.
+  const [selectedFolderIds, setSelectedFolderIds] = useState<Set<string>>(() => new Set());
+  const [folderDeleteOpen, setFolderDeleteOpen] = useState(false);
+  const [folderDeleteWithNotes, setFolderDeleteWithNotes] = useState(false);
+  const [folderDeleteStatus, setFolderDeleteStatus] = useState<"idle" | "deleting" | "error">("idle");
+  const [folderDeleteError, setFolderDeleteError] = useState<string | null>(null);
   const [folderFilter, setFolderFilter] = useState<FolderFilter>(initialFolder);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const collapsedSnapshot = useSyncExternalStore(
@@ -187,6 +194,10 @@ export function NotesView({
   /** A pasta aberta na galeria, para a pré-visualização antes de "Ver melhor". */
   const [previewFolder, setPreviewFolder] = useState<FolderItem | null>(null);
   const firstRequest = useRef(true);
+  const visibleNotes = viewMode === "kanban" ? kanbanNotes : result.notes;
+  const selectedFolderNoteCount = folders
+    .filter((folder) => selectedFolderIds.has(folder.id))
+    .reduce((total, folder) => total + folder.noteCount, 0);
   function toggleFolder(folderId: string) {
     const next = new Set(collapsedFolderIds);
     if (next.has(folderId)) next.delete(folderId);
@@ -477,6 +488,10 @@ export function NotesView({
 
   function resetSelection() {
     setSelectedNoteIds(new Set());
+    setSelectedFolderIds(new Set());
+    setFolderDeleteOpen(false);
+    setFolderDeleteWithNotes(false);
+    setFolderDeleteError(null);
     setDeleteDialogOpen(false);
     setDeleteAttachments(false);
     setDeleteTags(false);
@@ -523,7 +538,7 @@ export function NotesView({
   }
 
   function toggleVisibleNotes() {
-    const visibleIds = result.notes.map((note) => note.id);
+    const visibleIds = visibleNotes.map((note) => note.id);
     const everyVisibleNoteIsSelected = visibleIds.every((id) => selectedNoteIds.has(id));
     setSelectedNoteIds((current) => {
       const next = new Set(current);
@@ -556,14 +571,74 @@ export function NotesView({
       setDeleteDialogOpen(false);
       setDeleteStatus("idle");
       closePreview();
+      void loadFolders();
+      if (viewMode === "kanban") void loadKanban();
       await loadPage(1, false);
     } catch {
       setDeleteStatus("error");
     }
   }
 
+  function toggleFolderSelection(folderId: string) {
+    setSelectedFolderIds((current) => {
+      const next = new Set(current);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  }
+
+  /**
+   * Apaga as pastas marcadas, uma por vez, pela mesma rota do trilho.
+   *
+   * Em série de propósito: com as notas junto, a rota tem teto próprio por
+   * hora, e disparar tudo de uma vez faria as últimas baterem nele. Se alguma
+   * falhar, as que já saíram não voltam — a seleção fica só com as que
+   * restaram, e o diálogo diz quantas foram.
+   */
+  async function deleteSelectedFolders() {
+    const ids = [...selectedFolderIds];
+    if (ids.length === 0) return;
+    setFolderDeleteStatus("deleting");
+    setFolderDeleteError(null);
+
+    const removed: string[] = [];
+    for (const id of ids) {
+      const response = await fetch(`/api/folders/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: folderDeleteWithNotes ? "delete" : "keep", tags: false }),
+      }).catch(() => null);
+      if (!response?.ok) break;
+      removed.push(id);
+    }
+
+    if (removed.length > 0) {
+      if (removed.includes(folderFilter)) setFolderFilter("all");
+      refreshAfterFolders();
+      if (viewMode === "kanban") void loadKanban();
+    }
+
+    if (removed.length === ids.length) {
+      setSelectedFolderIds(new Set());
+      setFolderDeleteOpen(false);
+      setFolderDeleteWithNotes(false);
+      setFolderDeleteStatus("idle");
+      setSelectionMode(false);
+      return;
+    }
+
+    setSelectedFolderIds(new Set(ids.filter((id) => !removed.includes(id))));
+    setFolderDeleteStatus("error");
+    setFolderDeleteError(
+      removed.length === 0
+        ? "Não foi possível apagar as pastas. Tente novamente."
+        : `${removed.length} de ${ids.length} pastas foram apagadas. As que ficaram continuam selecionadas.`
+    );
+  }
+
   const everyVisibleNoteIsSelected =
-    result.notes.length > 0 && result.notes.every((note) => selectedNoteIds.has(note.id));
+    visibleNotes.length > 0 && visibleNotes.every((note) => selectedNoteIds.has(note.id));
 
   const kanbanColumns: KanbanColumnData[] = useMemo(() => {
     const byFolder = new Map<string, NoteListItem[]>();
@@ -622,8 +697,14 @@ export function NotesView({
               <button
                 type="button"
                 onClick={() => {
+                  // A prévia e a seleção disputam o mesmo clique: com o modo
+                  // ligado, clicar numa nota ou pasta marca em vez de abrir.
+                  if (!selectionMode) {
+                    closePreview();
+                    setPreviewFolder(null);
+                  }
                   setSelectionMode((active) => !active);
-                  setSelectedNoteIds(new Set());
+                  resetSelection();
                 }}
                 className={cn(
                   "h-9 rounded-xl border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
@@ -644,7 +725,10 @@ export function NotesView({
             </div>
           </header>
 
-          <Tabs value={section} onValueChange={(value) => setSection(value as "notes" | "folders")} className="mt-8">
+          <Tabs value={section} onValueChange={(value) => {
+            resetSelection();
+            setSection(value as "notes" | "folders");
+          }} className="mt-8">
             <TabsList aria-label="Conteúdo do acervo">
               <TabsTrigger value="notes">
                 <FileText className="size-4" aria-hidden="true" />
@@ -807,6 +891,19 @@ export function NotesView({
           </section>
 
           <section className="mt-8 flex flex-1 flex-col" aria-busy={status === "loading"}>
+            {selectionMode && visibleNotes.length > 0 && (
+              <SelectionBar
+                label={
+                  selectedNoteIds.size === 0
+                    ? "Escolha as notas que deseja apagar"
+                    : `${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`
+                }
+                toggleLabel={everyVisibleNoteIsSelected ? "Limpar seleção" : "Selecionar visíveis"}
+                onToggleAll={toggleVisibleNotes}
+                canDelete={selectedNoteIds.size > 0}
+                onDelete={() => void openDeleteDialog()}
+              />
+            )}
             {viewMode === "kanban" ? (
               kanbanStatus === "error" ? (
                 <MessageState title="As notas não carregaram" description="Confira a conexão e tente de novo." action={{ label: "Tentar novamente", onClick: () => void loadKanban() }} />
@@ -827,6 +924,9 @@ export function NotesView({
                       folders={folders}
                       now={now}
                       onOpenNote={(noteId) => void showPreview(noteId)}
+                      selectionMode={selectionMode}
+                      selectedIds={selectedNoteIds}
+                      onToggleSelect={toggleNoteSelection}
                       onMoveNote={(noteId, folderId) => void moveNoteFromMenu(noteId, folderId)}
                       onCreateFolder={() => { setNoteWaitingForFolder(null); setCreateFolderOpen(true); }}
                       onDeleteRequest={singleDeletion.request}
@@ -871,33 +971,6 @@ export function NotesView({
                 />
               ) : (
                 <>
-                  {selectionMode && (
-                    <div className="mb-4 flex flex-col gap-3 rounded-xl bg-secondary px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-                      <p className="text-sm font-medium text-foreground" aria-live="polite">
-                        {selectedNoteIds.size === 0
-                          ? "Escolha as notas que deseja apagar"
-                          : `${selectedNoteIds.size} ${selectedNoteIds.size === 1 ? "nota selecionada" : "notas selecionadas"}`}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={toggleVisibleNotes}
-                          className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                        >
-                          {everyVisibleNoteIsSelected ? "Limpar seleção" : "Selecionar visíveis"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={selectedNoteIds.size === 0}
-                          onClick={() => void openDeleteDialog()}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
-                        >
-                          <Trash2 className="size-4" aria-hidden="true" />
-                          Apagar
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <div
                     className={cn(
                       "grid min-h-0 gap-6",
@@ -1033,6 +1106,37 @@ export function NotesView({
                   setCreateFolderOpen(true);
                 }}
                 onPreview={(folderId) => setPreviewFolder(folders.find((item) => item.id === folderId) ?? null)}
+                selectionMode={selectionMode}
+                selectedIds={selectedFolderIds}
+                onToggleSelect={toggleFolderSelection}
+                selectionBar={
+                  <SelectionBar
+                    label={
+                      selectedFolderIds.size === 0
+                        ? "Escolha as pastas que deseja apagar"
+                        : `${selectedFolderIds.size} ${selectedFolderIds.size === 1 ? "pasta selecionada" : "pastas selecionadas"}`
+                    }
+                    toggleLabel={
+                      folders.length > 0 && folders.every((folder) => selectedFolderIds.has(folder.id))
+                        ? "Limpar seleção"
+                        : "Selecionar todas"
+                    }
+                    onToggleAll={() =>
+                      setSelectedFolderIds((current) =>
+                        folders.every((folder) => current.has(folder.id))
+                          ? new Set()
+                          : new Set(folders.map((folder) => folder.id))
+                      )
+                    }
+                    canDelete={selectedFolderIds.size > 0}
+                    onDelete={() => {
+                      setFolderDeleteWithNotes(false);
+                      setFolderDeleteStatus("idle");
+                      setFolderDeleteError(null);
+                      setFolderDeleteOpen(true);
+                    }}
+                  />
+                }
               />
           </TabsContent>
           </Tabs>
@@ -1111,6 +1215,49 @@ export function NotesView({
           onRetry={() => void loadDeletionImpact()}
         />
       </ConfirmDialog>
+      <ConfirmDialog
+        open={folderDeleteOpen}
+        title="Apagar pastas selecionadas?"
+        description={
+          folderDeleteWithNotes
+            ? "As pastas e as notas de dentro saem da sua conta, da busca e de todas as lousas em que estiverem abertas."
+            : "As notas de dentro não são apagadas: elas voltam para “Sem pasta”."
+        }
+        subject={`${selectedFolderIds.size} ${selectedFolderIds.size === 1 ? "pasta" : "pastas"} · ${selectedFolderNoteCount} ${selectedFolderNoteCount === 1 ? "nota" : "notas"}`}
+        confirmLabel={folderDeleteWithNotes ? "Apagar tudo" : "Apagar pastas"}
+        busyLabel="Apagando…"
+        busy={folderDeleteStatus === "deleting"}
+        error={folderDeleteError ?? undefined}
+        onOpenChange={(open) => {
+          if (!open && folderDeleteStatus !== "deleting") setFolderDeleteOpen(false);
+        }}
+        onConfirm={() => void deleteSelectedFolders()}
+      >
+        <label
+          className={cn(
+            "flex items-start gap-3 rounded-xl bg-secondary px-3.5 py-3 text-sm transition-opacity",
+            selectedFolderNoteCount > 0
+              ? "cursor-pointer text-foreground"
+              : "cursor-default text-muted-foreground opacity-70"
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={folderDeleteWithNotes}
+            onChange={(event) => setFolderDeleteWithNotes(event.target.checked)}
+            disabled={folderDeleteStatus === "deleting" || selectedFolderNoteCount === 0}
+            className="mt-0.5 size-4 accent-error"
+          />
+          <span>
+            <span className="block font-medium">Apagar também as notas de dentro</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+              {selectedFolderNoteCount > 0
+                ? `${selectedFolderNoteCount} ${selectedFolderNoteCount === 1 ? "nota sairá" : "notas sairão"} da sua conta. As tags delas continuam existindo.`
+                : "As pastas selecionadas estão vazias."}
+            </span>
+          </span>
+        </label>
+      </ConfirmDialog>
       <FolderPreviewDialog
         folder={previewFolder}
         onOpenChange={(open) => { if (!open) setPreviewFolder(null); }}
@@ -1129,10 +1276,19 @@ function FolderGallery({
   folders,
   onCreate,
   onPreview,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
+  selectionBar,
 }: {
   folders: FolderItem[];
   onCreate: () => void;
   onPreview: (folderId: string) => void;
+  /** Com o modo "Apagar" ligado, o cartão marca a pasta em vez de abrir a prévia. */
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (folderId: string) => void;
+  selectionBar: React.ReactNode;
 }) {
   return (
     <section aria-labelledby="folders-heading">
@@ -1167,16 +1323,27 @@ function FolderGallery({
           </button>
         </div>
       ) : (
-        <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {folders.map((folder) => (
+        <>
+        {selectionMode && <div className="mt-6">{selectionBar}</div>}
+        <ul className={cn("grid gap-3 sm:grid-cols-2 lg:grid-cols-3", selectionMode ? "mt-4" : "mt-6")}>
+          {folders.map((folder) => {
+            const checked = selectionMode && selectedIds.has(folder.id);
+            return (
             <li key={folder.id}>
               <button
                 type="button"
-                onClick={() => onPreview(folder.id)}
-                className="group flex min-h-36 w-full flex-col rounded-2xl border border-border bg-background p-4 text-left transition-[border-color,background-color,transform] duration-150 hover:-translate-y-0.5 hover:border-accent/45 hover:bg-secondary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transform-none"
+                onClick={() => (selectionMode ? onToggleSelect(folder.id) : onPreview(folder.id))}
+                aria-pressed={selectionMode ? checked : undefined}
+                className={cn(
+                  "group flex min-h-36 w-full flex-col rounded-2xl border bg-background p-4 text-left transition-[border-color,background-color,transform] duration-150 hover:-translate-y-0.5 hover:border-accent/45 hover:bg-secondary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transform-none",
+                  checked ? "border-error/60 bg-error/5 hover:border-error/60 hover:bg-error/10" : "border-border"
+                )}
               >
-                <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-colors group-hover:bg-accent/10 group-hover:text-accent">
-                  <FolderClosed className="size-5" aria-hidden="true" />
+                <span className="flex w-full items-start justify-between gap-3">
+                  <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-colors group-hover:bg-accent/10 group-hover:text-accent">
+                    <FolderClosed className="size-5" aria-hidden="true" />
+                  </span>
+                  {selectionMode && <SelectionMark checked={checked} />}
                 </span>
                 <span className="mt-4 line-clamp-2 font-semibold text-foreground">{folder.name}</span>
                 <span className="mt-auto flex w-full items-center justify-between gap-3 pt-3 text-xs text-subtle-foreground">
@@ -1185,10 +1352,53 @@ function FolderGallery({
                 </span>
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
+        </>
       )}
     </section>
+  );
+}
+
+/** A barra do modo "Apagar": o que está marcado, marcar tudo e apagar. */
+function SelectionBar({
+  label,
+  toggleLabel,
+  onToggleAll,
+  canDelete,
+  onDelete,
+}: {
+  label: string;
+  toggleLabel: string;
+  onToggleAll: () => void;
+  canDelete: boolean;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-xl bg-secondary px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+      <p className="text-sm font-medium text-foreground" aria-live="polite">
+        {label}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleAll}
+          className="h-9 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        >
+          {toggleLabel}
+        </button>
+        <button
+          type="button"
+          disabled={!canDelete}
+          onClick={onDelete}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-error px-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50 disabled:pointer-events-none disabled:opacity-45 dark:text-background"
+        >
+          <Trash2 className="size-4" aria-hidden="true" />
+          Apagar
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1287,12 +1497,14 @@ function NoteRow({
       )}
       <button
         type="button"
-        onClick={onSelect}
-        aria-pressed={selected}
-        title="Clique para ler a prévia"
+        // No modo "Apagar", a linha inteira marca a nota: abrir a prévia
+        // ali disputaria o clique com a seleção.
+        onClick={selectionMode ? onCheckedChange : onSelect}
+        aria-pressed={selectionMode ? checked : selected}
+        title={selectionMode ? "Clique para selecionar" : "Clique para ler a prévia"}
         className={cn(
           "group grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-3 px-1 py-5 text-left transition-colors hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:px-4",
-          selected && "bg-secondary/65"
+          (selectionMode ? checked : selected) && "bg-secondary/65"
         )}
       >
         <span className="mt-0.5 flex size-9 items-center justify-center rounded-xl bg-secondary text-subtle-foreground transition-colors group-hover:text-foreground">

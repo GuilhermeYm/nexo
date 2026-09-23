@@ -103,6 +103,28 @@ export function TagsView({
     }
   }
 
+  /**
+   * Uma tag apagada (menu do chip no editor ou do nó no grafo) some da
+   * lista, do grafo e do painel de notas da tag na hora — sem refetch, para
+   * as posições dos nós que continuam vivos não se perderem.
+   */
+  function handleTagDeleted(tagId: string) {
+    setAllTags((current) => current.filter((tag) => tag.id !== tagId));
+    setGraphData((current) =>
+      current && current !== "error"
+        ? {
+            ...current,
+            tags: current.tags.filter((tag) => tag.id !== tagId),
+            links: current.links.filter(
+              (link) => link.source !== tagId && link.target !== tagId
+            ),
+          }
+        : current
+    );
+    setSelected((current) => (current?.id === tagId ? null : current));
+    setTagNotes((current) => (current?.tagId === tagId ? null : current));
+  }
+
   // Relógio no padrão do dashboard: começa no instante do servidor para o
   // HTML bater, e só depois de montado passa a marcar o tempo de verdade.
   const [now, setNow] = useState(renderedAt);
@@ -378,6 +400,7 @@ export function TagsView({
                     {...graphData}
                     onTagColorChange={handleTagColorChange}
                     onNoteTagsEdited={() => void refreshGraph()}
+                    onTagDeleted={handleTagDeleted}
                   />
                 ) : (
                   <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">

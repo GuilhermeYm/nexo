@@ -145,3 +145,80 @@ function isUniqueViolation(error: unknown): boolean {
     (error as { code?: string }).code === "23505"
   );
 }
+
+/**
+ * Apagar a tag da conta.
+ *
+ * A tag é global: o DELETE remove a linha em `tags` e o banco faz o resto —
+ * `note_tags` (drizzle/0001) e `note_tag_rejections` (drizzle/0024)
+ * referenciam `tags(id)` com `ON DELETE CASCADE`, então os vínculos com as
+ * notas somem na mesma transação. Não há corpo nenhum: o alvo inteiro está
+ * na URL, e `user_id` do token entra no `where` junto com o id — tag de
+ * outra conta responde 404, a mesma resposta de uma que não existe, para o
+ * caminho não virar uma forma de testar ids alheios.
+ *
+ * **Auditada como toda exclusão de conteúdo** (id e nome anterior), no mesmo
+ * formato que a exclusão de tag que sai junto com uma nota — e o cache do
+ * acervo é invalidado, porque a lista de notas mostra as tags de cada uma.
+ */
+export async function DELETE(
+  request: Request,
+  ctx: RouteContext<"/api/tags/[tagId]">
+) {
+  const supabase = await createClient();
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return errorResponse(401, "Não autenticado.");
+
+    const limit = await rateLimit({
+      key: `tags:delete:${user.id}`,
+      limit: 60,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!limit.success) {
+      return errorResponse(429, "Muitas exclusões seguidas. Aguarde um pouco.");
+    }
+
+    const { tagId } = await ctx.params;
+    if (!UUID.test(tagId)) return errorResponse(404, "Tag não encontrada.");
+
+    // Lido antes porque a auditoria precisa do nome anterior — e porque um
+    // 404 explicado vale mais que um `delete` que não casa com nada.
+    const [current] = await db
+      .select({ id: tags.id, name: tags.name })
+      .from(tags)
+      .where(and(eq(tags.id, tagId), eq(tags.userId, user.id)))
+      .limit(1);
+
+    if (!current) return errorResponse(404, "Tag não encontrada.");
+
+    const [deleted] = await db
+      .delete(tags)
+      // O `userId` no `where` de novo: a leitura acima já conferiu, mas uma
+      // escrita que depende de uma leitura anterior para estar segura fica
+      // insegura no dia em que alguém mexer na leitura.
+      .where(and(eq(tags.id, tagId), eq(tags.userId, user.id)))
+      .returning({ id: tags.id });
+
+    if (!deleted) return errorResponse(404, "Tag não encontrada.");
+
+    await writeAuditLog({
+      action: "DELETE",
+      tableName: "tags",
+      recordId: tagId,
+      userId: user.id,
+      oldData: { name: current.name },
+      request,
+    });
+
+    await invalidateNoteListCache(user.id);
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const code = await logServerError("DELETE /api/tags/[tagId]", error);
+    return errorResponse(500, "Erro ao apagar a tag.", code);
+  }
+}

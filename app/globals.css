@@ -16,6 +16,7 @@
      valor anterior (#9b9080) reprovava nas três. É também a cor das linhas
      do canvas (ondas e mapa), que antes sumiam no tema claro. */
   --nx-text-tertiary: #74695a;
+  --nx-text-hint: #a79e91;
   --nx-border: #e8e2d9;
   --nx-accent: #3d3b36;
   --nx-accent-text: #fdfbf7;
@@ -65,6 +66,7 @@
   --color-tertiary: var(--nx-bg-tertiary);
   --color-muted-foreground: var(--nx-text-secondary);
   --color-subtle-foreground: var(--nx-text-tertiary);
+  --color-hint-foreground: var(--nx-text-hint);
   --color-border: var(--nx-border);
   --color-accent: var(--nx-accent);
   --color-accent-foreground: var(--nx-accent-text);
@@ -100,6 +102,7 @@
   --nx-text-secondary: #a0a0a8;
   /* Mesma correção de contraste do tema claro, na direção oposta. */
   --nx-text-tertiary: #8c8c93;
+  --nx-text-hint: #626269;
   --nx-border: #2a2a2e;
   --nx-accent: #eaeaea;
   --nx-accent-text: #0f0f11;
@@ -266,6 +269,13 @@ a {
      piscar antes do primeiro quadro. */
   --animate-row-in: row-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-row-flash: row-flash 1.2s ease-out both;
+  /* Um chip de tag recém-adicionado a uma nota. O chip só nasce quando a
+     rota responde (editor) ou quando o otimista confirma (lousa), então o
+     gatilho é um evento real. Sem `both` de propósito: o quadro final é o
+     estado natural do chip, e reter `transform`/`opacity` promoveria o chip
+     a camada com contained block para sempre — ver a nota do
+     `dashboard-enter` acima. */
+  --animate-tag-in: tag-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   /* O dashboard abre como uma mesa que se organiza: cada bloco se revela em
      sequência curta, e os itens da lista acompanham o painel ao qual pertencem.
 
@@ -397,6 +407,20 @@ a {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Escala curta de quem chega ao lugar exato em que vai ficar. A miniatura
+   (0.86) lê como "acabou de ser criada" sem parecer um elemento diferente
+   do que permanece na lista. */
+@keyframes tag-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

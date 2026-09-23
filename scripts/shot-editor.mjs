@@ -309,11 +309,11 @@ try {
         inked ?? "sem span"
       );
 
-      // A fonte da nota: Literata no corpo e no título.
+      // A fonte da nota: JetBrains Mono no corpo e no título (a Literata saiu em ce0f34c).
       await page.click('button[aria-label^="Fonte da nota"]');
       await page.screenshot({ path: `${OUT}/fonte-menu--desktop-light.png` });
       await page.click(
-        "[role='dialog'][aria-label='Fonte da nota'] button:has-text('Literata')"
+        "[role='dialog'][aria-label='Fonte da nota'] button:has-text('JetBrains Mono')"
       );
       await page.waitForTimeout(600);
       const fonts = await page.evaluate(() => ({
@@ -324,9 +324,9 @@ try {
       }));
       check(
         "a fonte escolhida vale para o título e o corpo, não para a ficha",
-        /Literata/i.test(fonts.body) &&
-          /Literata/i.test(fonts.title) &&
-          !/Literata/i.test(fonts.details),
+        /JetBrains/i.test(fonts.body) &&
+          /JetBrains/i.test(fonts.title) &&
+          !/JetBrains/i.test(fonts.details),
         JSON.stringify(fonts)
       );
 
@@ -405,7 +405,7 @@ try {
       );
       check(
         "a fonte e a cor foram gravadas na nota",
-        saved.font === "literata" &&
+        saved.font === "mono" &&
           JSON.stringify(saved.content_rich).includes('"color":"blue"'),
         saved.font
       );
