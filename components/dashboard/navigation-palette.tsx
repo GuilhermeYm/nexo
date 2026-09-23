@@ -158,6 +158,20 @@ export function NavigationPalette() {
   }
 
   function handleKeys(event: React.KeyboardEvent<HTMLDialogElement>) {
+    // O Chrome consome a primeira Esc dentro de `input[type=search]` com texto
+    // para limpar o campo — e o rodapé promete "Esc fechar". Interceptamos aqui:
+    // cancelamos a limpeza nativa e fechamos direto.
+    if (
+      event.key === "Escape" &&
+      event.target === searchRef.current &&
+      searchRef.current &&
+      searchRef.current.value.length > 0
+    ) {
+      event.preventDefault();
+      close();
+      return;
+    }
+
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (filtered.length === 0) return;
       event.preventDefault();
@@ -204,12 +218,14 @@ export function NavigationPalette() {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={kind === "workspaces" ? "Ir para um workspace…" : "Ir para uma página…"}
-          className="min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground"
+          data-focus-ring="container"
+          className="min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
         />
         <button
           type="button"
           onClick={close}
           aria-label="Fechar seletor"
+          data-focus-ring="container"
           className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <X className="size-4" aria-hidden="true" />
@@ -242,6 +258,7 @@ export function NavigationPalette() {
                 type="button"
                 onClick={() => navigate(choice.href)}
                 aria-current={current ? "page" : undefined}
+                data-focus-ring="container"
                 className="flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary focus-visible:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
               >
                 <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

@@ -25,7 +25,8 @@
     "shots:images": "node --env-file=.env.local --env-file=.env scripts/shot-images.mjs",
     "shots:busca": "node --env-file=.env scripts/shot-search.mjs",
     "shots:pastas": "node --env-file=.env.local --env-file=.env scripts/shot-folders.mjs",
-    "shots:editor": "node --env-file=.env scripts/shot-editor.mjs"
+    "shots:editor": "node --env-file=.env scripts/shot-editor.mjs",
+    "shots:palette": "node --env-file=.env scripts/shot-palette.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
