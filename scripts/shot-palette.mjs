@@ -13,10 +13,12 @@
  * cada estado:
  *
  *   páginas, busca sem resultado, primeira opção em foco de teclado,
- *   e workspaces em loading, pronto, com busca vazia, lista vazia e erro.
+ *   workspaces em loading, pronto, com busca vazia, lista vazia e erro,
+ *   e pastas (o outro estado do Alt+W) em loading, pronto, com busca vazia,
+ *   lista vazia e erro.
  *
- * Os estados de workspaces vêm de verdade do componente: interceptamos
- * `GET /api/workspaces` (atraso, corpo vazio, 500) — é exatamente o que o
+ * Os estados vêm de verdade do componente: interceptamos `GET /api/workspaces`
+ * e `GET /api/folders` (atraso, corpo vazio, 500) — é exatamente o que o
  * fetching de `navigation-palette.tsx` recebe em cada caso.
  *
  * Além das fotos, em toda abertura de "páginas" lê os estilos computados do
@@ -237,6 +239,14 @@ async function main() {
       "Trabalho de campo",
     ]);
 
+    // Pastas com nomes que não colidem com as workspaces: nas fotos dá para
+    // saber qual lista está na tela só de ler. `on conflict` cobre o caso de o
+    // trigger de signup já ter criado alguma pasta.
+    await sql.query(
+      "insert into folders (user_id, name) values ($1, $2), ($1, $3) on conflict do nothing",
+      [userId, "Receitas", "Livros para ler"]
+    );
+
     browser = await chromium.launch({ executablePath: findChrome() });
     const problemsConsole = problems;
 
@@ -352,6 +362,60 @@ async function main() {
         await shot(page, outDir, "workspaces-erro", size, theme);
         await closePalette(page);
         await page.unroute("**/api/workspaces");
+
+        // ---- Alt+W também abre pastas: o botão de troca do cabeçalho ----
+        // Loading: atrasa /api/folders; o clique no botão já deixa o estado
+        // em carregando antes da resposta (que segue em voo depois do unroute).
+        await page.route("**/api/folders", async (route) => {
+          await new Promise((resolve) => setTimeout(resolve, 4000));
+          await route.continue().catch(() => {});
+        });
+        await openPalette(page, "W");
+        await page.click('dialog[open] button[title="Pastas"]');
+        await shot(page, outDir, "pastas-loading", size, theme);
+        await page.waitForSelector("dialog[open] button >> text=Receitas", {
+          timeout: 10_000,
+        }).catch(() => {});
+        await page.unroute("**/api/folders");
+        await page.waitForTimeout(300);
+        await shot(page, outDir, "pastas", size, theme);
+
+        await page.fill("dialog[open] input[type='search']", "zzz");
+        await page.waitForTimeout(300);
+        await shot(page, outDir, "pastas-busca-vazia", size, theme);
+        await closePalette(page);
+
+        // Lista vazia: a abertura nasce em workspaces (display reseta), então
+        // a interceptação vale e o clique que troca dispara o fetch.
+        await page.route("**/api/folders", (route) =>
+          route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ folders: [] }),
+          })
+        );
+        await openPalette(page, "W");
+        await page.click('dialog[open] button[title="Pastas"]');
+        await page.waitForTimeout(300);
+        await shot(page, outDir, "pastas-vazio", size, theme);
+        await closePalette(page);
+        await page.unroute("**/api/folders");
+
+        // Erro: 500 em /api/folders. O navegador loga no console de propósito —
+        // é o estado sendo fotografado, não um defeito da rodada.
+        await page.route("**/api/folders", (route) =>
+          route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Erro ao carregar pastas." }),
+          })
+        );
+        await openPalette(page, "W");
+        await page.click('dialog[open] button[title="Pastas"]');
+        await page.waitForTimeout(400);
+        await shot(page, outDir, "pastas-erro", size, theme);
+        await closePalette(page);
+        await page.unroute("**/api/folders");
       }
 
       await context.close();
@@ -371,7 +435,7 @@ async function main() {
       );
     }
 
-    // O 500 e o abort do loading são o próprio estado fotografado.
+    // Os 500 (workspaces e pastas) e o abort do loading são o próprio estado fotografado.
     const esperados = /status of 500|ERR_ABORTED|Failed to load resource/;
     const inesperados = [...new Set(problems)].filter((p) => !esperados.test(p));
     console.log(
