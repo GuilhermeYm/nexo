@@ -23,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentPropsWithRef } from "react";
 
 import {
   NOTE_TYPE_LABEL,
@@ -57,10 +57,37 @@ import {
   type NoteListSource,
   type NoteListType,
 } from "@/lib/notes/list";
+import {
+  COLLAPSED_NOTE_FOLDERS_KEY,
+  PREFERENCES_EVENT,
+  readCollapsedNoteFolders,
+  writeCollapsedNoteFolders,
+} from "@/lib/preferences";
 import { TAG_CHIP_CLASS, tagTone } from "@/lib/tags/palette";
 import { cn } from "@/lib/utils";
 
 const SEARCH_DELAY_MS = 250;
+
+/** O servidor desenha tudo aberto; o navegador aplica a preferência após hidratar. */
+function collapsedNoteFoldersSnapshot(): string {
+  return JSON.stringify(readCollapsedNoteFolders());
+}
+
+function subscribeCollapsedNoteFolders(onChange: () => void): () => void {
+  function onStorage(event: StorageEvent) {
+    if (event.key === COLLAPSED_NOTE_FOLDERS_KEY || event.key === null) onChange();
+  }
+  window.addEventListener(PREFERENCES_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(PREFERENCES_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function openNoteFoldersSnapshot(): string {
+  return "[]";
+}
 
 const EMPTY_NOTE_LIST: NoteListResult = {
   notes: [],
@@ -125,6 +152,18 @@ export function NotesView({
   const [impactStatus, setImpactStatus] = useState<"idle" | "loading" | "error">("idle");
   const [folderFilter, setFolderFilter] = useState<FolderFilter>(initialFolder);
   const [folders, setFolders] = useState<FolderItem[]>([]);
+  const collapsedSnapshot = useSyncExternalStore(
+    subscribeCollapsedNoteFolders,
+    collapsedNoteFoldersSnapshot,
+    openNoteFoldersSnapshot
+  );
+  const storedCollapsedFolderIds = useMemo(
+    () => new Set<string>(JSON.parse(collapsedSnapshot) as string[]),
+    [collapsedSnapshot]
+  );
+  // Sem storage, a escolha continua valendo até sair desta tela.
+  const [pickedCollapsedFolderIds, setPickedCollapsedFolderIds] = useState<Set<string> | null>(null);
+  const collapsedFolderIds = pickedCollapsedFolderIds ?? storedCollapsedFolderIds;
   // Muda quando pastas ou pertenças mudam: o cartão da Nexo reconta.
   const [reviewKey, setReviewKey] = useState(0);
   const [forceReview, setForceReview] = useState(false);
@@ -148,6 +187,13 @@ export function NotesView({
   /** A pasta aberta na galeria, para a pré-visualização antes de "Ver melhor". */
   const [previewFolder, setPreviewFolder] = useState<FolderItem | null>(null);
   const firstRequest = useRef(true);
+  function toggleFolder(folderId: string) {
+    const next = new Set(collapsedFolderIds);
+    if (next.has(folderId)) next.delete(folderId);
+    else next.add(folderId);
+    setPickedCollapsedFolderIds(next);
+    writeCollapsedNoteFolders([...next]);
+  }
 
   // O "Nota movida." some sozinho depois de ~2s; o timer não pode
   // sobreviver ao componente.
@@ -863,25 +909,46 @@ export function NotesView({
                         const showFolderHeaders = folderFilter === "all";
                         let previousFolderId: string | null = null;
                         const items: React.ReactNode[] = [];
-                        for (const note of result.notes) {
+                        for (const [index, note] of result.notes.entries()) {
                           const currentFolderId = note.folder?.id ?? null;
-                          if (
-                            showFolderHeaders &&
-                            currentFolderId !== null &&
-                            currentFolderId !== previousFolderId
-                          ) {
-                            const folder = folders.find((f) => f.id === currentFolderId);
-                            if (folder) {
-                              items.push(
-                                <li
-                                  key={`folder-header-${currentFolderId}-${note.id}`}
-                                  className="flex items-center gap-1.5 px-1 pt-4 pb-1 text-xs font-medium text-subtle-foreground sm:px-4"
+                          const folder = showFolderHeaders && currentFolderId !== null
+                            ? folders.find((item) => item.id === currentFolderId)
+                            : undefined;
+                          const collapsed = folder ? collapsedFolderIds.has(folder.id) : false;
+                          if (folder && currentFolderId !== previousFolderId) {
+                            // Conta o que este bloco esconde, não a pasta inteira:
+                            // a lista pode estar filtrada ou partida em vários blocos.
+                            let blockSize = 1;
+                            while (result.notes[index + blockSize]?.folder?.id === currentFolderId) blockSize += 1;
+                            items.push(
+                              <li
+                                key={`folder-header-${currentFolderId}-${note.id}`}
+                                className="pt-3 pb-1 sm:px-3"
+                              >
+                                <button
+                                  type="button"
+                                  aria-expanded={!collapsed}
+                                  onClick={() => toggleFolder(folder.id)}
+                                  className="flex min-h-8 w-full items-center gap-1.5 rounded-lg px-1 py-1 text-left text-xs font-medium text-subtle-foreground transition-colors duration-150 hover:bg-secondary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transition-none pointer-coarse:min-h-11"
                                 >
-                                  <FolderClosed className="size-3.5" aria-hidden="true" />
-                                  {folder.name}
-                                </li>
-                              );
-                            }
+                                  <FolderClosed className="size-3.5 shrink-0" aria-hidden="true" />
+                                  <span className="min-w-0 truncate">{folder.name}</span>
+                                  {collapsed && (
+                                    <span className="font-normal tabular-nums text-muted-foreground">
+                                      · {blockSize} {blockSize === 1 ? "nota" : "notas"}
+                                    </span>
+                                  )}
+                                  <ChevronDown
+                                    className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none", collapsed && "-rotate-90")}
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              </li>
+                            );
+                          }
+                          if (collapsed) {
+                            previousFolderId = currentFolderId;
+                            continue;
                           }
                           items.push(
                             <NoteContextMenu
