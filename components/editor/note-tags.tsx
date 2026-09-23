@@ -1,8 +1,13 @@
 "use client";
 
-import { Plus, X } from "lucide-react";
+import { LoaderCircle, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { TagMenuContent, useTagDeletion } from "@/components/tags/tag-menu";
 import {
   TAG_DOT_CLASS,
   TAG_PALETTE,
@@ -25,7 +30,14 @@ import { cn } from "@/lib/utils";
  * lousa.
  *
  * **Tirar e recolorir são otimistas; adicionar não.** O chip novo precisa do
- * `id` que só o servidor conhece, então ele entra quando a resposta chega.
+ * `id` que só o servidor conhece, então ele entra quando a resposta chega —
+ * e enquanto isso um chip-fantasma com spinner ocupa o lugar dele (estado de
+ * espera). Quando a resposta chega, o chip real nasce com a animação de
+ * entrada (`animate-tag-in`); se o POST falhar, o texto volta ao campo.
+ *
+ * **Botão direito no chip abre o menu da tag** (`TagMenuContent`): editar ou
+ * apagar. Apagar é da **conta**, não só desta nota — o fluxo mede o impacto
+ * e só mostra o aviso quando outras notas usam a mesma tag.
  *
  * **Impressão.** Os controles de edição ("Adicionar", o "×") levam
  * `print:hidden` — são chrome da tela, não conteúdo da nota.
@@ -80,6 +92,25 @@ export function NoteTags({
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
 
+  // Quem já estava aqui na abertura não anima: a animação é de chegada, e
+  // disparar em todo re-render fariam os chips piscarem a cada tecla.
+  const [entryIds] = useState(() => new Set(initialTags.map((tag) => tag.id)));
+
+  // O chip-fantasma enquanto o POST de adicionar não responde.
+  const [pendingName, setPendingName] = useState<string | null>(null);
+  const pendingRef = useRef(false);
+
+  // O menu de contexto é um portal: dentro de um `<dialog>` (top layer) ele
+  // precisa nascer dentro do próprio diálogo, senão fica atrás dele e some.
+  const rootRef = useRef<HTMLElement>(null);
+  const [menuContainer, setMenuContainer] = useState<HTMLElement | undefined>(
+    undefined
+  );
+
+  useEffect(() => {
+    setMenuContainer(rootRef.current?.closest("dialog") ?? undefined);
+  }, []);
+
   const changeTags = useCallback(
     (update: (current: EditableTag[]) => EditableTag[]) => {
       const next = update(tagsRef.current);
@@ -101,13 +132,24 @@ export function NoteTags({
 
   const add = useCallback(
     async (name: string) => {
+      // Uma espera de cada vez: dois POSTs simultâneos trocariam o
+      // chip-fantasma no meio do voo, e o segundo terminaria sem sinal na
+      // tela. O fantasma visível já diz que está em curso.
+      if (pendingRef.current) return;
+      pendingRef.current = true;
+      setPendingName(name);
       try {
         const response = await fetch(`/api/notes/${noteId}/tags`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name }),
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          // O texto volta ao campo: uma falha silenciosa que também engole o
+          // que a pessoa digitou apagaria o trabalho dela sem avisar.
+          setValue(name);
+          return;
+        }
         const body = (await response.json()) as { tag: EditableTag };
         // A rota é idempotente (`onConflictDoNothing`): marcar de novo uma
         // tag que a nota já tem não duplica o chip.
@@ -122,7 +164,11 @@ export function NoteTags({
             : [body.tag, ...current]
         );
       } catch {
-        // A linha simplesmente não aparece; a nota em si nunca é afetada.
+        // A nota em si nunca é afetada; o texto volta para tentar de novo.
+        setValue(name);
+      } finally {
+        pendingRef.current = false;
+        setPendingName(null);
       }
     },
     [noteId, changeTags]
@@ -186,6 +232,17 @@ export function NoteTags({
 
   const closePanel = useCallback(() => setEditingId(null), []);
 
+  // Apagar a tag é da conta: ela sai da lista aqui, do vocabulário de
+  // sugestões, e o painel de edição fecha se era dela que estava aberto.
+  const deletion = useTagDeletion({
+    currentNoteId: noteId,
+    onDeleted: (tagId) => {
+      changeTags((current) => current.filter((tag) => tag.id !== tagId));
+      setKnown((current) => current.filter((tag) => tag.id !== tagId));
+      setEditingId((current) => (current === tagId ? null : current));
+    },
+  });
+
   // As sugestões: tags que a pessoa já usa e esta nota ainda não tem. Quem
   // começa pelo nome vem antes de quem só o contém.
   const query = normalize(value);
@@ -238,48 +295,89 @@ export function NoteTags({
       >
         Tags
       </dt>
-      <dd className={cn("min-w-0", tags.length === 0 && "print:hidden")}>
+      <dd ref={rootRef} className={cn("min-w-0", tags.length === 0 && "print:hidden")}>
         <div className="relative flex min-h-7 flex-wrap items-center gap-1.5">
           {tags.map((tag) => (
-            <span
+            <ContextMenu
               key={tag.id}
-              className={cn(
-                "group/tag inline-flex h-7 max-w-56 items-center rounded-md border border-border bg-background text-xs text-foreground transition-colors duration-150 hover:border-subtle-foreground/60 motion-reduce:transition-none pointer-coarse:h-9",
-                editingId === tag.id && "border-subtle-foreground"
-              )}
+              onOpenChange={(open) => {
+                if (open) deletion.prime(tag);
+              }}
             >
-              <button
-                type="button"
-                onClick={() =>
+              <ContextMenuTrigger asChild>
+                <span
+                  className={cn(
+                    "group/tag inline-flex h-7 max-w-56 items-center rounded-md border border-border bg-background text-xs text-foreground transition-colors duration-150 hover:border-subtle-foreground/60 motion-reduce:transition-none pointer-coarse:h-9",
+                    editingId === tag.id && "border-subtle-foreground",
+                    // Chip que acaba de chegar (a animação é de chegada) —
+                    // quem já estava aqui desde a abertura não pisca.
+                    !entryIds.has(tag.id) &&
+                      "animate-tag-in motion-reduce:animate-none"
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingId((current) =>
+                        current === tag.id ? null : tag.id
+                      )
+                    }
+                    aria-label={`Editar a tag ${tag.name}`}
+                    aria-expanded={editingId === tag.id}
+                    className="flex h-full min-w-0 items-center gap-1.5 rounded-md pr-0.5 pl-2 print:pr-2"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "size-2 shrink-0 rounded-full print:hidden",
+                        dotClass(tag)
+                      )}
+                    />
+                    <span className="truncate">{tag.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void remove(tag.id)}
+                    aria-label={`Tirar a tag ${tag.name}`}
+                    // Sempre à vista, mas apagado: um "×" que só nasce no hover
+                    // deixaria um vão vazio no chip o resto do tempo.
+                    className="mr-0.5 grid size-5 shrink-0 place-items-center rounded text-subtle-foreground/70 transition-colors duration-100 hover:bg-tertiary hover:text-foreground motion-reduce:transition-none pointer-coarse:size-8 print:hidden"
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                  </button>
+                </span>
+              </ContextMenuTrigger>
+
+              <TagMenuContent
+                tag={tag}
+                container={menuContainer}
+                onEdit={() =>
                   setEditingId((current) =>
                     current === tag.id ? null : tag.id
                   )
                 }
-                aria-label={`Editar a tag ${tag.name}`}
-                aria-expanded={editingId === tag.id}
-                className="flex h-full min-w-0 items-center gap-1.5 rounded-md pr-0.5 pl-2 print:pr-2"
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "size-2 shrink-0 rounded-full print:hidden",
-                    dotClass(tag)
-                  )}
-                />
-                <span className="truncate">{tag.name}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => void remove(tag.id)}
-                aria-label={`Tirar a tag ${tag.name}`}
-                // Sempre à vista, mas apagado: um "×" que só nasce no hover
-                // deixaria um vão vazio no chip o resto do tempo.
-                className="mr-0.5 grid size-5 shrink-0 place-items-center rounded text-subtle-foreground/70 transition-colors duration-100 hover:bg-tertiary hover:text-foreground motion-reduce:transition-none pointer-coarse:size-8 print:hidden"
-              >
-                <X className="size-3" aria-hidden="true" />
-              </button>
-            </span>
+                onDelete={() => deletion.request(tag)}
+              />
+            </ContextMenu>
           ))}
+
+          {/* O chip-fantasma: a espera do POST não-otimista, com o nome que
+              está voando. Ele ocupa o lugar do chip real para a linha não
+              engolir o gesto — sumir sem sinal depois de um clique seria
+              indistinguível de ter dado errado. */}
+          {pendingName !== null && (
+            <span
+              aria-busy="true"
+              className="inline-flex h-7 max-w-56 items-center gap-1.5 rounded-md border border-dashed border-subtle-foreground/60 px-2 text-xs text-subtle-foreground pointer-coarse:h-9 print:hidden"
+            >
+              <LoaderCircle
+                className="size-3 shrink-0 animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+              <span className="truncate">{pendingName}</span>
+              <span className="sr-only">Adicionando a tag…</span>
+            </span>
+          )}
 
           {/* Ancorado na linha, não no chip — mesmo motivo da lousa: o painel
           nunca fica mais largo que a coluna da nota. */}
@@ -408,6 +506,8 @@ export function NoteTags({
           )}
         </div>
       </dd>
+
+      {deletion.dialog}
     </>
   );
 }

@@ -266,6 +266,13 @@ a {
      piscar antes do primeiro quadro. */
   --animate-row-in: row-in 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-row-flash: row-flash 1.2s ease-out both;
+  /* Um chip de tag recém-adicionado a uma nota. O chip só nasce quando a
+     rota responde (editor) ou quando o otimista confirma (lousa), então o
+     gatilho é um evento real. Sem `both` de propósito: o quadro final é o
+     estado natural do chip, e reter `transform`/`opacity` promoveria o chip
+     a camada com contained block para sempre — ver a nota do
+     `dashboard-enter` acima. */
+  --animate-tag-in: tag-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   /* O dashboard abre como uma mesa que se organiza: cada bloco se revela em
      sequência curta, e os itens da lista acompanham o painel ao qual pertencem.
 
@@ -397,6 +404,20 @@ a {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Escala curta de quem chega ao lugar exato em que vai ficar. A miniatura
+   (0.86) lê como "acabou de ser criada" sem parecer um elemento diferente
+   do que permanece na lista. */
+@keyframes tag-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Sparkles, X } from "lucide-react";
+import { LoaderCircle, Plus, Sparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 
@@ -250,6 +250,13 @@ export function NoteWindowBody({
  * administração no meio da nota é o que faz `a-classificar` sobreviver para
  * sempre. O painel que abre mexe na **tag**, não na marcação: o nome e a cor
  * valem em todas as notas que a usam, e ele diz isso em voz alta.
+ *
+ * **O chip `pending:*` é a espera.** Adicionar aqui é otimista: o chip
+ * aparece na hora com um id temporário (`pending:<nome>`) enquanto o POST
+ * voa. Enquanto não confirma, ele fica com opacidade reduzida e um spinner,
+ * e sem editar nem tirar — os dois mandariam o id temporário para a API, que
+ * não é um UUID. Quando a resposta chega, o chip real troca o temporário e
+ * nasce com a animação de entrada (`animate-tag-in`), a mesma do editor.
  */
 function TagRow({
   tags,
@@ -268,6 +275,8 @@ function TagRow({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  // Quem já estava aqui na abertura não anima: a animação é de chegada.
+  const [entryIds] = useState(() => new Set(tags.map((tag) => tag.id)));
 
   useEffect(() => {
     if (adding) inputRef.current?.focus({ preventScroll: true });
@@ -289,16 +298,35 @@ function TagRow({
     // lerem como uma coisa só, com a moldura do campo passando rente à
     // etiqueta. O espaço é o que diz que são dois controles.
     <div className="relative flex flex-wrap items-center gap-1 px-3.5 pt-2 pb-1.5">
-      {tags.map((tag) => (
+      {tags.map((tag) => {
+        // O otimista ainda em voo — ver `addNoteTag` em use-board-windows.
+        const pending = tag.id.startsWith("pending:");
+        return (
         <span key={tag.id}>
           <span
+            aria-busy={pending || undefined}
             className={cn(
               "group/tag inline-flex max-w-[11rem] items-center gap-0.5 rounded-full py-0.5 pr-1 pl-1.5 text-[10px] font-medium",
-              storedChipClass(tag)
+              storedChipClass(tag),
+              pending && "opacity-70",
+              !entryIds.has(tag.id) &&
+                !pending &&
+                "animate-tag-in motion-reduce:animate-none"
             )}
           >
             {readOnly ? (
               <span className="truncate">#{tag.name}</span>
+            ) : pending ? (
+              // Sem botões enquanto não confirma: editar ou tirar mandaria o
+              // id temporário para a API, que espera um UUID.
+              <span className="flex min-w-0 items-center gap-1">
+                <LoaderCircle
+                  className="size-2.5 shrink-0 animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+                <span className="truncate">#{tag.name}</span>
+                <span className="sr-only">Salvando a tag…</span>
+              </span>
             ) : (
               <button
                 type="button"
@@ -313,7 +341,7 @@ function TagRow({
                 #{tag.name}
               </button>
             )}
-            {!readOnly && (
+            {!readOnly && !pending && (
               <button
                 type="button"
                 onPointerDown={(event) => event.stopPropagation()}
@@ -326,7 +354,8 @@ function TagRow({
             )}
           </span>
         </span>
-      ))}
+        );
+      })}
 
       {/* Ancorado na linha, não no chip: um chip na ponta direita de uma
           janela estreita abriria o painel para fora da moldura, que é

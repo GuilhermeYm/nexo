@@ -20,6 +20,7 @@ import {
   TagGraphNoteMenu,
   type GraphNoteMenuTarget,
 } from "./tag-graph-note-menu";
+import { TagGraphTagMenu, type GraphTagMenuTarget } from "./tag-menu";
 
 /**
  * A lib de força é pesada (d3 + canvas): só desce quando o modo grafo abre.
@@ -232,11 +233,14 @@ export function TagsGraph({
   links,
   onTagColorChange,
   onNoteTagsEdited,
+  onTagDeleted,
 }: TagGraph & {
   /** Avisa a tela quando uma cor grava de verdade, para a lista acompanhar. */
   onTagColorChange?: (tagId: string, color: string | null) => void;
   /** As tags de uma nota podem ter mudado pelo menu: o grafo precisa se refazer. */
   onNoteTagsEdited?: () => void;
+  /** A tag foi apagada da conta: nó e arestas somem, a lista acompanha. */
+  onTagDeleted?: (tagId: string) => void;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -255,6 +259,7 @@ export function TagsGraph({
   const [saveError, setSaveError] = useState(false);
   const [zoomK, setZoomK] = useState(1);
   const [noteMenu, setNoteMenu] = useState<GraphNoteMenuTarget | null>(null);
+  const [tagMenu, setTagMenu] = useState<GraphTagMenuTarget | null>(null);
   const [notice, setNotice] = useState<{
     message: string;
     tone: "info" | "error";
@@ -648,13 +653,30 @@ export function TagsGraph({
   );
 
   /**
-   * Botão direito numa nota abre o menu dela. As tags saem das arestas que o
-   * grafo já tem — a rota do grafo traz todas as ligações das notas
-   * carregadas, então não há o que buscar.
+   * Botão direito numa nota abre o menu dela; numa tag, o menu da tag. As
+   * tags do menu da nota saem das arestas que o grafo já tem — a rota do
+   * grafo traz todas as ligações das notas carregadas, então não há o que
+   * buscar. Os dois menus se excluem: um alvo novo fecha o outro.
    */
   const handleNodeRightClick = useCallback(
     (node: GraphNode, event: MouseEvent) => {
-      if (node.kind !== "note" || typeof node.id !== "string") return;
+      if (typeof node.id !== "string") return;
+
+      if (node.kind === "tag") {
+        setNoteMenu(null);
+        // O editor de cor fica para o menu: abrir os dois em cima do mesmo
+        // nó só dividiria a atenção.
+        setSelectedTag(null);
+        setTagMenu({
+          id: node.id,
+          name: node.name,
+          color: node.color,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+        return;
+      }
+
       const noteId = node.id;
       const tagIds = new Set<string>();
       for (const link of graphLinks) {
@@ -665,6 +687,7 @@ export function TagsGraph({
         if (sourceId === noteId) tagIds.add(targetId);
       }
       setSelectedTag(null);
+      setTagMenu(null);
       setNoteMenu({
         id: noteId,
         title: node.name,
@@ -896,6 +919,24 @@ export function TagsGraph({
         vocabulary={vocabulary}
         onTagsDialogClose={() => onNoteTagsEdited?.()}
         onNotice={(message, tone) => setNotice({ message, tone })}
+      />
+
+      <TagGraphTagMenu
+        target={tagMenu}
+        onEditColor={(tag) => {
+          setSelectedTag(tag);
+          setSaveError(false);
+        }}
+        onDeleted={(tagId) => {
+          const name = tagMenu?.id === tagId ? `“${tagMenu.name}”` : null;
+          onTagDeleted?.(tagId);
+          setNotice({
+            message: name
+              ? `A tag ${name} foi apagada — saiu de todas as notas que a usavam.`
+              : "A tag foi apagada — saiu de todas as notas que a usavam.",
+            tone: "info",
+          });
+        }}
       />
     </div>
   );

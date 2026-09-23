@@ -57,8 +57,14 @@ export function DeleteTagsChoice({
     <div className="mt-3 overflow-hidden rounded-xl border border-border">
       <label
         className={cn(
-          "flex items-start gap-3 px-3.5 py-3 text-sm text-foreground transition-colors",
-          impact?.tags.length ? "cursor-pointer hover:bg-secondary/60" : "cursor-default"
+          "flex items-start gap-3 px-3.5 py-3 text-sm transition-[color,background-color,opacity]",
+          // Sem tags não há o que escolher: o visual desligado espelha o
+          // input de arquivos logo acima (`useNoteDeletion`), que é o outro
+          // checkbox do mesmo diálogo. Mesmo tratamento nas outras portas —
+          // o componente é só um.
+          impact?.tags.length
+            ? "cursor-pointer text-foreground hover:bg-secondary/60"
+            : "cursor-default text-muted-foreground opacity-70"
         )}
       >
         <input
