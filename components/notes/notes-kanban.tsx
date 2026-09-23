@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { NoteContextMenu, useNoteDeletion, type NoteMenuTarget } from "@/components/dashboard/note-context-menu";
 import type { EditableTag } from "@/components/editor/note-tags";
+import { SelectionMark } from "@/components/notes/selection-mark";
 import { NOTE_TYPE_LABEL, NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { formatRelative } from "@/lib/dashboard/format";
 import type { FolderItem } from "@/lib/folders/types";
@@ -39,6 +40,9 @@ export function NotesKanbanBoard({
   folders,
   now,
   onOpenNote,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
   onMoveNote,
   onCreateFolder,
   onDeleteRequest,
@@ -52,6 +56,10 @@ export function NotesKanbanBoard({
   folders: FolderItem[];
   now: number;
   onOpenNote: (noteId: string) => void;
+  /** Modo "Apagar": o card marca a nota em vez de abrir a prévia, e não arrasta. */
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (noteId: string) => void;
   onMoveNote: (noteId: string, folderId: string | null) => void;
   onCreateFolder: () => void;
   onDeleteRequest: ReturnType<typeof useNoteDeletion>["request"];
@@ -136,6 +144,8 @@ export function NotesKanbanBoard({
               ) : (
                 column.notes.map((note) => {
                   const isMoving = movingNoteId === note.id;
+                  const checked = selectionMode && selectedIds.has(note.id);
+                  const activate = () => (selectionMode ? onToggleSelect(note.id) : onOpenNote(note.id));
                   return (
                   <NoteContextMenu
                     key={note.id}
@@ -155,7 +165,7 @@ export function NotesKanbanBoard({
                   >
                     <li>
                       <article
-                        draggable={!isMoving}
+                        draggable={!isMoving && !selectionMode}
                         aria-busy={isMoving}
                         onDragStart={(event) => {
                           event.dataTransfer.setData("text/plain", note.id);
@@ -166,18 +176,21 @@ export function NotesKanbanBoard({
                           setDraggingId(null);
                           setOverColumn(null);
                         }}
-                        onClick={() => onOpenNote(note.id)}
+                        onClick={activate}
                         role="button"
+                        aria-pressed={selectionMode ? checked : undefined}
                         tabIndex={0}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            onOpenNote(note.id);
+                            activate();
                           }
                         }}
                         title={note.title || "Sem título"}
                         className={cn(
-                          "cursor-grab rounded-xl border border-border bg-background p-3 text-left shadow-sm transition-[opacity,border-color] duration-150 active:cursor-grabbing hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                          "rounded-xl border bg-background p-3 text-left shadow-sm transition-[opacity,border-color,background-color] duration-150 hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                          selectionMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
+                          checked ? "border-error/60 bg-error/5 hover:border-error/60" : "border-border",
                           // Em voo o card fica esmaecido e com o giro no lugar do
                           // ícone de tipo; o drop não é otimista — ele só troca de
                           // coluna quando o servidor confirma (ver `noteMoved`).
@@ -203,6 +216,7 @@ export function NotesKanbanBoard({
                           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                             {note.title || "Sem título"}
                           </span>
+                          {selectionMode && <SelectionMark checked={checked} />}
                         </div>
 
                         <div className="mt-2 flex flex-wrap items-center gap-1">
