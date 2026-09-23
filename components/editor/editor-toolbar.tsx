@@ -75,7 +75,10 @@ export function EditorToolbar({
         className
       )}
     >
-      <div className="mx-auto flex w-full max-w-2xl items-center gap-0.5 overflow-x-auto">
+      {/* O `relative` segura os `sr-only` dos botões (absolutos) dentro da
+          rolagem. Sem ele, escapavam para o documento e o alargavam: no
+          celular, `innerWidth` 882 numa tela de 360. */}
+      <div className="relative mx-auto flex w-full max-w-2xl items-center gap-0.5 overflow-x-auto">
         {editor && (
           <>
             <FontPicker font={font} onChange={onFontChange} />
