@@ -256,12 +256,21 @@ export async function listOwnedNotes(
   }
 
   const where = and(...conditions)!;
-  const orderBy =
+  const sortKeys =
     options.sort === "created"
       ? [desc(notes.createdAt), desc(notes.id)]
       : options.sort === "title"
         ? [asc(notes.title), desc(notes.updatedAt)]
         : [desc(notes.updatedAt), desc(notes.id)];
+  // Na visão de todas as pastas, a lista sai agrupada: pastas pelo nome, no
+  // mesmo critério do trilho (`listFolders`), e as notas sem pasta no fim.
+  // O índice único em `lower(btrim(name))` impede duas pastas com o mesmo
+  // `lower(name)`, então cada grupo fica contíguo. Com uma pasta (ou "sem
+  // pasta") no filtro, todas caem no mesmo grupo e as chaves não mudariam nada.
+  const orderBy =
+    !options.folder || options.folder === "all"
+      ? [sql`${noteFolders.folderId} is null`, asc(sql`lower(${folders.name})`), ...sortKeys]
+      : sortKeys;
 
   const [rows, [totalRow]] = await Promise.all([
     db
