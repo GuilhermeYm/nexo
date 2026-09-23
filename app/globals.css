@@ -16,6 +16,7 @@
      valor anterior (#9b9080) reprovava nas três. É também a cor das linhas
      do canvas (ondas e mapa), que antes sumiam no tema claro. */
   --nx-text-tertiary: #74695a;
+  --nx-text-hint: #a79e91;
   --nx-border: #e8e2d9;
   --nx-accent: #3d3b36;
   --nx-accent-text: #fdfbf7;
@@ -65,6 +66,7 @@
   --color-tertiary: var(--nx-bg-tertiary);
   --color-muted-foreground: var(--nx-text-secondary);
   --color-subtle-foreground: var(--nx-text-tertiary);
+  --color-hint-foreground: var(--nx-text-hint);
   --color-border: var(--nx-border);
   --color-accent: var(--nx-accent);
   --color-accent-foreground: var(--nx-accent-text);
@@ -100,6 +102,7 @@
   --nx-text-secondary: #a0a0a8;
   /* Mesma correção de contraste do tema claro, na direção oposta. */
   --nx-text-tertiary: #8c8c93;
+  --nx-text-hint: #626269;
   --nx-border: #2a2a2e;
   --nx-accent: #eaeaea;
   --nx-accent-text: #0f0f11;

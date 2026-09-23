@@ -212,7 +212,14 @@ export function Sidebar({
         </div>
 
         {/* Navegação */}
-        <nav className="mt-2 px-3">
+        <nav aria-label="Páginas" className="mt-2 px-3">
+          {labelsVisible && (
+            <div className="mb-1 flex h-4 items-center justify-end pr-2">
+              <span className="text-[10px] leading-none text-hint-foreground" aria-label="Atalho: Alt mais N">
+                Alt+N
+              </span>
+            </div>
+          )}
           <ul className="flex flex-col gap-0.5">
             {DASHBOARD_NAV_ITEMS.map((item) => (
               <li key={item.href}>
@@ -291,6 +298,9 @@ export function Sidebar({
                     <SideLabel open>
                       <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
                         Workspaces
+                      </span>
+                      <span className="ml-2 text-[10px] text-hint-foreground" aria-label="Atalho: Alt mais W">
+                        Alt+W
                       </span>
                     </SideLabel>
                   )}

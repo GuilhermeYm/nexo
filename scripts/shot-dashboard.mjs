@@ -404,8 +404,7 @@ async function main() {
       } catch {}
       document.documentElement.setAttribute("data-theme", "light");
     });
-    await page.click('input[type="search"]');
-    await page.fill('input[type="search"]', "reunião");
+    await page.locator('input[type="search"]:visible').first().fill("reunião");
     await page.waitForTimeout(3000);
     await page.screenshot({ path: `${OUT}/search-light.png` });
 
@@ -426,6 +425,15 @@ async function main() {
     await mobilePage.click('button[aria-label*="navegação"]');
     await mobilePage.waitForTimeout(700);
     await mobilePage.screenshot({ path: `${OUT}/mobile-drawer.png` });
+    await mobilePage.evaluate(() => {
+      localStorage.setItem("nexo-theme", "dark");
+      document.documentElement.setAttribute("data-theme", "dark");
+    });
+    await mobilePage.waitForTimeout(400);
+    await mobilePage.screenshot({ path: `${OUT}/mobile-drawer-dark.png` });
+    await mobilePage.keyboard.press("Escape");
+    await mobilePage.waitForTimeout(250);
+    await mobilePage.screenshot({ path: `${OUT}/mobile-dark.png`, fullPage: true });
 
     console.log(
       problems.length ? `\nProblemas:\n  ${[...new Set(problems)].join("\n  ")}` : "\nNenhum erro de console."
