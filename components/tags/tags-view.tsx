@@ -51,6 +51,40 @@ const SEARCH_DEBOUNCE_MS = 220;
  * `color` nasce nulo e só as tags criadas na lousa o preenchem.
  */
 
+type TagsViewMode = "list" | "graph";
+
+/**
+ * A tag aberta e o modo moram na URL (`?tag=<id>`, `?modo=grafo`).
+ *
+ * Sem isso o "Voltar" do navegador saía da página em vez de fechar a tag,
+ * voltar de uma nota perdia a tag que estava aberta, e não havia como
+ * guardar ou mandar o link de uma tag. O `pushState` nativo se integra ao
+ * roteador do Next (a página não recarrega nem refaz o fetch); o caminho de
+ * volta é o `popstate`, que o componente escuta para reler a URL.
+ *
+ * Abrir, fechar e trocar de modo **empilham** uma entrada — cada um é um
+ * lugar para onde o "Voltar" deve levar. Digitar na busca **substitui**:
+ * cada letra não vira um degrau no histórico.
+ */
+function writeTagsUrl(
+  tagId: string | null,
+  view: TagsViewMode,
+  mode: "push" | "replace"
+) {
+  const params = new URLSearchParams(window.location.search);
+  if (tagId) params.set("tag", tagId);
+  else params.delete("tag");
+  if (view === "graph") params.set("modo", "grafo");
+  else params.delete("modo");
+
+  const search = params.toString();
+  const url = `${window.location.pathname}${search ? `?${search}` : ""}`;
+  if (url === `${window.location.pathname}${window.location.search}`) return;
+
+  if (mode === "push") window.history.pushState(null, "", url);
+  else window.history.replaceState(null, "", url);
+}
+
 /** Busca de tag sem tropeçar em acento: "pesquisa" encontra "pesquisa" e "Pesquisa". */
 function fold(text: string): string {
   return text
@@ -63,10 +97,12 @@ export function TagsView({
   tags,
   renderedAt,
   initialTagId = null,
+  initialView = "list",
 }: {
   tags: TagWithUsage[];
   renderedAt: number;
   initialTagId?: string | null;
+  initialView?: TagsViewMode;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -139,6 +175,7 @@ export function TagsView({
           }
         : current
     );
+    if (selectedId === tagId) writeTagsUrl(null, view, "replace");
     setSelectedId((current) => (current === tagId ? null : current));
     setTagNotes((current) => (current?.tagId === tagId ? null : current));
   }
@@ -192,7 +229,24 @@ export function TagsView({
     tags.some((tag) => tag.id === initialTagId) ? initialTagId : null
   );
   const selected = allTags.find((tag) => tag.id === selectedId) ?? null;
-  const [view, setView] = useState<"list" | "graph">("list");
+  const [view, setView] = useState<TagsViewMode>(initialView);
+
+  // "Voltar" e "Avançar" do navegador: a URL já mudou, o estado acompanha.
+  useEffect(() => {
+    function syncFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const tagId = params.get("tag");
+      setSelectedId(
+        tagId && allTags.some((tag) => tag.id === tagId) ? tagId : null
+      );
+      setView(params.get("modo") === "grafo" ? "graph" : "list");
+      setRenameTagId(null);
+      setQuery("");
+    }
+
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, [allTags]);
   const [graphData, setGraphData] = useState<TagGraph | "error" | null>(null);
 
   // O resultado carrega a busca que o originou (mesmo padrão da barra de
@@ -329,6 +383,7 @@ export function TagsView({
     setSelectedId(tag.id);
     setRenameTagId(null);
     setQuery("");
+    writeTagsUrl(tag.id, view, "push");
   }
 
   function requestRename(tag: TagWithUsage) {
@@ -375,7 +430,11 @@ export function TagsView({
             )}
             <button
               type="button"
-              onClick={() => setView(view === "list" ? "graph" : "list")}
+              onClick={() => {
+                const next = view === "list" ? "graph" : "list";
+                setView(next);
+                writeTagsUrl(selectedId, next, "push");
+              }}
               className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
             >
               {view === "list" ? (
@@ -418,7 +477,10 @@ export function TagsView({
                 setQuery(event.target.value);
                 // Digitar é um voto de saída da tag aberta: a pessoa foi
                 // procurar outra coisa.
-                if (selectedId) setSelectedId(null);
+                if (selectedId) {
+                  setSelectedId(null);
+                  writeTagsUrl(null, view, "replace");
+                }
               }}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -492,7 +554,10 @@ export function TagsView({
                 notes={currentTagNotes}
                 now={now}
                 startRenaming={renameTagId === selected.id}
-                onClear={() => setSelectedId(null)}
+                onClear={() => {
+                  setSelectedId(null);
+                  writeTagsUrl(null, view, "push");
+                }}
                 onUpdated={handleTagUpdated}
                 onDelete={() => deletion.request(selected)}
                 onOpenNote={openNote}

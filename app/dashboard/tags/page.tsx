@@ -20,8 +20,10 @@ export default async function TagsPage({
   if (!user) redirect("/login");
 
   const tags = await listTagsWithUsage(user.id);
-  const { tag } = await searchParams;
+  const { tag, modo } = await searchParams;
   const initialTagId = typeof tag === "string" ? tag : null;
+  // A tag aberta e o modo voltam pela URL — ver `writeTagsUrl` na view.
+  const initialView = modo === "grafo" ? "graph" : "list";
 
   // Mesmo padrão do dashboard: este instante pinta o primeiro estado nos
   // dois lados (servidor e hidratação); depois o relógio do cliente assume.
@@ -33,6 +35,7 @@ export default async function TagsPage({
       tags={tags}
       renderedAt={renderedAt}
       initialTagId={initialTagId}
+      initialView={initialView}
     />
   );
 }
