@@ -240,48 +240,56 @@ export function Sidebar({
             escolhido, em ícones. */}
         <div className="mt-6 flex min-h-0 flex-1 flex-col px-3">
           {labelsVisible && (
-            <div
-              role="group"
-              aria-label="Mostrar na barra lateral"
-              className="mb-3 flex gap-0.5 self-end rounded-lg bg-tertiary/70 p-0.5"
-            >
-              {VIEW_TOGGLES.map((toggle) => {
-                const on = view !== toggle.off;
-                const Icon = toggle.icon;
-                return (
-                  <button
-                    key={toggle.key}
-                    type="button"
-                    aria-pressed={on}
-                    title={toggle.label}
-                    onClick={() => chooseView(on ? toggle.off : "both")}
-                    className={cn(
-                      "relative isolate flex size-7 items-center justify-center rounded-md transition-[color,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 active:scale-90 motion-reduce:transition-none motion-reduce:active:scale-100 pointer-coarse:size-9",
-                      on ? "text-foreground" : "text-subtle-foreground hover:text-foreground"
-                    )}
-                  >
-                    {/* A pastilha é uma camada própria, não o fundo do botão:
-                        cor de fundo não interpola bem a partir do transparente,
-                        e uma camada dá para crescer e sumir de verdade. */}
-                    <span
-                      aria-hidden="true"
+            <div className="mb-3 flex items-center justify-end gap-2">
+              <span
+                className="text-[10px] text-hint-foreground"
+                aria-label="Atalho: Alt mais W"
+              >
+                Alt+W
+              </span>
+              <div
+                role="group"
+                aria-label="Mostrar na barra lateral"
+                className="flex gap-0.5 rounded-lg bg-tertiary/70 p-0.5"
+              >
+                {VIEW_TOGGLES.map((toggle) => {
+                  const on = view !== toggle.off;
+                  const Icon = toggle.icon;
+                  return (
+                    <button
+                      key={toggle.key}
+                      type="button"
+                      aria-pressed={on}
+                      title={toggle.label}
+                      onClick={() => chooseView(on ? toggle.off : "both")}
                       className={cn(
-                        "absolute inset-0 -z-10 rounded-md bg-background shadow-sm",
-                        "transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
-                        on ? "scale-100 opacity-100" : "scale-75 opacity-0"
+                        "relative isolate flex size-7 items-center justify-center rounded-md transition-[color,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 active:scale-90 motion-reduce:transition-none motion-reduce:active:scale-100 pointer-coarse:size-9",
+                        on ? "text-foreground" : "text-subtle-foreground hover:text-foreground"
                       )}
-                    />
-                    <Icon
-                      className={cn(
-                        "size-4 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
-                        on ? "scale-100" : "scale-90"
-                      )}
-                      aria-hidden="true"
-                    />
-                    <span className="sr-only">{toggle.label}</span>
-                  </button>
-                );
-              })}
+                    >
+                      {/* A pastilha é uma camada própria, não o fundo do botão:
+                          cor de fundo não interpola bem a partir do transparente,
+                          e uma camada dá para crescer e sumir de verdade. */}
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "absolute inset-0 -z-10 rounded-md bg-background shadow-sm",
+                          "transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                          on ? "scale-100 opacity-100" : "scale-75 opacity-0"
+                        )}
+                      />
+                      <Icon
+                        className={cn(
+                          "size-4 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                          on ? "scale-100" : "scale-90"
+                        )}
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">{toggle.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -299,9 +307,6 @@ export function Sidebar({
                       <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
                         Workspaces
                       </span>
-                      <span className="ml-2 text-[10px] text-hint-foreground" aria-label="Atalho: Alt mais W">
-                        Alt+W
-                      </span>
                     </SideLabel>
                   )}
                   <button
@@ -316,21 +321,35 @@ export function Sidebar({
                 </div>
 
                 <ul className="mt-1.5 flex flex-col gap-0.5">
-                  {workspaces.map((workspace) => (
-                    <WorkspaceRow
-                      key={workspace.id}
-                      workspace={workspace}
-                      isActive={workspace.id === activeWorkspaceId}
-                      labelsVisible={labelsVisible}
-                      // Zero workspaces é um estado sem tela: a rota recusa, e a
-                      // interface diz isso antes de a pessoa tentar.
-                      canDelete={workspaces.length > 1}
-                      onCloseDrawer={onCloseDrawer}
-                      onOpen={() => onOpenWorkspace(workspace.id)}
-                      onRename={(name) => onRenameWorkspace(workspace, name)}
-                      onDelete={() => onDeleteWorkspace(workspace)}
-                    />
-                  ))}
+                  {workspaces.length === 0 ? (
+                    [0, 1, 2].map((row) => (
+                      <li key={row} className="flex h-9 items-center gap-3 px-[9px]">
+                        <span className="size-4 shrink-0 rounded bg-tertiary" />
+                        {labelsVisible && (
+                          <span
+                            className="h-3 animate-pulse rounded bg-tertiary motion-reduce:animate-none"
+                            style={{ width: `${62 - row * 14}%` }}
+                          />
+                        )}
+                      </li>
+                    ))
+                  ) : (
+                    workspaces.map((workspace) => (
+                      <WorkspaceRow
+                        key={workspace.id}
+                        workspace={workspace}
+                        isActive={workspace.id === activeWorkspaceId}
+                        labelsVisible={labelsVisible}
+                        // Zero workspaces é um estado sem tela: a rota recusa, e a
+                        // interface diz isso antes de a pessoa tentar.
+                        canDelete={workspaces.length > 1}
+                        onCloseDrawer={onCloseDrawer}
+                        onOpen={() => onOpenWorkspace(workspace.id)}
+                        onRename={(name) => onRenameWorkspace(workspace, name)}
+                        onDelete={() => onDeleteWorkspace(workspace)}
+                      />
+                    ))
+                  )}
                 </ul>
               </section>
             )}

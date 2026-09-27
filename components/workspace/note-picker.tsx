@@ -48,6 +48,7 @@ interface NotePickerProps {
   onClose: () => void;
   onPick: (note: OpenableNote) => void;
   onPickAttachment: (attachment: OpenableAttachment) => void;
+  onSelectionModeChange?: (active: boolean) => void;
 }
 
 /**
@@ -67,6 +68,7 @@ export const NotePicker = memo(function NotePicker({
   onClose,
   onPick,
   onPickAttachment,
+  onSelectionModeChange,
 }: NotePickerProps) {
   const [tab, setTab] = useState<Tab>("notes");
   const [query, setQuery] = useState("");
@@ -93,6 +95,12 @@ export const NotePicker = memo(function NotePicker({
   );
   const searchRef = useRef<HTMLInputElement>(null);
   const inFlight = useRef<AbortController | null>(null);
+
+  // Comunica o modo de seleção ao board — ele bloqueia a inserção de notas
+  // enquanto a pessoa está selecionando para apagar.
+  useEffect(() => {
+    onSelectionModeChange?.(selectionMode);
+  }, [selectionMode, onSelectionModeChange]);
 
   useEffect(() => {
     // `preventScroll` porque o campo ainda está fora da tela quando isto

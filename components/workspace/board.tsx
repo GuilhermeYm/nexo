@@ -201,6 +201,10 @@ export function Board({
   const [focusedId, setFocusedId] = useState<string | null>(focusWindowId);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Quando o NotePicker está em modo de seleção (para exclusão), não permite
+  // inserir notas na lousa — a pessoa está selecionando para apagar, não para
+  // adicionar.
+  const [pickerSelectionMode, setPickerSelectionMode] = useState(false);
   const [notePendingDelete, setNotePendingDelete] = useState<string | null>(
     null
   );
@@ -1549,10 +1553,13 @@ export function Board({
 
   const handlePick = useCallback(
     (note: OpenableNote) => {
+      // No modo de seleção (exclusão), clicar numa nota a seleciona para
+      // apagar — não a insere na lousa.
+      if (pickerSelectionMode) return;
       setPickerOpen(false);
       spawn({ kind: "note", noteId: note.id });
     },
-    [spawn]
+    [spawn, pickerSelectionMode]
   );
 
   const handlePickAttachment = useCallback(
@@ -2648,6 +2655,7 @@ export function Board({
           onClose={closePicker}
           onPick={handlePick}
           onPickAttachment={handlePickAttachment}
+          onSelectionModeChange={setPickerSelectionMode}
         />
         <ConfirmDialog
           open={notePendingDelete !== null}
