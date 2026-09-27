@@ -23,7 +23,8 @@ export default async function TagsPage({
   const { tag, modo } = await searchParams;
   const initialTagId = typeof tag === "string" ? tag : null;
   // A tag aberta e o modo voltam pela URL — ver `writeTagsUrl` na view.
-  const initialView = modo === "grafo" ? "graph" : "list";
+  const initialView =
+    modo === "grafo" ? "graph" : modo === "sem-notas" ? "orphans" : "list";
 
   // Mesmo padrão do dashboard: este instante pinta o primeiro estado nos
   // dois lados (servidor e hidratação); depois o relógio do cliente assume.

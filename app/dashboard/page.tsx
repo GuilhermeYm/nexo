@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { profiles, workspaces } from "@/lib/db/schema";
 import { countUnreadNotifications } from "@/lib/inbox/queries";
 import { createClient } from "@/lib/supabase/server";
+import { notifyOrphanTags } from "@/lib/tags/orphans";
 
 export const metadata = {
   title: "Dashboard — Nexo",
@@ -59,6 +60,12 @@ export default async function DashboardPage({
   const ownerId = user.id;
   after(async function sweepNotesAfterRender() {
     await sweepPendingNotes(ownerId);
+  });
+
+  // Tags que nenhuma nota usa mais saem da página de Tags; o aviso na Entrada
+  // é como a pessoa fica sabendo (no máximo um não lido por vez).
+  after(async function noticeOrphanTags() {
+    await notifyOrphanTags(ownerId);
   });
 
   const { tarefa } = await searchParams;

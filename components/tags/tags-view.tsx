@@ -9,14 +9,16 @@ import {
   MoreHorizontal,
   Search,
   Tags as TagsIcon,
+  Trash2,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { RowSkeleton } from "@/components/dashboard/panel";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ErrorReport } from "@/components/errors/error-report";
 import { Input } from "@/components/ui/input";
@@ -33,7 +35,7 @@ import {
   tagTone,
 } from "@/lib/tags/palette";
 import type { TagWithUsage, TagGraph } from "@/lib/tags/queries";
-import { cn } from "@/lib/utils";
+import { cn, foldText } from "@/lib/utils";
 import { SelectedTagHeader, type TagPatch } from "./tag-header";
 import { TagMenuContent, useTagDeletion } from "./tag-menu";
 import { TagsGraph } from "./tags-graph";
@@ -53,10 +55,22 @@ const SEARCH_DEBOUNCE_MS = 220;
  * `color` nasce nulo e só as tags criadas na lousa o preenchem.
  */
 
-type TagsViewMode = "list" | "graph";
+type TagsViewMode = "list" | "graph" | "orphans";
+
+/** Como cada modo aparece em `?modo=` — a lista é o padrão e não aparece. */
+const MODE_PARAM: Record<TagsViewMode, string | null> = {
+  list: null,
+  graph: "grafo",
+  orphans: "sem-notas",
+};
+
+function modeFromParam(param: string | null): TagsViewMode {
+  return param === "grafo" ? "graph" : param === "sem-notas" ? "orphans" : "list";
+}
 
 /**
- * A tag aberta e o modo moram na URL (`?tag=<id>`, `?modo=grafo`).
+ * A tag aberta e o modo moram na URL (`?tag=<id>`, `?modo=grafo`,
+ * `?modo=sem-notas`).
  *
  * Sem isso o "Voltar" do navegador saía da página em vez de fechar a tag,
  * voltar de uma nota perdia a tag que estava aberta, e não havia como
@@ -76,7 +90,8 @@ function writeTagsUrl(
   const params = new URLSearchParams(window.location.search);
   if (tagId) params.set("tag", tagId);
   else params.delete("tag");
-  if (view === "graph") params.set("modo", "grafo");
+  const modeParam = MODE_PARAM[view];
+  if (modeParam) params.set("modo", modeParam);
   else params.delete("modo");
 
   const search = params.toString();
@@ -105,14 +120,6 @@ const OFFLINE: ApiFailure = {
   message: "Sem conexão com o servidor. Confira a internet e tente de novo.",
   code: null,
 };
-
-/** Busca de tag sem tropeçar em acento: "pesquisa" encontra "pesquisa" e "Pesquisa". */
-function fold(text: string): string {
-  return text
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-}
 
 export function TagsView({
   tags,
@@ -264,7 +271,7 @@ export function TagsView({
       setSelectedId(
         tagId && allTags.some((tag) => tag.id === tagId) ? tagId : null
       );
-      setView(params.get("modo") === "grafo" ? "graph" : "list");
+      setView(modeFromParam(params.get("modo")));
       setRenameTagId(null);
       setQuery("");
     }
@@ -415,12 +422,34 @@ export function TagsView({
   /* --- Estado derivado --------------------------------------------------- */
 
   const trimmedQuery = query.trim();
-  const foldedQuery = fold(trimmedQuery);
+  const foldedQuery = foldText(trimmedQuery);
   // Filtrar tag no cliente custa nada — a lista já está aqui — e é o que
   // torna as tags antigas alcançáveis sem poluir a tela de descanso.
   const matchedTags = foldedQuery
-    ? allTags.filter((tag) => fold(tag.name).includes(foldedQuery))
+    ? allTags.filter((tag) => foldText(tag.name).includes(foldedQuery))
     : [];
+
+  // Tags sem notas ficam fora da lista e do grafo por padrão — elas não levam
+  // a nada. A busca (`matchedTags`, acima) continua achando todas, e o modo
+  // "sem notas" é onde a pessoa as revisa. Ver `lib/tags/orphans.ts`.
+  const activeTags = allTags.filter((tag) => tag.noteCount > 0);
+  const orphanTags = allTags.filter((tag) => tag.noteCount === 0);
+  const orphanKey = orphanTags.map((tag) => tag.id).join(",");
+
+  // O grafo compara as props por identidade para decidir se refaz o arranjo:
+  // o filtro só gera um objeto novo quando os dados ou as órfãs mudam.
+  const visibleGraph = useMemo(() => {
+    if (!graphData || "failure" in graphData || !orphanKey) return graphData;
+    const orphans = new Set(orphanKey.split(","));
+    return {
+      ...graphData,
+      tags: graphData.tags.filter((tag) => !orphans.has(tag.id)),
+      // A contagem da lista é da carga da página; o grafo veio depois. Uma
+      // tag que ganhou nota nesse meio-tempo ainda conta como órfã aqui, e
+      // uma aresta para um nó que não está no grafo derruba a simulação.
+      links: graphData.links.filter((link) => !orphans.has(link.target)),
+    };
+  }, [graphData, orphanKey]);
 
   const currentSearch =
     searchResults?.query === trimmedQuery ? searchResults : null;
@@ -444,6 +473,35 @@ export function TagsView({
     setRenameTagId(null);
     setQuery("");
     writeTagsUrl(tag.id, view, "push");
+  }
+
+  function changeView(next: TagsViewMode) {
+    setView(next);
+    writeTagsUrl(selectedId, next, "push");
+  }
+
+  /** Do grafo para a lista, já com a tag aberta — um passo só no histórico. */
+  function openTagFromGraph(tagId: string) {
+    if (!allTags.some((tag) => tag.id === tagId)) return;
+    setView("list");
+    setSelectedId(tagId);
+    setRenameTagId(null);
+    setQuery("");
+    writeTagsUrl(tagId, "list", "push");
+  }
+
+  function handleOrphansPruned(deletedIds: string[], requested: number) {
+    for (const tagId of deletedIds) handleTagDeleted(tagId);
+    const kept = requested - deletedIds.length;
+    const removed =
+      deletedIds.length === 1
+        ? "1 tag sem notas foi apagada."
+        : `${deletedIds.length} tags sem notas foram apagadas.`;
+    setNotice(
+      kept > 0
+        ? `${removed} ${kept === 1 ? "Uma ganhou nota" : `${kept} ganharam notas`} nesse meio-tempo e ficou.`
+        : removed
+    );
   }
 
   function requestRename(tag: TagWithUsage) {
@@ -490,22 +548,18 @@ export function TagsView({
             )}
             <button
               type="button"
-              onClick={() => {
-                const next = view === "list" ? "graph" : "list";
-                setView(next);
-                writeTagsUrl(selectedId, next, "push");
-              }}
+              onClick={() => changeView(view === "graph" ? "list" : "graph")}
               className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
             >
-              {view === "list" ? (
-                <>
-                  <GitFork className="size-4" aria-hidden="true" />
-                  Ver como grafo
-                </>
-              ) : (
+              {view === "graph" ? (
                 <>
                   <List className="size-4" aria-hidden="true" />
                   Voltar para lista
+                </>
+              ) : (
+                <>
+                  <GitFork className="size-4" aria-hidden="true" />
+                  Ver como grafo
                 </>
               )}
             </button>
@@ -573,18 +627,20 @@ export function TagsView({
           <div className="mt-10">
             {view === "graph" ? (
               <div className="space-y-3">
-                {graphData && "failure" in graphData ? (
+                {visibleGraph && "failure" in visibleGraph ? (
                   <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">
                     <LoadFailure
-                      failure={graphData.failure}
+                      failure={visibleGraph.failure}
                       route="/api/tags/graph"
                       // Zerar o grafo é o que o efeito entende como "busque".
                       onRetry={() => setGraphData(null)}
                     />
                   </div>
-                ) : graphData ? (
+                ) : visibleGraph ? (
                   <TagsGraph
-                    {...graphData}
+                    {...visibleGraph}
+                    searchQuery={trimmedQuery}
+                    onOpenTag={openTagFromGraph}
                     onTagColorChange={(tagId, color) =>
                       handleTagUpdated(tagId, { color })
                     }
@@ -628,9 +684,19 @@ export function TagsView({
                 onMissing={() => handleTagDeleted(selected.id)}
                 onOpenNote={openNote}
               />
+            ) : view === "orphans" ? (
+              <OrphanTags
+                tags={orphanTags}
+                onBack={() => changeView("list")}
+                onSelectTag={selectTag}
+                cardActions={cardActions}
+                onPruned={handleOrphansPruned}
+              />
             ) : (
               <RecentTags
-                tags={allTags}
+                tags={activeTags}
+                orphanCount={orphanTags.length}
+                onShowOrphans={() => changeView("orphans")}
                 onSelectTag={selectTag}
                 cardActions={cardActions}
               />
@@ -666,13 +732,61 @@ export function TagsView({
  */
 function RecentTags({
   tags,
+  orphanCount,
+  onShowOrphans,
   onSelectTag,
   cardActions,
 }: {
   tags: TagWithUsage[];
+  /** Tags sem notas, fora desta lista — a linha do rodapé leva até elas. */
+  orphanCount: number;
+  onShowOrphans: () => void;
   onSelectTag: (tag: TagWithUsage) => void;
   cardActions: TagCardActions;
 }) {
+  const orphansLine =
+    orphanCount > 0 ? (
+      <p className="mt-2 text-xs text-subtle-foreground">
+        {orphanCount === 1
+          ? "1 tag sem notas ficou de fora da lista."
+          : `${orphanCount} tags sem notas ficaram de fora da lista.`}{" "}
+        <button
+          type="button"
+          onClick={onShowOrphans}
+          className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+        >
+          Revisar
+        </button>
+      </p>
+    ) : null;
+
+  if (tags.length === 0 && orphanCount > 0) {
+    return (
+      <div className="flex flex-col items-center gap-3 px-8 py-12 text-center">
+        <span className="flex size-10 items-center justify-center rounded-xl bg-secondary text-subtle-foreground">
+          <TagsIcon className="size-5" aria-hidden="true" />
+        </span>
+        <div className="max-w-[40ch]">
+          <p className="text-sm font-medium text-foreground">
+            Nenhuma tag marca notas agora
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {orphanCount === 1
+              ? "A única tag da conta não está em nenhuma nota."
+              : `As ${orphanCount} tags da conta não estão em nenhuma nota.`}{" "}
+            <button
+              type="button"
+              onClick={onShowOrphans}
+              className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+            >
+              Revisar tags sem notas
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (tags.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 px-8 py-12 text-center">
@@ -716,11 +830,151 @@ function RecentTags({
         ))}
       </ul>
 
-      {rest > 0 && (
-        <p className="mt-4 text-xs text-subtle-foreground">
-          E mais {rest} {rest === 1 ? "tag" : "tags"} — aparecem na busca
-          acima.
+      <div className="mt-4">
+        {rest > 0 && (
+          <p className="text-xs text-subtle-foreground">
+            E mais {rest} {rest === 1 ? "tag" : "tags"} — aparecem na busca
+            acima.
+          </p>
+        )}
+        {orphansLine}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * As tags sem notas, para revisar: abrir uma, renomear, apagar uma a uma
+ * pelo menu — ou todas de uma vez.
+ *
+ * O "apagar todas" manda os ids **desta tela**, e o servidor só apaga as que
+ * continuam sem notas (ver `DELETE /api/tags/orphans`). Nenhuma nota perde
+ * tag com isso: por definição, nenhuma nota viva usava estas.
+ */
+function OrphanTags({
+  tags,
+  onBack,
+  onSelectTag,
+  cardActions,
+  onPruned,
+}: {
+  tags: TagWithUsage[];
+  onBack: () => void;
+  onSelectTag: (tag: TagWithUsage) => void;
+  cardActions: TagCardActions;
+  onPruned: (deletedIds: string[], requested: number) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [pruning, setPruning] = useState(false);
+  const [failure, setFailure] = useState<ApiFailure | null>(null);
+
+  async function prune() {
+    const tagIds = tags.map((tag) => tag.id);
+    setPruning(true);
+    setFailure(null);
+    try {
+      const response = await fetch("/api/tags/orphans", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tagIds }),
+      });
+      if (!response.ok) {
+        setFailure(
+          await readApiFailure(response, "Não foi possível apagar as tags.")
+        );
+        return;
+      }
+      const body = (await response.json()) as { deletedIds: string[] };
+      setConfirming(false);
+      onPruned(body.deletedIds, tagIds.length);
+    } catch {
+      setFailure(OFFLINE);
+    } finally {
+      setPruning(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby="orphan-tags-heading">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex w-fit items-center gap-1.5 rounded-lg py-1 pr-2 text-sm text-subtle-foreground transition-colors duration-150 hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" aria-hidden="true" />
+        Todas as tags
+      </button>
+
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2
+          id="orphan-tags-heading"
+          className="text-lg font-semibold tracking-tight text-foreground"
+        >
+          Tags sem notas
+        </h2>
+        {tags.length > 0 && (
+          <span className="text-xs tabular-nums text-subtle-foreground">
+            {tags.length} {tags.length === 1 ? "tag" : "tags"}
+          </span>
+        )}
+      </div>
+
+      {tags.length === 0 ? (
+        <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+          Nenhuma tag sobrando: todas marcam ao menos uma nota.
         </p>
+      ) : (
+        <>
+          <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+            Nenhuma nota usa estas tags. Elas ficam fora da lista e do grafo,
+            mas continuam aparecendo na busca. Apague as que não fazem mais
+            falta — nenhuma nota perde nada com isso.
+          </p>
+
+          <ul className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {tags.map((tag) => (
+              <li key={tag.id}>
+                <TagCard
+                  tag={tag}
+                  onSelect={() => onSelectTag(tag)}
+                  actions={cardActions}
+                />
+              </li>
+            ))}
+          </ul>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFailure(null);
+              setConfirming(true);
+            }}
+            className="mt-5 flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-foreground transition-colors duration-150 hover:border-error/40 hover:bg-error/10 hover:text-error pointer-coarse:h-11"
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+            {tags.length === 1
+              ? "Apagar esta tag"
+              : `Apagar as ${tags.length} tags`}
+          </button>
+
+          <ConfirmDialog
+            open={confirming}
+            onOpenChange={(open) => {
+              if (!pruning) setConfirming(open);
+            }}
+            title={
+              tags.length === 1
+                ? "Apagar a tag sem notas?"
+                : `Apagar ${tags.length} tags sem notas?`
+            }
+            description="Nenhuma nota usa estas tags, então nenhuma nota muda. Se uma delas ganhou nota agora há pouco, ela fica."
+            confirmLabel={failure ? "Tentar de novo" : "Apagar tags"}
+            busyLabel="Apagando…"
+            busy={pruning}
+            error={failure?.message}
+            onConfirm={() => void prune()}
+          />
+        </>
       )}
     </section>
   );
@@ -788,7 +1042,9 @@ function TagCard({
               #{tag.name}
             </span>
             <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
-              {tag.noteCount} {tag.noteCount === 1 ? "nota" : "notas"}
+              {tag.noteCount === 0
+                ? "sem notas"
+                : `${tag.noteCount} ${tag.noteCount === 1 ? "nota" : "notas"}`}
             </span>
           </button>
           <button
