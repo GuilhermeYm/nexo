@@ -15,7 +15,8 @@
  *   páginas, busca sem resultado, primeira opção em foco de teclado,
  *   workspaces em loading, pronto, com busca vazia, lista vazia e erro,
  *   e pastas (o outro estado do Alt+W) em loading, pronto, com busca vazia,
- *   lista vazia e erro.
+ *   lista vazia e erro — mais a troca Workspaces ↔ Pastas pelo atalho
+ *   (Ctrl+Shift+Seta) nos dois sentidos.
  *
  * Os estados vêm de verdade do componente: interceptamos `GET /api/workspaces`
  * e `GET /api/folders` (atraso, corpo vazio, 500) — é exatamente o que o
@@ -28,6 +29,12 @@
  * por medida, não por olho nu. E, logo antes de cada foto, audita a viewport
  * (scale, innerWidth, scrollWidth, rect do diálogo): foi o que mostrou que o
  * recorte mobile vinha do overflow da página atrás, não do componente.
+ *
+ * A troca de lista passa pelo **teclado** (`Control+Shift+Arrow…`), não pelo
+ * clique no botão: o clique exercita o `onClick` e passaria por cima do
+ * `handleKeys`, que é a parte que o atalho precisa provar. A checagem confirma
+ * os três efeitos que importam — a lista certaina, a query limpa e o foco
+ * ainda no campo.
  *
  * Precisa de SUPABASE_SERVICE_ROLE_KEY e DATABASE_URL, então roda com
  * `node --env-file=.env`. A chave nunca sai daqui: é script de terminal, não
@@ -51,9 +58,17 @@ const CHROME_CANDIDATES = [
   "/usr/sbin/chromium",
 ];
 
+/**
+ * `hasTouch` não é decoração: sem ele o Chromium emulado continua respondendo
+ * `pointer: fine` e `hover: hover` numa tela de 390px, e **todo** corte
+ * `pointer-coarse:` da aplicação (o alvo de toque dos botões, o
+ * `pointer-coarse:hidden` da dica de teclado no rodapé) fica fora da foto — a
+ * captura mobile mentia. Medido: `isMobile` sozinho dá `pointerCoarse:false`;
+ * com `hasTouch` dá `true`. Mesma configuração de `shot-workspace.mjs`.
+ */
 const VIEWPORTS = {
   desktop: { width: 1440, height: 900, deviceScaleFactor: 1 },
-  mobile: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true },
+  mobile: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 };
 
 const BASE = process.env.NEXO_BASE_URL ?? "http://localhost:3000";
@@ -105,6 +120,11 @@ async function auditarViewport(page, size, name) {
       offsetLeft: window.visualViewport?.offsetLeft ?? null,
       innerWidth: window.innerWidth,
       docScrollWidth: document.documentElement.scrollWidth,
+      // A foto mobile só vale se os cortes `pointer-coarse:` estiverem
+      // valendo. Sem `hasTouch` o Chromium segue em `pointer: fine` e a
+      // imagem mostra o layout de um monitor, não o de um telefone.
+      pointerCoarse: matchMedia("(pointer: coarse)").matches,
+      hover: matchMedia("(hover: hover)").matches,
       dialog: r
         ? { x: Math.round(r.x), w: Math.round(r.width), right: Math.round(r.right) }
         : null,
@@ -112,7 +132,9 @@ async function auditarViewport(page, size, name) {
   });
   console.log(
     `    [audit ${size}/${name}] scale=${estado.scale} offsetLeft=${estado.offsetLeft} ` +
-      `inner=${estado.innerWidth} scrollW=${estado.docScrollWidth} dialog=${JSON.stringify(estado.dialog)}`
+      `inner=${estado.innerWidth} scrollW=${estado.docScrollWidth} ` +
+      `coarse=${estado.pointerCoarse} hover=${estado.hover} ` +
+      `dialog=${JSON.stringify(estado.dialog)}`
   );
 }
 
@@ -200,6 +222,35 @@ async function diagnoseFocusedOption(page) {
   });
 }
 
+/**
+ * Troca Workspaces ↔ Pastas pelo **atalho** (Ctrl+Shift+Seta) e confere o
+ * resultado: qual lista ficou no ar, se o foco continuou no campo e se a
+ * query foi limpa. O clique no botão exercita o `onClick`; este é o caminho
+ * que passa por `handleKeys`, que é justamente o que o roteiro precisa provar.
+ */
+async function alternarDisplay(page, seta, tituloEsperado) {
+  await page.keyboard.press(`Control+Shift+Arrow${seta}`);
+  await page.waitForSelector(`dialog[open] h2 >> text=${tituloEsperado}`, {
+    timeout: 5_000,
+  });
+  await page.waitForTimeout(300);
+  return page.evaluate(() => {
+    const dialog = document.querySelector("dialog[open]");
+    const input = dialog?.querySelector("input[type='search']") ?? null;
+    return {
+      titulo: dialog?.querySelector("h2")?.textContent?.trim() ?? null,
+      // O foco tem que continuar no campo: quem estava digitando não deveria
+      // ter que voltar para ele depois de trocar a lista.
+      focoNoCampo: document.activeElement === input,
+      valor: input?.value ?? null,
+      selecionado:
+        dialog
+          ?.querySelector('button[data-palette-display][aria-pressed="true"]')
+          ?.getAttribute("data-palette-display") ?? null,
+    };
+  });
+}
+
 async function main() {
   const outDir = path.resolve(OUT);
   mkdirSync(outDir, { recursive: true });
@@ -260,6 +311,7 @@ async function main() {
         viewport: { width: viewport.width, height: viewport.height },
         deviceScaleFactor: viewport.deviceScaleFactor,
         isMobile: viewport.isMobile ?? false,
+        hasTouch: viewport.hasTouch ?? false,
         locale: "pt-BR",
         ...(storageState ? { storageState } : {}),
       });
@@ -371,7 +423,7 @@ async function main() {
           await route.continue().catch(() => {});
         });
         await openPalette(page, "W");
-        await page.click('dialog[open] button[title="Pastas"]');
+        await page.click('dialog[open] button[data-palette-display="folders"]');
         await shot(page, outDir, "pastas-loading", size, theme);
         await page.waitForSelector("dialog[open] button >> text=Receitas", {
           timeout: 10_000,
@@ -379,6 +431,28 @@ async function main() {
         await page.unroute("**/api/folders");
         await page.waitForTimeout(300);
         await shot(page, outDir, "pastas", size, theme);
+
+        // ---- O atalho da troca, ponta a ponta ----
+        // Preenche a busca de propósito: a troca tem que limpá-la, porque o
+        // que se digitou era para a lista que está saindo.
+        await page.fill("dialog[open] input[type='search']", "zzz");
+        await page.waitForTimeout(250);
+        diagnostico.push({
+          size,
+          theme,
+          paleta: "workspaces",
+          atalho: "Ctrl+Shift+ArrowRight",
+          ...(await alternarDisplay(page, "Right", "Workspaces")),
+        });
+        await shot(page, outDir, "atalho-para-workspaces", size, theme);
+        diagnostico.push({
+          size,
+          theme,
+          paleta: "workspaces",
+          atalho: "Ctrl+Shift+ArrowLeft",
+          ...(await alternarDisplay(page, "Left", "Pastas")),
+        });
+        await shot(page, outDir, "atalho-para-pastas", size, theme);
 
         await page.fill("dialog[open] input[type='search']", "zzz");
         await page.waitForTimeout(300);
@@ -395,7 +469,7 @@ async function main() {
           })
         );
         await openPalette(page, "W");
-        await page.click('dialog[open] button[title="Pastas"]');
+        await page.click('dialog[open] button[data-palette-display="folders"]');
         await page.waitForTimeout(300);
         await shot(page, outDir, "pastas-vazio", size, theme);
         await closePalette(page);
@@ -411,7 +485,7 @@ async function main() {
           })
         );
         await openPalette(page, "W");
-        await page.click('dialog[open] button[title="Pastas"]');
+        await page.click('dialog[open] button[data-palette-display="folders"]');
         await page.waitForTimeout(400);
         await shot(page, outDir, "pastas-erro", size, theme);
         await closePalette(page);
@@ -431,7 +505,17 @@ async function main() {
       console.log(
         `  ${row.size}/${row.theme}: outline=${row.antes?.outlineStyle} ${row.antes?.outlineWidth} offset=${row.antes?.outlineOffset} | ` +
           `opt-out=${row.temOptOut} | focusVisible=${row.matchesFocusVisible} | ` +
-          `wrapper=${row.wrapperBoxShadow?.slice(0, 60)}…`
+          // `wrapperBoxShadow` precisa voltar `none`: era o anel de 2px do
+          // foco, e é ele que estraga o canto arredondado do diálogo.
+          `wrapper=${row.wrapperBoxShadow === "none" ? "none ✓" : row.wrapperBoxShadow?.slice(0, 60) + "…"}`
+      );
+    }
+
+    console.log("\nAtalho da troca (Ctrl+Shift+Seta):");
+    for (const row of diagnostico.filter((r) => r.atalho)) {
+      console.log(
+        `  ${row.size}/${row.theme} ${row.atalho} → lista=${row.selecionado} "${row.titulo}" | ` +
+          `foco no campo=${row.focoNoCampo ? "sim ✓" : "NÃO"} | query limpa=${row.valor === "" ? "sim ✓" : JSON.stringify(row.valor)}`
       );
     }
 

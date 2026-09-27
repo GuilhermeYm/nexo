@@ -267,6 +267,30 @@ export function NavigationPalette() {
       return;
     }
 
+    // Ctrl + Shift + ← / → alterna Workspaces ↔ Pastas — o mesmo caminho dos
+    // dois botões do cabeçalho. A seta guardada é a que o dedo usaria para
+    // voltar à lista anterior, e o `Shift` afasta a combinação do Alt+← /
+    // Alt+→ (histórico do navegador).
+    //
+    // `Ctrl+Alt+Seta` foi descartado de propósito: GNOME e KDE reservam essa
+    // combinação para trocar de área de trabalho, e o evento não chegaria ao
+    // navegador. `Ctrl+Shift+Seta` é livre nos dois.
+    if (
+      kind === "workspaces" &&
+      event.ctrlKey &&
+      event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      (event.key === "ArrowRight" || event.key === "ArrowLeft")
+    ) {
+      event.preventDefault();
+      // O foco **fica** no campo: quem está digitando não deve ter que voltar
+      // para ele depois de trocar a lista. A query é limpa, como no clique —
+      // o que se digitou foi procurando a lista que acabou de sair.
+      trocarExibicao(display === "workspaces" ? "folders" : "workspaces");
+      return;
+    }
+
     if (event.key === "Enter" && event.target === searchRef.current && filtered[0]) {
       event.preventDefault();
       navigate(filtered[0].href);
@@ -290,8 +314,21 @@ export function NavigationPalette() {
       }}
       className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-2xl border border-border bg-background p-0 text-foreground shadow-2xl backdrop:bg-black/45"
     >
-      <div className="flex items-center gap-3 border-b border-border px-4 py-3.5 focus-within:ring-2 focus-within:ring-inset focus-within:ring-accent/40">
-        <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      {/* O foco do campo é desenhado por aqui, mas **sem moldura**.
+
+          Esta linha encosta nas quatro bordas do diálogo, então um anel —
+          `ring` ou `ring-inset` — vira um retângulo quadrado em cima do canto
+          arredondado do `dialog`, encostando na borda dele: era a borda
+          horrorosa que abria no Alt+N / Alt+W. A indicação fica dentro da
+          linha (o fundo acende e a lupa escurece), que é o mesmo caminho da
+          barra de comando — `focus-within:bg-background` em
+          command-bar.tsx:711. O `overflow-hidden` do diálogo recorta o fundo no
+          arredondado, então aqui não há canto vazando. */}
+      <div className="group flex items-center gap-3 border-b border-border px-4 py-3.5 transition-colors duration-150 focus-within:bg-secondary/70 motion-reduce:transition-none">
+        <Search
+          className="size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-focus-within:text-foreground motion-reduce:transition-none"
+          aria-hidden="true"
+        />
         <label htmlFor={searchId} className="sr-only">
           {kind === "workspaces"
             ? display === "folders"
@@ -345,7 +382,14 @@ export function NavigationPalette() {
                     key={toggle.key}
                     type="button"
                     aria-pressed={on}
-                    title={toggle.label}
+                    // O `title` é onde o ponteiro descansa; o
+                    // `aria-keyshortcuts` é o campo que o leitor de tela lê
+                    // para dizer que a troca também é tecla. O `data-*` dá um
+                    // alvo estável para o roteiro de captura, que não pode
+                    // depender da frase do tooltip.
+                    title={`${toggle.label} — Ctrl+Shift+←/→ alterna`}
+                    aria-keyshortcuts="Control+Shift+ArrowLeft Control+Shift+ArrowRight"
+                    data-palette-display={toggle.key}
                     onClick={() => trocarExibicao(toggle.key)}
                     data-focus-ring="container"
                     className={cn(
@@ -429,6 +473,17 @@ export function NavigationPalette() {
       </div>
       <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
         ↑↓ navegar · Enter abrir · Esc fechar
+        {/* O rodapé é onde as teclas já são prometidas; a troca só existe no
+            Alt+W, então só aparece lá — no Alt+N seria um atalho que não
+            responde. E some no toque (`pointer-coarse`, o mesmo corte que os
+            botões de ícone já fazem): ali não há Ctrl+Shift, e a frase só
+            empurraria o rodapé para uma segunda linha. */}
+        {kind === "workspaces" && (
+          <span className="pointer-coarse:hidden">
+            {" · "}
+            <kbd className="font-sans">Ctrl+Shift+←/→</kbd> Workspaces/Pastas
+          </span>
+        )}
       </p>
     </dialog>
   );
