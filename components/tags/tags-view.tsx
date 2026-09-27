@@ -18,7 +18,9 @@ import { useEffect, useRef, useState } from "react";
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { RowSkeleton } from "@/components/dashboard/panel";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { ErrorReport } from "@/components/errors/error-report";
 import { Input } from "@/components/ui/input";
+import { type ApiFailure, readApiFailure } from "@/lib/api-failure";
 import {
   formatAbsolute,
   formatRelative,
@@ -85,6 +87,25 @@ function writeTagsUrl(
   else window.history.replaceState(null, "", url);
 }
 
+/**
+ * Uma leitura que falhou não é uma lista vazia.
+ *
+ * Antes, erro de rede ou 5xx caía no mesmo ramo do "nada encontrado" — e a
+ * tela dizia "Nenhuma nota com esta tag" para quem só tinha perdido a
+ * conexão, que concluía que as notas tinham sumido. Agora a falha tem estado
+ * próprio, com a mensagem do servidor e o "Tentar de novo".
+ */
+type Loaded<T> =
+  | { status: "ok"; items: T }
+  | { status: "failed"; failure: ApiFailure }
+  /** 404 nas notas da tag: ela foi apagada em outro lugar. */
+  | { status: "missing" };
+
+const OFFLINE: ApiFailure = {
+  message: "Sem conexão com o servidor. Confira a internet e tente de novo.",
+  code: null,
+};
+
 /** Busca de tag sem tropeçar em acento: "pesquisa" encontra "pesquisa" e "Pesquisa". */
 function fold(text: string): string {
   return text
@@ -124,13 +145,17 @@ export function TagsView({
         ),
       }));
     setTagNotes((current) =>
-      current ? { ...current, items: patchNotes(current.items) } : current
+      current?.status === "ok"
+        ? { ...current, items: patchNotes(current.items) }
+        : current
     );
     setSearchResults((current) =>
-      current ? { ...current, items: patchNotes(current.items) } : current
+      current?.status === "ok"
+        ? { ...current, items: patchNotes(current.items) }
+        : current
     );
     setGraphData((current) =>
-      current && current !== "error"
+      current && "tags" in current
         ? {
             ...current,
             tags: current.tags.map((tag) =>
@@ -165,7 +190,7 @@ export function TagsView({
   function handleTagDeleted(tagId: string) {
     setAllTags((current) => current.filter((tag) => tag.id !== tagId));
     setGraphData((current) =>
-      current && current !== "error"
+      current && "tags" in current
         ? {
             ...current,
             tags: current.tags.filter((tag) => tag.id !== tagId),
@@ -247,18 +272,22 @@ export function TagsView({
     window.addEventListener("popstate", syncFromUrl);
     return () => window.removeEventListener("popstate", syncFromUrl);
   }, [allTags]);
-  const [graphData, setGraphData] = useState<TagGraph | "error" | null>(null);
+  const [graphData, setGraphData] = useState<
+    TagGraph | { failure: ApiFailure } | null
+  >(null);
 
   // O resultado carrega a busca que o originou (mesmo padrão da barra de
   // comando): “está buscando” é derivado, sem um segundo estado para zerar.
-  const [searchResults, setSearchResults] = useState<{
-    query: string;
-    items: RecentNote[];
-  } | null>(null);
-  const [tagNotes, setTagNotes] = useState<{
-    tagId: string;
-    items: RecentNote[];
-  } | null>(null);
+  const [searchResults, setSearchResults] = useState<
+    ({ query: string } & Loaded<RecentNote[]>) | null
+  >(null);
+  const [tagNotes, setTagNotes] = useState<
+    ({ tagId: string } & Loaded<RecentNote[]>) | null
+  >(null);
+  // "Tentar de novo" refaz a mesma leitura: o contador entra nas
+  // dependências do efeito, que é quem sabe buscar.
+  const [searchAttempt, setSearchAttempt] = useState(0);
+  const [notesAttempt, setNotesAttempt] = useState(0);
 
   /* --- Dados do grafo (sob demanda) --------------------------------------- */
 
@@ -271,14 +300,19 @@ export function TagsView({
     (async () => {
       try {
         const response = await fetch("/api/tags/graph");
-        if (!response.ok || cancelled) {
-          if (!cancelled) setGraphData("error");
+        if (cancelled) return;
+        if (!response.ok) {
+          const failure = await readApiFailure(
+            response,
+            "Não foi possível carregar o grafo."
+          );
+          if (!cancelled) setGraphData({ failure });
           return;
         }
         const payload = await response.json();
         if (!cancelled) setGraphData(payload);
       } catch {
-        if (!cancelled) setGraphData("error");
+        if (!cancelled) setGraphData({ failure: OFFLINE });
       }
     })();
 
@@ -310,21 +344,29 @@ export function TagsView({
           { signal: controller.signal }
         );
         if (!response.ok) {
-          setSearchResults({ query: trimmed, items: [] });
+          const failure = await readApiFailure(
+            response,
+            "Não foi possível buscar nas notas."
+          );
+          setSearchResults({ query: trimmed, status: "failed", failure });
           return;
         }
         const payload = await response.json();
-        setSearchResults({ query: trimmed, items: payload.notes ?? [] });
+        setSearchResults({
+          query: trimmed,
+          status: "ok",
+          items: payload.notes ?? [],
+        });
       } catch (error) {
         // Abort é o caso normal — uma busca mais nova cancelou esta.
         if ((error as Error)?.name !== "AbortError") {
-          setSearchResults({ query: trimmed, items: [] });
+          setSearchResults({ query: trimmed, status: "failed", failure: OFFLINE });
         }
       }
     }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, searchAttempt]);
 
   /* --- Notas da tag selecionada ----------------------------------------- */
 
@@ -346,21 +388,29 @@ export function TagsView({
         const response = await fetch(`/api/tags/${tagId}/notes`, {
           signal: controller.signal,
         });
+        if (response.status === 404) {
+          setTagNotes({ tagId, status: "missing" });
+          return;
+        }
         if (!response.ok) {
-          setTagNotes({ tagId, items: [] });
+          const failure = await readApiFailure(
+            response,
+            "Não foi possível carregar as notas desta tag."
+          );
+          setTagNotes({ tagId, status: "failed", failure });
           return;
         }
         const payload = await response.json();
-        setTagNotes({ tagId, items: payload.notes ?? [] });
+        setTagNotes({ tagId, status: "ok", items: payload.notes ?? [] });
       } catch (error) {
         if ((error as Error)?.name !== "AbortError") {
-          setTagNotes({ tagId, items: [] });
+          setTagNotes({ tagId, status: "failed", failure: OFFLINE });
         }
       }
     })();
 
     return () => controller.abort();
-  }, [selectedId]);
+  }, [selectedId, notesAttempt]);
 
   /* --- Estado derivado --------------------------------------------------- */
 
@@ -373,11 +423,21 @@ export function TagsView({
     : [];
 
   const currentSearch =
-    searchResults?.query === trimmedQuery ? searchResults.items : null;
+    searchResults?.query === trimmedQuery ? searchResults : null;
   const searching = trimmedQuery.length > 0 && currentSearch === null;
 
   const currentTagNotes =
-    selected && tagNotes?.tagId === selected.id ? tagNotes.items : null;
+    selected && tagNotes?.tagId === selected.id ? tagNotes : null;
+
+  function retrySearch() {
+    setSearchResults(null);
+    setSearchAttempt((attempt) => attempt + 1);
+  }
+
+  function retryTagNotes() {
+    setTagNotes(null);
+    setNotesAttempt((attempt) => attempt + 1);
+  }
 
   function selectTag(tag: TagWithUsage) {
     setSelectedId(tag.id);
@@ -513,11 +573,14 @@ export function TagsView({
           <div className="mt-10">
             {view === "graph" ? (
               <div className="space-y-3">
-                {graphData === "error" ? (
+                {graphData && "failure" in graphData ? (
                   <div className="flex h-96 items-center justify-center rounded-2xl border border-border bg-secondary/40">
-                    <span className="text-sm text-muted-foreground">
-                      Não foi possível carregar o grafo.
-                    </span>
+                    <LoadFailure
+                      failure={graphData.failure}
+                      route="/api/tags/graph"
+                      // Zerar o grafo é o que o efeito entende como "busque".
+                      onRetry={() => setGraphData(null)}
+                    />
                   </div>
                 ) : graphData ? (
                   <TagsGraph
@@ -546,6 +609,7 @@ export function TagsView({
                 now={now}
                 onSelectTag={selectTag}
                 cardActions={cardActions}
+                onRetry={retrySearch}
                 onOpenNote={openNote}
               />
             ) : selected ? (
@@ -560,6 +624,8 @@ export function TagsView({
                 }}
                 onUpdated={handleTagUpdated}
                 onDelete={() => deletion.request(selected)}
+                onRetry={retryTagNotes}
+                onMissing={() => handleTagDeleted(selected.id)}
                 onOpenNote={openNote}
               />
             ) : (
@@ -756,15 +822,20 @@ function SelectedTagNotes({
   onClear,
   onUpdated,
   onDelete,
+  onRetry,
+  onMissing,
   onOpenNote,
 }: {
   tag: TagWithUsage;
-  notes: RecentNote[] | null;
+  notes: Loaded<RecentNote[]> | null;
   now: number;
   startRenaming: boolean;
   onClear: () => void;
   onUpdated: (tagId: string, patch: TagPatch) => void;
   onDelete: () => void;
+  onRetry: () => void;
+  /** A tag sumiu (apagada em outra aba): some da página também. */
+  onMissing: () => void;
   onOpenNote: (noteId: string) => void;
 }) {
   return (
@@ -783,12 +854,32 @@ function SelectedTagNotes({
       <div className="mt-6 overflow-hidden rounded-2xl border border-border">
         {notes === null ? (
           <RowSkeleton rows={3} />
-        ) : notes.length === 0 ? (
+        ) : notes.status === "missing" ? (
+          <div role="alert" className="flex flex-col items-center gap-2 px-6 py-8 text-center">
+            <p className="text-sm text-foreground">
+              Esta tag não existe mais — ela pode ter sido apagada em outra
+              aba.
+            </p>
+            <button
+              type="button"
+              onClick={onMissing}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-foreground underline decoration-border underline-offset-4 transition-colors duration-150 hover:bg-secondary"
+            >
+              Voltar para todas as tags
+            </button>
+          </div>
+        ) : notes.status === "failed" ? (
+          <LoadFailure
+            failure={notes.failure}
+            route="/api/tags/[tagId]/notes"
+            onRetry={onRetry}
+          />
+        ) : notes.items.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">
             Nenhuma nota com esta tag.
           </p>
         ) : (
-          <NoteList notes={notes} now={now} onOpenNote={onOpenNote} />
+          <NoteList notes={notes.items} now={now} onOpenNote={onOpenNote} />
         )}
       </div>
     </section>
@@ -804,15 +895,17 @@ function SearchResults({
   now,
   onSelectTag,
   cardActions,
+  onRetry,
   onOpenNote,
 }: {
   matchedTags: TagWithUsage[];
-  notes: RecentNote[] | null;
+  notes: Loaded<RecentNote[]> | null;
   searching: boolean;
   query: string;
   now: number;
   onSelectTag: (tag: TagWithUsage) => void;
   cardActions: TagCardActions;
+  onRetry: () => void;
   onOpenNote: (noteId: string) => void;
 }) {
   return (
@@ -849,17 +942,54 @@ function SearchResults({
         <div className="mt-3 overflow-hidden rounded-2xl border border-border">
           {searching || notes === null ? (
             <RowSkeleton rows={3} />
-          ) : notes.length === 0 ? (
+          ) : notes.status !== "ok" ? (
+            <LoadFailure
+              failure={notes.status === "failed" ? notes.failure : OFFLINE}
+              route="/api/search"
+              onRetry={onRetry}
+            />
+          ) : notes.items.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               Nada encontrado para{" "}
               <span className="text-foreground">“{query}”</span>. A busca também
               lê o conteúdo, não só o título.
             </p>
           ) : (
-            <NoteList notes={notes} now={now} onOpenNote={onOpenNote} />
+            <NoteList notes={notes.items} now={now} onOpenNote={onOpenNote} />
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * Uma leitura que não veio: o que o servidor disse, o "Tentar de novo" e,
+ * quando houve defeito de verdade (há código), o "Reportar".
+ */
+function LoadFailure({
+  failure,
+  route,
+  onRetry,
+}: {
+  failure: ApiFailure;
+  route: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center gap-2 px-6 py-8 text-center"
+    >
+      <p className="max-w-[46ch] text-sm text-foreground">{failure.message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-lg px-3 py-1.5 text-sm font-medium text-foreground underline decoration-border underline-offset-4 transition-colors duration-150 hover:bg-secondary"
+      >
+        Tentar de novo
+      </button>
+      {failure.code && <ErrorReport code={failure.code} route={route} compact />}
     </div>
   );
 }
