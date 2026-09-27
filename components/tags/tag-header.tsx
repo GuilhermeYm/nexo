@@ -149,7 +149,7 @@ export function SelectedTagHeader({
       <button
         type="button"
         onClick={onBack}
-        className="flex w-fit items-center gap-1.5 rounded-lg py-1 pr-2 text-sm text-subtle-foreground transition-colors duration-150 hover:text-foreground"
+        className="flex w-fit items-center gap-1.5 rounded-lg py-1 pr-2 text-sm text-subtle-foreground transition-colors duration-150 hover:text-foreground pointer-coarse:py-2.5"
       >
         <ArrowLeft className="size-4" aria-hidden="true" />
         Todas as tags
@@ -226,7 +226,11 @@ export function SelectedTagHeader({
               {tag.noteCount} {tag.noteCount === 1 ? "nota" : "notas"}
             </span>
 
-            <div className="ml-auto flex items-center gap-1">
+            {/* Numa tela estreita as ações descem para a linha de baixo,
+                alinhadas à esquerda com o resto da coluna (o -ml compensa o
+                respiro interno do botão); a partir do sm voltam para a
+                direita do nome. */}
+            <div className="-ml-2.5 flex basis-full items-center gap-1 sm:ml-auto sm:basis-auto">
               <button
                 ref={renameButtonRef}
                 type="button"

@@ -546,23 +546,42 @@ export function TagsView({
                 {allTags.length}
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => changeView(view === "graph" ? "list" : "graph")}
-              className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
+            {/* Um controle segmentado, não um botão que troca de rótulo: o
+                modo atual fica à vista, em vez de ser deduzido pela ausência
+                do outro. "Sem notas" é uma revisão dentro da lista. */}
+            <div
+              role="group"
+              aria-label="Modo de exibição"
+              className="ml-auto flex items-center rounded-lg bg-secondary p-0.5"
             >
-              {view === "graph" ? (
-                <>
-                  <List className="size-4" aria-hidden="true" />
-                  Voltar para lista
-                </>
-              ) : (
-                <>
-                  <GitFork className="size-4" aria-hidden="true" />
-                  Ver como grafo
-                </>
-              )}
-            </button>
+              {(
+                [
+                  { mode: "list", label: "Lista", Icon: List },
+                  { mode: "graph", label: "Grafo", Icon: GitFork },
+                ] as const
+              ).map(({ mode, label, Icon }) => {
+                const active = mode === "graph" ? view === "graph" : view !== "graph";
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      if (view !== mode) changeView(mode);
+                    }}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm transition-colors duration-150 pointer-coarse:py-2",
+                      active
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-subtle-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="size-4" aria-hidden="true" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
@@ -616,7 +635,7 @@ export function TagsView({
                   setQuery("");
                   inputRef.current?.focus();
                 }}
-                className="absolute top-1/2 right-3 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
+                className="absolute top-1/2 right-3 flex size-7 -translate-y-1/2 pointer-coarse:size-10 items-center justify-center rounded-full text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
               >
                 <X className="size-4" aria-hidden="true" />
                 <span className="sr-only">Limpar busca</span>
@@ -899,7 +918,7 @@ function OrphanTags({
       <button
         type="button"
         onClick={onBack}
-        className="flex w-fit items-center gap-1.5 rounded-lg py-1 pr-2 text-sm text-subtle-foreground transition-colors duration-150 hover:text-foreground"
+        className="flex w-fit items-center gap-1.5 rounded-lg py-1 pr-2 text-sm text-subtle-foreground transition-colors duration-150 hover:text-foreground pointer-coarse:py-2.5"
       >
         <ArrowLeft className="size-4" aria-hidden="true" />
         Todas as tags
@@ -1164,8 +1183,18 @@ function SearchResults({
   onRetry: () => void;
   onOpenNote: (noteId: string) => void;
 }) {
+  const noteCount = notes?.status === "ok" ? notes.items.length : null;
+
   return (
     <div className="space-y-8">
+      {/* O resultado muda enquanto se digita; quem não vê a lista ouve a
+          contagem quando a busca assenta. */}
+      <p role="status" className="sr-only">
+        {searching || noteCount === null
+          ? ""
+          : `${matchedTags.length} ${matchedTags.length === 1 ? "tag" : "tags"} e ${noteCount} ${noteCount === 1 ? "nota" : "notas"} para “${query}”.`}
+      </p>
+
       {matchedTags.length > 0 && (
         <section aria-labelledby="matched-tags-heading">
           <h2
