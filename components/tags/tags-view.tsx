@@ -6,6 +6,7 @@ import {
   Hash,
   List,
   LoaderCircle,
+  MoreHorizontal,
   Search,
   Tags as TagsIcon,
   X,
@@ -16,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { NoteTypeIcon } from "@/components/dashboard/note-type-icon";
 import { RowSkeleton } from "@/components/dashboard/panel";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import {
   formatAbsolute,
@@ -30,6 +32,8 @@ import {
 } from "@/lib/tags/palette";
 import type { TagWithUsage, TagGraph } from "@/lib/tags/queries";
 import { cn } from "@/lib/utils";
+import { SelectedTagHeader, type TagPatch } from "./tag-header";
+import { TagMenuContent, useTagDeletion } from "./tag-menu";
 import { TagsGraph } from "./tags-graph";
 
 /**
@@ -67,20 +71,34 @@ export function TagsView({
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // As tags moram em estado: a troca de cor feita no grafo precisa chegar à
-  // lista quando a pessoa volta para ela, sem novo fetch.
+  // As tags moram em estado: renomear ou recolorir (aqui ou no grafo) precisa
+  // chegar à lista, ao cabeçalho e ao grafo sem novo fetch.
   const [allTags, setAllTags] = useState(tags);
 
-  function handleTagColorChange(tagId: string, color: string | null) {
+  function handleTagUpdated(tagId: string, patch: TagPatch) {
     setAllTags((current) =>
-      current.map((tag) => (tag.id === tagId ? { ...tag, color } : tag))
+      current.map((tag) => (tag.id === tagId ? { ...tag, ...patch } : tag))
+    );
+    // Os chips das notas já listadas também mostram a tag.
+    const patchNotes = (items: RecentNote[]) =>
+      items.map((note) => ({
+        ...note,
+        tags: note.tags.map((tag) =>
+          tag.id === tagId ? { ...tag, ...patch } : tag
+        ),
+      }));
+    setTagNotes((current) =>
+      current ? { ...current, items: patchNotes(current.items) } : current
+    );
+    setSearchResults((current) =>
+      current ? { ...current, items: patchNotes(current.items) } : current
     );
     setGraphData((current) =>
       current && current !== "error"
         ? {
             ...current,
             tags: current.tags.map((tag) =>
-              tag.id === tagId ? { ...tag, color } : tag
+              tag.id === tagId ? { ...tag, ...patch } : tag
             ),
           }
         : current
@@ -121,9 +139,38 @@ export function TagsView({
           }
         : current
     );
-    setSelected((current) => (current?.id === tagId ? null : current));
+    setSelectedId((current) => (current === tagId ? null : current));
     setTagNotes((current) => (current?.tagId === tagId ? null : current));
   }
+
+  // O recado de uma ação que tirou algo da tela (apagar a tag) — confirmação,
+  // não algo para dispensar, então some sozinho.
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // Um só fluxo de apagar para a página inteira: o menu dos cartões e o
+  // cabeçalho da tag aberta pedem pelo mesmo hook, com o mesmo diálogo.
+  const deletion = useTagDeletion({
+    onDeleted: (tagId) => {
+      const name = allTags.find((tag) => tag.id === tagId)?.name;
+      handleTagDeleted(tagId);
+      setNotice(
+        name
+          ? `A tag “${name}” foi apagada — saiu de todas as notas que a usavam.`
+          : "A tag foi apagada — saiu de todas as notas que a usavam."
+      );
+    },
+  });
+
+  // O menu do cartão pode pedir "renomear": abre a tag com o campo já ativo.
+  // Vale só para a tag pedida e só na montagem do cabeçalho (ele tem `key`
+  // pelo id), então não há flag para desligar depois.
+  const [renameTagId, setRenameTagId] = useState<string | null>(null);
 
   // Relógio no padrão do dashboard: começa no instante do servidor para o
   // HTML bater, e só depois de montado passa a marcar o tempo de verdade.
@@ -139,9 +186,12 @@ export function TagsView({
   }, []);
 
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<TagWithUsage | null>(
-    () => tags.find((tag) => tag.id === initialTagId) ?? null
+  // Guarda o id, não a tag: renomear ou recolorir muda `allTags`, e a tag
+  // aberta lida de lá já nasce com o nome e a cor novos.
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    tags.some((tag) => tag.id === initialTagId) ? initialTagId : null
   );
+  const selected = allTags.find((tag) => tag.id === selectedId) ?? null;
   const [view, setView] = useState<"list" | "graph">("list");
   const [graphData, setGraphData] = useState<TagGraph | "error" | null>(null);
 
@@ -227,7 +277,7 @@ export function TagsView({
   const notesAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!selected) {
+    if (!selectedId) {
       notesAbort.current?.abort();
       return;
     }
@@ -235,7 +285,7 @@ export function TagsView({
     notesAbort.current?.abort();
     const controller = new AbortController();
     notesAbort.current = controller;
-    const tagId = selected.id;
+    const tagId = selectedId;
 
     (async () => {
       try {
@@ -256,7 +306,7 @@ export function TagsView({
     })();
 
     return () => controller.abort();
-  }, [selected]);
+  }, [selectedId]);
 
   /* --- Estado derivado --------------------------------------------------- */
 
@@ -276,11 +326,23 @@ export function TagsView({
     selected && tagNotes?.tagId === selected.id ? tagNotes.items : null;
 
   function selectTag(tag: TagWithUsage) {
-    setSelected(tag);
+    setSelectedId(tag.id);
+    setRenameTagId(null);
     setQuery("");
   }
 
+  function requestRename(tag: TagWithUsage) {
+    selectTag(tag);
+    setRenameTagId(tag.id);
+  }
+
   const openNote = (noteId: string) => router.push(`/nota/${noteId}`);
+
+  const cardActions: TagCardActions = {
+    onRename: requestRename,
+    onDelete: (tag) => deletion.request(tag),
+    onMenuOpen: (tag) => deletion.prime(tag),
+  };
 
   return (
     <div className="flex min-h-dvh bg-secondary p-3">
@@ -356,7 +418,7 @@ export function TagsView({
                 setQuery(event.target.value);
                 // Digitar é um voto de saída da tag aberta: a pessoa foi
                 // procurar outra coisa.
-                if (selected) setSelected(null);
+                if (selectedId) setSelectedId(null);
               }}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -398,7 +460,9 @@ export function TagsView({
                 ) : graphData ? (
                   <TagsGraph
                     {...graphData}
-                    onTagColorChange={handleTagColorChange}
+                    onTagColorChange={(tagId, color) =>
+                      handleTagUpdated(tagId, { color })
+                    }
                     onNoteTagsEdited={() => void refreshGraph()}
                     onTagDeleted={handleTagDeleted}
                   />
@@ -419,6 +483,7 @@ export function TagsView({
                 query={trimmedQuery}
                 now={now}
                 onSelectTag={selectTag}
+                cardActions={cardActions}
                 onOpenNote={openNote}
               />
             ) : selected ? (
@@ -426,15 +491,38 @@ export function TagsView({
                 tag={selected}
                 notes={currentTagNotes}
                 now={now}
-                onClear={() => setSelected(null)}
+                startRenaming={renameTagId === selected.id}
+                onClear={() => setSelectedId(null)}
+                onUpdated={handleTagUpdated}
+                onDelete={() => deletion.request(selected)}
                 onOpenNote={openNote}
               />
             ) : (
-              <RecentTags tags={allTags} onSelectTag={selectTag} />
+              <RecentTags
+                tags={allTags}
+                onSelectTag={selectTag}
+                cardActions={cardActions}
+              />
             )}
           </div>
         </div>
       </main>
+
+      {/* Fora da árvore que troca de ramo: o recado de "apagada" continua
+          lido mesmo quando a tag aberta some e a lista volta. */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
+      >
+        {notice && (
+          <p className="max-w-md rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground shadow-[0_12px_32px_-12px_rgb(0_0_0/0.25)]">
+            {notice}
+          </p>
+        )}
+      </div>
+
+      {deletion.dialog}
     </div>
   );
 }
@@ -448,9 +536,11 @@ export function TagsView({
 function RecentTags({
   tags,
   onSelectTag,
+  cardActions,
 }: {
   tags: TagWithUsage[];
   onSelectTag: (tag: TagWithUsage) => void;
+  cardActions: TagCardActions;
 }) {
   if (tags.length === 0) {
     return (
@@ -486,7 +576,11 @@ function RecentTags({
       <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {recent.map((tag) => (
           <li key={tag.id}>
-            <TagCard tag={tag} onSelect={() => onSelectTag(tag)} />
+            <TagCard
+              tag={tag}
+              onSelect={() => onSelectTag(tag)}
+              actions={cardActions}
+            />
           </li>
         ))}
       </ul>
@@ -501,34 +595,90 @@ function RecentTags({
   );
 }
 
-/** Um cartão de tag: cor, nome e quantas notas ela marca. */
+/** O que o menu de um cartão sabe fazer — o mesmo para lista e busca. */
+interface TagCardActions {
+  onRename: (tag: TagWithUsage) => void;
+  onDelete: (tag: TagWithUsage) => void;
+  /** O menu abriu: mede o impacto de apagar antes do clique. */
+  onMenuOpen: (tag: TagWithUsage) => void;
+}
+
+/**
+ * Um cartão de tag: cor, nome, quantas notas ela marca — e o menu dela.
+ *
+ * O menu é o mesmo `TagMenuContent` do chip no editor e do nó no grafo, e
+ * abre de três jeitos: botão direito (ou a tecla de menu) no cartão, toque
+ * longo, e o "⋯" sempre à vista. O "⋯" existe porque os dois primeiros são
+ * invisíveis — quem não sabe que há um menu nunca o encontraria. Ele
+ * dispara o mesmo `contextmenu` que o grafo usa para abrir o menu no ponto
+ * certo, então não há um segundo tipo de menu para manter.
+ */
 function TagCard({
   tag,
   onSelect,
+  actions,
 }: {
   tag: TagWithUsage;
   onSelect: () => void;
+  actions: TagCardActions;
 }) {
+  function openMenu(event: React.MouseEvent<HTMLButtonElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: rect.left,
+        clientY: rect.bottom + 4,
+      })
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition-colors duration-150 hover:border-subtle-foreground/60 hover:bg-secondary/50"
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) actions.onMenuOpen(tag);
+      }}
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "size-2.5 shrink-0 rounded-full",
-          TAG_DOT_CLASS[tagTone(tag)]
-        )}
+      <ContextMenuTrigger asChild>
+        <div className="flex items-center rounded-xl border border-border transition-colors duration-150 hover:border-subtle-foreground/60 hover:bg-secondary/50 data-[state=open]:border-subtle-foreground/60 data-[state=open]:bg-secondary/50">
+          <button
+            type="button"
+            onClick={onSelect}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl py-3 pr-2 pl-4 text-left"
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-2.5 shrink-0 rounded-full",
+                TAG_DOT_CLASS[tagTone(tag)]
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              #{tag.name}
+            </span>
+            <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
+              {tag.noteCount} {tag.noteCount === 1 ? "nota" : "notas"}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={openMenu}
+            aria-haspopup="menu"
+            aria-label={`Ações da tag ${tag.name}`}
+            className="mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-tertiary hover:text-foreground pointer-coarse:size-11"
+          >
+            <MoreHorizontal className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+
+      <TagMenuContent
+        tag={tag}
+        editLabel="Renomear ou trocar a cor"
+        onEdit={() => actions.onRename(tag)}
+        onDelete={() => actions.onDelete(tag)}
       />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-        #{tag.name}
-      </span>
-      <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
-        {tag.noteCount} {tag.noteCount === 1 ? "nota" : "notas"}
-      </span>
-    </button>
+    </ContextMenu>
   );
 }
 
@@ -537,38 +687,35 @@ function SelectedTagNotes({
   tag,
   notes,
   now,
+  startRenaming,
   onClear,
+  onUpdated,
+  onDelete,
   onOpenNote,
 }: {
   tag: TagWithUsage;
   notes: RecentNote[] | null;
   now: number;
+  startRenaming: boolean;
   onClear: () => void;
+  onUpdated: (tagId: string, patch: TagPatch) => void;
+  onDelete: () => void;
   onOpenNote: (noteId: string) => void;
 }) {
   return (
     <section aria-labelledby="selected-tag-heading">
-      <div className="flex items-center gap-2">
-        <span
-          id="selected-tag-heading"
-          className={cn(
-            "flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium",
-            TAG_CHIP_CLASS[tagTone(tag)]
-          )}
-        >
-          #{tag.name}
-        </span>
-        <button
-          type="button"
-          onClick={onClear}
-          className="flex size-7 items-center justify-center rounded-full text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground"
-        >
-          <X className="size-4" aria-hidden="true" />
-          <span className="sr-only">Voltar para todas as tags</span>
-        </button>
-      </div>
+      <SelectedTagHeader
+        // Outra tag é outro cabeçalho: um nome meio digitado não passa de uma
+        // tag para a seguinte.
+        key={tag.id}
+        tag={tag}
+        startRenaming={startRenaming}
+        onBack={onClear}
+        onUpdated={onUpdated}
+        onDelete={onDelete}
+      />
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+      <div className="mt-6 overflow-hidden rounded-2xl border border-border">
         {notes === null ? (
           <RowSkeleton rows={3} />
         ) : notes.length === 0 ? (
@@ -591,6 +738,7 @@ function SearchResults({
   query,
   now,
   onSelectTag,
+  cardActions,
   onOpenNote,
 }: {
   matchedTags: TagWithUsage[];
@@ -599,6 +747,7 @@ function SearchResults({
   query: string;
   now: number;
   onSelectTag: (tag: TagWithUsage) => void;
+  cardActions: TagCardActions;
   onOpenNote: (noteId: string) => void;
 }) {
   return (
@@ -614,7 +763,11 @@ function SearchResults({
           <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {matchedTags.map((tag) => (
               <li key={tag.id}>
-                <TagCard tag={tag} onSelect={() => onSelectTag(tag)} />
+                <TagCard
+                  tag={tag}
+                  onSelect={() => onSelectTag(tag)}
+                  actions={cardActions}
+                />
               </li>
             ))}
           </ul>
