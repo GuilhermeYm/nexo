@@ -11,12 +11,9 @@ import { cn } from "@/lib/utils";
  *
  * Trocado por Radix depois de uma primeira versão feita à mão, e a troca
  * paga por si: submenu, navegação por setas, busca por digitação, foco
- * preso dentro do menu, posicionamento que evita sair da tela e **toque
- * longo** vêm prontos. O toque longo importa aqui — sem ele o botão direito
- * seria um recurso só de desktop, o que contradiz o compromisso de
- * multiplataforma do produto.
+ * preso dentro do menu e posicionamento que evita sair da tela vêm prontos.
  *
- * O gesto de arrastar convive com o toque longo porque o Radix cancela a
+ * O gesto de arrastar convive com o duplo clique porque o Radix cancela a
  * contagem assim que o ponteiro se move: arrastar a lousa não abre menu.
  */
 

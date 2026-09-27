@@ -54,13 +54,18 @@ export default async function WorkspacePage(
   ]);
 
   return (
-    <Board
-      workspace={workspace}
-      initialWindows={board.windows}
-      initialConnections={board.connections}
-      initialMarks={marks}
-      focusWindowId={focusWindowId}
-      windowCap={ABSOLUTE_WINDOWS_PER_BOARD}
-    />
+    <div
+      className="h-screen w-screen overflow-hidden"
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <Board
+        workspace={workspace}
+        initialWindows={board.windows}
+        initialConnections={board.connections}
+        initialMarks={marks}
+        focusWindowId={focusWindowId}
+        windowCap={ABSOLUTE_WINDOWS_PER_BOARD}
+      />
+    </div>
   );
 }

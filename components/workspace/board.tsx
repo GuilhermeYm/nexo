@@ -70,7 +70,6 @@ import {
   ContextMenuItem,
   ContextMenuItemLabel,
   ContextMenuSeparator,
-  ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
   useBoardWindows,
@@ -216,6 +215,11 @@ export function Board({
   // botões saem do ar — sem isso o botão continua com o foco do teclado, e
   // a barra de espaço de quem já começou a digitar o aciona de novo.
   const [creating, setCreating] = useState(false);
+  // O menu do fundo abre com duplo clique do botão esquerdo. Controlado
+  // à mão porque o `ContextMenuTrigger` do Radix responde ao botão direito.
+  const [boardMenuOpen, setBoardMenuOpen] = useState(false);
+  // O menu do nome do workspace também abre com duplo clique do botão esquerdo.
+  const [nameMenuOpen, setNameMenuOpen] = useState(false);
   /**
    * A ferramenta na mão.
    *
@@ -1473,20 +1477,6 @@ export function Board({
     zenMode,
   ]);
 
-  const handleBackgroundDoubleClick = useCallback(
-    (event: React.MouseEvent) => {
-      if (zenMode || event.target !== event.currentTarget) return;
-
-      const point = toContainer(event.clientX, event.clientY);
-      const board = toBoard(point.x, point.y);
-      spawn(
-        { kind: "note", title: "Nova nota" },
-        { x: snapToGrid(board.x), y: snapToGrid(board.y) }
-      );
-    },
-    [toContainer, toBoard, spawn, zenMode]
-  );
-
   /* ---------------------------------------------------------------- */
   /* Os repasses de cada janela                                        */
   /*                                                                   */
@@ -1676,9 +1666,15 @@ export function Board({
             O contador ao lado deixou de ser um número solto: "3" não dizia
             nada, e um número sem unidade numa barra de ferramentas é ruído
             que a pessoa aprende a ignorar. */}
-        <ContextMenu>
-          <ContextMenuTrigger asChild disabled={zenMode}>
-            <div className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-150 hover:bg-tertiary">
+        <ContextMenu open={nameMenuOpen} onOpenChange={setNameMenuOpen}>
+            <div
+              onDoubleClick={(event) => {
+                if (zenMode) return;
+                event.preventDefault();
+                setNameMenuOpen(true);
+              }}
+              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 transition-colors duration-150 hover:bg-tertiary"
+            >
               <span
                 aria-hidden="true"
                 className="size-2 shrink-0 rounded-full bg-subtle-foreground"
@@ -1702,7 +1698,7 @@ export function Board({
                   title={
                     zenMode
                       ? name
-                      : "Botão direito (ou dois cliques) para renomear"
+                      : "Dois cliques para renomear"
                   }
                   className="min-w-0 truncate text-sm font-bold text-foreground"
                 >
@@ -1718,7 +1714,6 @@ export function Board({
                   : "elementos"}
               </span>
             </div>
-          </ContextMenuTrigger>
 
           <ContextMenuContent>
             <ContextMenuItem onSelect={() => setRenaming(true)}>
@@ -1936,26 +1931,30 @@ export function Board({
             sensação de superfície — sem referência visual, arrastar no vazio
             não parece movimento. Qual trama e qual cor é escolha da pessoa,
             guardada no workspace: ver `lib/workspace/board-background.ts`. */}
-        <ContextMenu>
-          <ContextMenuTrigger asChild disabled={zenMode}>
-            <div
-              onPointerDown={handleBackgroundPointerDown}
-              onPointerMove={handleBackgroundPointerMove}
-              onPointerUp={handleBackgroundPointerUp}
-              onPointerCancel={handleBackgroundPointerUp}
-              onDoubleClick={handleBackgroundDoubleClick}
-              onContextMenu={(event) =>
-                recordSpawnPoint(event.clientX, event.clientY)
-              }
-              style={{
-                touchAction: "none",
-                ...boardBackgroundStyle(background, viewport),
-              }}
-              className={cn(
-                "absolute inset-0 cursor-grab active:cursor-grabbing",
-                boardSurfaceClass(background.tone)
-              )}
-            >
+        <ContextMenu open={boardMenuOpen} onOpenChange={setBoardMenuOpen}>
+          <div
+            onPointerDown={handleBackgroundPointerDown}
+            onPointerMove={handleBackgroundPointerMove}
+            onPointerUp={handleBackgroundPointerUp}
+            onPointerCancel={handleBackgroundPointerUp}
+            onContextMenu={(event) =>
+              recordSpawnPoint(event.clientX, event.clientY)
+            }
+            onDoubleClick={(event) => {
+              if (zenMode) return;
+              event.preventDefault();
+              recordSpawnPoint(event.clientX, event.clientY);
+              setBoardMenuOpen(true);
+            }}
+            style={{
+              touchAction: "none",
+              ...boardBackgroundStyle(background, viewport),
+            }}
+            className={cn(
+              "absolute inset-0 cursor-grab active:cursor-grabbing",
+              boardSurfaceClass(background.tone)
+            )}
+          >
               {/* O plano. Uma transformação só carrega todas as janelas — mexer
               em `left`/`top` de cada uma a cada quadro de pan custaria um
               recálculo de layout por janela. */}
@@ -2058,11 +2057,9 @@ export function Board({
                 ))}
               </div>
             </div>
-          </ContextMenuTrigger>
 
-          {/* Menu do fundo: cria onde o ponteiro estava. Só abre quando o
-            clique não veio de dentro de uma janela — o gatilho da janela já
-            marcou o evento como tratado, e o Radix respeita isso. */}
+          {/* Menu do fundo: cria onde o ponteiro estava. Abre com duplo
+            clique do botão esquerdo. */}
           <ContextMenuContent>
             <ContextMenuItem
               onSelect={() =>
@@ -2767,14 +2764,21 @@ const BoardWindowItem = memo(function BoardWindowItem({
     [onCommit, id]
   );
   const close = useCallback(() => onClose(id), [onClose, id]);
+  const [windowMenuOpen, setWindowMenuOpen] = useState(false);
 
   return (
     // `display: contents` apaga a caixa deste envelope — as janelas continuam
     // posicionadas em relação ao plano. `pointer-events` é herdada, e é assim
     // que ela chega até a janela sem o envelope virar um alvo.
     <div className="pointer-events-auto contents">
-      <ContextMenu>
-        <ContextMenuTrigger asChild disabled={readOnly}>
+      <ContextMenu open={windowMenuOpen} onOpenChange={setWindowMenuOpen}>
+        <div
+          onDoubleClick={(event) => {
+            if (readOnly) return;
+            event.preventDefault();
+            setWindowMenuOpen(true);
+          }}
+        >
           <WindowFrame
             window={item}
             zoom={zoom}
@@ -2827,7 +2831,7 @@ const BoardWindowItem = memo(function BoardWindowItem({
               />
             )}
           </WindowFrame>
-        </ContextMenuTrigger>
+        </div>
         <WindowMenu
           window={item}
           onOpenAttachment={

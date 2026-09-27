@@ -7,7 +7,6 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuItemLabel,
-  ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
   arrowHead,
@@ -493,9 +492,18 @@ export function ConnectionMenu({
   onRemove: (id: string) => void;
   children: React.ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+    <ContextMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <div
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          setMenuOpen(true);
+        }}
+      >
+        {children}
+      </div>
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => onSelect(id)}>
           <SlidersIcon />

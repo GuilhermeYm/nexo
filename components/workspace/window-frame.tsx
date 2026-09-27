@@ -50,8 +50,8 @@ const KEYBOARD_STEP = 16;
 
 /**
  * Além dos props próprios, a moldura repassa para o `<article>` tudo o que
- * receber de fora. É assim que o `ContextMenuTrigger` do Radix consegue
- * instalar os ouvintes dele — botão direito e toque longo — sem a janela
+ * receber de fora. É assim que o wrapper com `onDoubleClick` consegue
+ * instalar os ouvintes dele — duplo clique do botão esquerdo — sem a janela
  * precisar saber que existe um menu.
  */
 interface WindowFrameProps extends Omit<
@@ -296,9 +296,9 @@ export function WindowFrame({
         trigger.onPointerDown?.(event);
         onFocus();
       }}
-      onContextMenu={(event) => {
+      onDoubleClick={(event) => {
         onFocus();
-        trigger.onContextMenu?.(event);
+        trigger.onDoubleClick?.(event);
       }}
       style={{
         /**
