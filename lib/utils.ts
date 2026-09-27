@@ -41,3 +41,14 @@ export function formatBytes(bytes: number | null): string {
 export function likeContains(text: string): string {
   return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
+
+/**
+ * Texto para comparar sem tropeçar em acento nem caixa: "Reunião" e
+ * "reuniao" viram a mesma coisa. É o que as buscas feitas no cliente usam.
+ */
+export function foldText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}

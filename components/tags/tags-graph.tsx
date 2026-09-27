@@ -1,7 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import dynamic from "next/dynamic";
 import type { ReactElement, RefObject } from "react";
 import { Maximize, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
@@ -14,7 +21,7 @@ import type {
 } from "react-force-graph-2d";
 import { TAG_PALETTE, paletteFromName } from "@/lib/tags/palette";
 import type { TagGraph } from "@/lib/tags/queries";
-import { cn } from "@/lib/utils";
+import { cn, foldText } from "@/lib/utils";
 
 import {
   TagGraphNoteMenu,
@@ -72,6 +79,15 @@ function radiusFor(kind: "note" | "tag", degree: number): number {
   return kind === "tag"
     ? 6.5 + Math.min(degree, 14) * 0.6
     : 4 + Math.min(degree, 6) * 0.4;
+}
+
+/** O nome inteiro do nó, para o cartão de foco. */
+function nodeTitle(node: GraphNodeData): string {
+  return node.kind === "tag" ? `#${node.name}` : node.name.trim() || "Sem título";
+}
+
+function degreeLabel(degree: number): string {
+  return degree === 1 ? "1 ligação" : `${degree} ligações`;
 }
 
 /** Título longo vira reticências: o rótulo é uma etiqueta, não o conteúdo. */
@@ -227,14 +243,50 @@ function createCenterPull(strength: number) {
   return force;
 }
 
+/**
+ * Toque em vez de mouse. No toque não existe hover nem botão direito — as duas
+ * formas que o grafo usava para mostrar um nó antes de abri-lo e para chegar
+ * ao menu dele. Com toque, o primeiro toque foca o nó (a vizinhança acende e
+ * aparecem "Abrir" e "Opções") e o segundo abre.
+ */
+const COARSE_QUERY = "(pointer: coarse)";
+
+function subscribeCoarse(onChange: () => void) {
+  const media = window.matchMedia(COARSE_QUERY);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+function useCoarsePointer(): boolean {
+  return useSyncExternalStore(
+    subscribeCoarse,
+    () => window.matchMedia(COARSE_QUERY).matches,
+    () => false
+  );
+}
+
+/** Abaixo disto, os rótulos de todas as tags não cabem sem se atropelar. */
+const NARROW_WIDTH = 560;
+/** Numa tela estreita, quantas tags (as mais ligadas) escrevem o nome sem zoom. */
+const NARROW_LABELS = 8;
+
 export function TagsGraph({
   notes,
   tags,
   links,
+  searchQuery = "",
+  onOpenTag,
   onTagColorChange,
   onNoteTagsEdited,
   onTagDeleted,
 }: TagGraph & {
+  /**
+   * O que está digitado na busca da página. No grafo ela não troca a tela:
+   * acende os nós cujo nome bate e deixa o resto recuar.
+   */
+  searchQuery?: string;
+  /** Clicar numa tag abre as notas dela — o mesmo gesto da lista. */
+  onOpenTag?: (tagId: string) => void;
   /** Avisa a tela quando uma cor grava de verdade, para a lista acompanhar. */
   onTagColorChange?: (tagId: string, color: string | null) => void;
   /** As tags de uma nota podem ter mudado pelo menu: o grafo precisa se refazer. */
@@ -249,7 +301,12 @@ export function TagsGraph({
   );
   const theme = useResolvedTheme();
 
+  const coarse = useCoarsePointer();
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  // O nó focado por toque. Fica separado do hover porque a lib também dispara
+  // hover num toque — e aí o primeiro toque já contaria como o segundo.
+  const [tappedNode, setTappedNode] = useState<GraphNode | null>(null);
+  const activeNode = hoveredNode ?? tappedNode;
   const [selectedTag, setSelectedTag] = useState<{
     id: string;
     name: string;
@@ -286,7 +343,10 @@ export function TagsGraph({
   // Escape fecha o editor de cor, como fecha tudo no resto do app.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setSelectedTag(null);
+      if (event.key === "Escape") {
+        setSelectedTag(null);
+        setTappedNode(null);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -379,20 +439,45 @@ export function TagsGraph({
     [layout, links]
   );
 
+  // A busca da página, no grafo: os nós cujo nome bate. Sem busca, nulo.
+  const foldedQuery = foldText(searchQuery.trim());
+  const matchIds = useMemo(() => {
+    if (!foldedQuery) return null;
+    const ids = new Set<string>();
+    for (const node of layout?.nodes ?? []) {
+      if (foldText(node.name).includes(foldedQuery)) ids.add(String(node.id));
+    }
+    return ids;
+  }, [foldedQuery, layout]);
+
+  // As tags que escrevem o nome numa tela estreita: as mais ligadas. Um corte
+  // fixo por grau deixava grafos pequenos sem nome nenhum.
+  const narrowLabelIds = useMemo(
+    () =>
+      new Set(
+        (layout?.nodes ?? [])
+          .filter((node) => node.kind === "tag")
+          .sort((a, b) => b.degree - a.degree)
+          .slice(0, NARROW_LABELS)
+          .map((node) => String(node.id))
+      ),
+    [layout]
+  );
+
   // Em hover, o foco é o nó e a sua vizinhança; o resto do grafo recua.
   const highlightIds = useMemo(() => {
-    if (!hoveredNode) return null;
-    const ids = new Set<string>([String(hoveredNode.id)]);
+    if (!activeNode) return null;
+    const ids = new Set<string>([String(activeNode.id)]);
     for (const link of graphLinks) {
       const source = link.source as unknown as GraphNode | string;
       const target = link.target as unknown as GraphNode | string;
       const sourceId = typeof source === "string" ? source : String(source.id);
       const targetId = typeof target === "string" ? target : String(target.id);
-      if (sourceId === hoveredNode.id) ids.add(targetId);
-      if (targetId === hoveredNode.id) ids.add(sourceId);
+      if (sourceId === activeNode.id) ids.add(targetId);
+      if (targetId === activeNode.id) ids.add(sourceId);
     }
     return ids;
-  }, [hoveredNode, graphLinks]);
+  }, [activeNode, graphLinks]);
 
   /* --- Desenho ------------------------------------------------------------ */
 
@@ -409,9 +494,12 @@ export function TagsGraph({
       const { colors } = theme;
       const x = node.x ?? 0;
       const y = node.y ?? 0;
-      const dimmed = Boolean(
-        highlightIds && !highlightIds.has(String(node.id))
-      );
+      const id = String(node.id);
+      // O hover manda mais que a busca: ele é o gesto de agora.
+      const dimmed = highlightIds
+        ? !highlightIds.has(id)
+        : Boolean(matchIds && !matchIds.has(id));
+      const matched = !highlightIds && Boolean(matchIds?.has(id));
       const radius = node.radius;
 
       const tone =
@@ -446,8 +534,8 @@ export function TagsGraph({
         ctx.stroke();
       }
 
-      const focused = String(node.id) === String(hoveredNode?.id);
-      if (focused) {
+      const focused = id === String(activeNode?.id);
+      if (focused || matched) {
         ctx.beginPath();
         ctx.arc(x, y, radius + 3.5 / globalScale, 0, TAU);
         ctx.lineWidth = 1.5 / globalScale;
@@ -455,11 +543,19 @@ export function TagsGraph({
         ctx.stroke();
       }
 
+      // Numa tela estreita, os nomes de todas as tags viram um bolo de texto:
+      // ali só as tags mais ligadas escrevem o nome até a pessoa aproximar. O
+      // que está em foco (hover, toque, busca) escreve sempre.
+      const crowded = width < NARROW_WIDTH && globalScale < 1.3;
       const showLabel =
-        node.kind === "tag" ||
-        focused ||
-        globalScale > 1.8 ||
-        Boolean(highlightIds && !dimmed);
+        // Com algo em foco numa tela estreita, o nome do que recuou só
+        // atropelaria o nome do que está em foco.
+        !(crowded && dimmed) &&
+        ((node.kind === "tag" && (!crowded || narrowLabelIds.has(id))) ||
+          focused ||
+          matched ||
+          globalScale > 1.8 ||
+          Boolean(highlightIds && !dimmed));
 
       if (showLabel) {
         const isTag = node.kind === "tag";
@@ -489,7 +585,7 @@ export function TagsGraph({
 
       ctx.restore();
     },
-    [theme, highlightIds, hoveredNode]
+    [theme, highlightIds, activeNode, matchIds, width, narrowLabelIds]
   );
 
   /**
@@ -512,31 +608,32 @@ export function TagsGraph({
       // A aresta é o conteúdo do grafo, não moldura: a 0,35 ela simplesmente
       // não existia no tema escuro (#8c8c93 rebaixado sobre #0f0f11).
       const base = theme.colors["subtle-foreground"];
-      if (!highlightIds) return withAlpha(base, 0.55);
+      if (!highlightIds && !matchIds) return withAlpha(base, 0.55);
 
       const source = link.source as unknown as GraphNode | string;
       const target = link.target as unknown as GraphNode | string;
       const sourceId = typeof source === "string" ? source : String(source.id);
       const targetId = typeof target === "string" ? target : String(target.id);
-      const inFocus =
-        sourceId === hoveredNode?.id || targetId === hoveredNode?.id;
+      const inFocus = highlightIds
+        ? sourceId === activeNode?.id || targetId === activeNode?.id
+        : Boolean(matchIds?.has(sourceId) || matchIds?.has(targetId));
       return inFocus ? withAlpha(base, 1) : withAlpha(base, 0.1);
     },
-    [theme, highlightIds, hoveredNode]
+    [theme, highlightIds, activeNode, matchIds]
   );
 
   const linkWidth = useCallback(
     (link: GraphLink) => {
-      if (!highlightIds || !hoveredNode) return 1;
+      if (!highlightIds || !activeNode) return 1;
       const source = link.source as unknown as GraphNode | string;
       const target = link.target as unknown as GraphNode | string;
       const sourceId = typeof source === "string" ? source : String(source.id);
       const targetId = typeof target === "string" ? target : String(target.id);
-      return sourceId === hoveredNode.id || targetId === hoveredNode.id
+      return sourceId === activeNode.id || targetId === activeNode.id
         ? 1.8
         : 1;
     },
-    [highlightIds, hoveredNode]
+    [highlightIds, activeNode]
   );
 
   /* --- Arranjo ------------------------------------------------------------ */
@@ -589,21 +686,32 @@ export function TagsGraph({
 
   /* --- Interação ---------------------------------------------------------- */
 
+  /**
+   * Abrir um nó: a nota vai para o editor; a tag abre as notas dela, o mesmo
+   * gesto do cartão na lista. Antes o clique na tag abria o editor de cor —
+   * a mesma tag queria dizer uma coisa na lista e outra aqui. A cor continua a
+   * um botão direito ("Trocar a cor") e no cabeçalho da tag aberta.
+   */
+  const openNode = useCallback(
+    (node: GraphNode) => {
+      if (typeof node.id !== "string") return;
+      if (node.kind === "note") router.push(`/nota/${node.id}`);
+      else onOpenTag?.(node.id);
+    },
+    [router, onOpenTag]
+  );
+
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
-      if (node.kind === "note" && typeof node.id === "string") {
-        router.push(`/nota/${node.id}`);
+      // No toque, o primeiro toque só foca: um ponto de 8px não é alvo para
+      // sair da página sem ver antes o que ele é.
+      if (coarse && String(tappedNode?.id) !== String(node.id)) {
+        setTappedNode(node);
         return;
       }
-      // Tag abre o editor de cor; clicar de novo no mesmo nó fecha.
-      setSelectedTag((current) =>
-        current?.id === node.id
-          ? null
-          : { id: String(node.id), name: node.name, color: node.color }
-      );
-      setSaveError(false);
+      openNode(node);
     },
-    [router]
+    [coarse, tappedNode, openNode]
   );
 
   /**
@@ -745,6 +853,13 @@ export function TagsGraph({
         style={{ cursor: hoveredNode ? "pointer" : "grab" }}
         className="relative"
       >
+        {/* O canvas não tem o que um leitor de tela leia. A lista é o caminho
+            navegável; aqui fica dito o que o desenho mostra e onde ir. */}
+        <p className="sr-only">
+          Grafo com {tags.length} {tags.length === 1 ? "tag" : "tags"} e{" "}
+          {notes.length} {notes.length === 1 ? "nota" : "notas"} ligadas por
+          elas. Para navegar pelo teclado, use a lista de tags.
+        </p>
         {/* O nome de cada nó é desenhado no canvas (ver `drawNode`), então o
             rótulo nativo da lib — um title correndo atrás do mouse — só
             duplicaria a informação. Daí o nodeLabel vazio. */}
@@ -757,8 +872,13 @@ export function TagsGraph({
           linkWidth={linkWidth}
           onNodeClick={handleNodeClick}
           onNodeRightClick={handleNodeRightClick}
-          onNodeHover={(node) => setHoveredNode(node as GraphNode | null)}
-          onBackgroundClick={() => setSelectedTag(null)}
+          onNodeHover={(node) => {
+            if (!coarse) setHoveredNode(node as GraphNode | null);
+          }}
+          onBackgroundClick={() => {
+            setSelectedTag(null);
+            setTappedNode(null);
+          }}
           onZoom={({ k }) => setZoomK(k)}
           onEngineTick={tuneForces}
           onEngineStop={() => {
@@ -786,31 +906,72 @@ export function TagsGraph({
           <GraphControlButton label="Recentralizar" onClick={resetView}>
             <RotateCcw className="size-4" aria-hidden="true" />
           </GraphControlButton>
-          <span className="px-1 pt-0.5 text-[10px] tabular-nums text-subtle-foreground">
+          <span className="px-1 pt-0.5 text-[11px] tabular-nums text-subtle-foreground">
             {Math.round(zoomK * 100)}%
           </span>
         </div>
 
         {/* Detalhe do nó em foco: o rótulo já está no canvas, então aqui vai o
             que ele não cabe — o título inteiro e para onde o clique leva. */}
-        {hoveredNode && (
+        {hoveredNode ? (
           <div className="pointer-events-none absolute top-3 left-3 max-w-[min(20rem,calc(100%-6rem))] rounded-lg bg-foreground px-2.5 py-1.5 text-xs text-background">
             <span className="block truncate font-medium">
-              {hoveredNode.kind === "tag"
-                ? `#${hoveredNode.name}`
-                : hoveredNode.name.trim() || "Sem título"}
+              {nodeTitle(hoveredNode)}
             </span>
             <span className="block opacity-70">
-              {hoveredNode.degree === 1
-                ? "1 ligação"
-                : `${hoveredNode.degree} ligações`}
+              {degreeLabel(hoveredNode.degree)}
               {" · "}
-              {hoveredNode.kind === "tag"
-                ? "trocar a cor"
-                : "abrir a nota · botão direito para mais"}
+              {hoveredNode.kind === "tag" ? "abrir as notas" : "abrir a nota"}
+              {" · botão direito para mais"}
             </span>
           </div>
-        )}
+        ) : tappedNode ? (
+          // No toque, o foco vira um cartão com as ações que o mouse teria
+          // no clique e no botão direito.
+          <div className="absolute top-3 left-3 flex max-w-[min(20rem,calc(100%-5rem))] flex-col gap-2 rounded-xl border border-border bg-background/95 p-2.5 shadow-lg backdrop-blur-sm">
+            <div className="min-w-0 px-1">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {nodeTitle(tappedNode)}
+              </span>
+              <span className="block text-xs text-subtle-foreground">
+                {degreeLabel(tappedNode.degree)} · toque de novo para abrir
+              </span>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => openNode(tappedNode)}
+                className="h-11 flex-1 rounded-lg bg-foreground px-3 text-sm font-medium text-background"
+              >
+                Abrir
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  handleNodeRightClick(tappedNode, {
+                    clientX: rect.left,
+                    clientY: rect.bottom + 4,
+                  } as MouseEvent);
+                }}
+                className="h-11 flex-1 rounded-lg border border-border px-3 text-sm font-medium text-foreground"
+              >
+                Opções
+              </button>
+            </div>
+          </div>
+        ) : matchIds ? (
+          <div
+            role="status"
+            className="pointer-events-none absolute top-3 left-3 max-w-[min(20rem,calc(100%-6rem))] rounded-lg border border-border bg-background/95 px-2.5 py-1.5 text-xs text-muted-foreground backdrop-blur-sm"
+          >
+            {matchIds.size === 0
+              ? `Nada no grafo tem “${searchQuery.trim()}” no nome.`
+              : matchIds.size === 1
+                ? `1 nó tem “${searchQuery.trim()}” no nome.`
+                : `${matchIds.size} nós têm “${searchQuery.trim()}” no nome.`}
+          </div>
+        ) : null}
 
         {/* O recado do menu da nota: mover de pasta não muda nada no
             canvas, então sem ele a pessoa não saberia se deu certo. */}
@@ -928,6 +1089,7 @@ export function TagsGraph({
           setSaveError(false);
         }}
         onDeleted={(tagId) => {
+          setTappedNode(null);
           const name = tagMenu?.id === tagId ? `“${tagMenu.name}”` : null;
           onTagDeleted?.(tagId);
           setNotice({
