@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { Board } from "@/components/workspace/board";
+import { DisableNativeContextMenu } from "@/app/workspace/[id]/disable-native-context-menu";
 import { ABSOLUTE_WINDOWS_PER_BOARD } from "@/lib/limits";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnedWorkspace, listBoardMarks, readBoard } from "@/lib/workspace/queries";
@@ -54,10 +55,8 @@ export default async function WorkspacePage(
   ]);
 
   return (
-    <div
-      className="h-screen w-screen overflow-hidden"
-      onContextMenu={(e) => e.preventDefault()}
-    >
+    <div className="h-screen w-screen overflow-hidden">
+      <DisableNativeContextMenu />
       <Board
         workspace={workspace}
         initialWindows={board.windows}
