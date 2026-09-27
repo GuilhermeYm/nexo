@@ -70,6 +70,7 @@ import {
   ContextMenuItem,
   ContextMenuItemLabel,
   ContextMenuSeparator,
+  ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
   useBoardWindows,
@@ -220,6 +221,10 @@ export function Board({
   const [boardMenuOpen, setBoardMenuOpen] = useState(false);
   // O menu do nome do workspace também abre com duplo clique do botão esquerdo.
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
+  // Posição do último duplo clique — usada para posicionar o menu.
+  const [boardMenuAnchor, setBoardMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  // Ref do trigger do menu do fundo — ativado no duplo clique.
+  const boardMenuTriggerRef = useRef<HTMLSpanElement>(null);
   /**
    * A ferramenta na mão.
    *
@@ -1932,20 +1937,28 @@ export function Board({
             não parece movimento. Qual trama e qual cor é escolha da pessoa,
             guardada no workspace: ver `lib/workspace/board-background.ts`. */}
         <ContextMenu open={boardMenuOpen} onOpenChange={setBoardMenuOpen}>
-          <div
-            onPointerDown={handleBackgroundPointerDown}
-            onPointerMove={handleBackgroundPointerMove}
-            onPointerUp={handleBackgroundPointerUp}
-            onPointerCancel={handleBackgroundPointerUp}
-            onContextMenu={(event) =>
-              recordSpawnPoint(event.clientX, event.clientY)
-            }
-            onDoubleClick={(event) => {
-              if (zenMode) return;
-              event.preventDefault();
-              recordSpawnPoint(event.clientX, event.clientY);
-              setBoardMenuOpen(true);
-            }}
+          <ContextMenuTrigger ref={boardMenuTriggerRef} asChild>
+            <div
+              onPointerDown={handleBackgroundPointerDown}
+              onPointerMove={handleBackgroundPointerMove}
+              onPointerUp={handleBackgroundPointerUp}
+              onPointerCancel={handleBackgroundPointerUp}
+              onContextMenu={(event) =>
+                recordSpawnPoint(event.clientX, event.clientY)
+              }
+              onDoubleClick={(event) => {
+                if (zenMode) return;
+                event.preventDefault();
+                recordSpawnPoint(event.clientX, event.clientY);
+                boardMenuTriggerRef.current?.dispatchEvent(
+                  new MouseEvent("contextmenu", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                  })
+                );
+              }}
             style={{
               touchAction: "none",
               ...boardBackgroundStyle(background, viewport),
@@ -2057,6 +2070,7 @@ export function Board({
                 ))}
               </div>
             </div>
+          </ContextMenuTrigger>
 
           {/* Menu do fundo: cria onde o ponteiro estava. Abre com duplo
             clique do botão esquerdo. */}
