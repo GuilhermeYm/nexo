@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * contagem assim que o ponteiro se move: arrastar a lousa não abre menu.
  */
 
-export const ContextMenu = ContextMenuPrimitive.Root;
+export const ContextMenu: typeof ContextMenuPrimitive.Root = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 export const ContextMenuSub = ContextMenuPrimitive.Sub;
 
