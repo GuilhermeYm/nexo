@@ -51,6 +51,9 @@ const PLACEHOLDERS = [
   "notas marcadas com #pesquisa",
 ];
 
+/** O campo de busca e envio; o "Pular para a busca" do shell mira aqui. */
+export const CAPTURE_INPUT_ID = "nexo-capture";
+
 const ROTATION_MS = 4200;
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -479,6 +482,7 @@ export function CommandBar({
           <div className="relative flex-1">
             <input
               ref={inputRef}
+              id={CAPTURE_INPUT_ID}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -513,12 +517,16 @@ export function CommandBar({
                 {PLACEHOLDERS.map((text, index) => (
                   <span
                     key={text}
+                    // A frase que sai termina antes de a próxima começar
+                    // (`delay-200` só na que entra): com as duas transições
+                    // ao mesmo tempo, o meio da troca mostrava duas frases
+                    // sobrepostas.
                     className={cn(
-                      "absolute whitespace-nowrap text-[15px] text-subtle-foreground",
-                      "transition-[opacity,transform] duration-500 ease-out motion-reduce:transition-none",
+                      "absolute max-w-full truncate text-[15px] text-subtle-foreground",
+                      "transition-[opacity,transform] ease-out motion-reduce:transition-none",
                       index === placeholderIndex
-                        ? "translate-y-0 opacity-100"
-                        : "pointer-events-none translate-y-2 opacity-0"
+                        ? "translate-y-0 opacity-100 delay-200 duration-500"
+                        : "pointer-events-none -translate-y-1 opacity-0 duration-200"
                     )}
                   >
                     {text}
@@ -585,21 +593,6 @@ export function CommandBar({
               )}
               <span className="sr-only">Enviar arquivo</span>
             </button>
-
-            {/* Pedir para a IA ainda não tem controle de crédito, então o botão
-                existe desabilitado em vez de sumir: o usuário fica sabendo que
-                o caminho existe, e por que ainda não dá. */}
-            <button
-              type="button"
-              disabled
-              aria-describedby={`${listboxId}-ai`}
-              className="flex h-9 cursor-not-allowed items-center gap-1.5 rounded-xl px-2.5 text-muted-foreground opacity-55"
-            >
-              <Sparkles className="size-[18px]" aria-hidden="true" />
-              <span className="hidden text-sm font-medium sm:inline">
-                Pedir à IA
-              </span>
-            </button>
           </div>
         </div>
 
@@ -621,43 +614,41 @@ export function CommandBar({
         )}
       </div>
 
-      {/* A linha de rodapé da barra: o que está acontecendo à esquerda, a
-          atribuição do modelo à direita.
+      {/* A linha de rodapé da barra: o que está acontecendo com o envio.
 
-          O crédito fica aqui, e não colado no botão "Pedir à IA": a Groq já
-          classifica cada arquivo enviado hoje, enquanto o botão continua
-          esperando os créditos. Preso ao botão, o crédito diria a coisa errada
-          — que a IA ainda não está em uso. */}
-      <div className="mt-2.5 flex items-baseline justify-between gap-3 px-1">
-        <p
-          id={`${listboxId}-ai`}
-          className="min-w-0 text-xs text-subtle-foreground"
-        >
-          {upload.phase === "sending" ? (
-            <span className="text-muted-foreground">
-              Enviando {upload.filename}… a Nexo classifica assim que chegar.
-            </span>
-          ) : upload.phase === "done" ? (
-            <span className="text-muted-foreground">
-              {upload.filename} chegou. A classificação aparece em Tarefas.
-            </span>
-          ) : upload.phase === "error" ? (
-            <span className="flex items-center gap-1.5 text-error">
-              <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-              {upload.message}
-            </span>
-          ) : (
-            <>
-              Busca e envio estão no ar. Pedir à IA em linguagem natural vem
-              depois — e vai responder sobre workspaces, pastas e tags.
-            </>
-          )}
-        </p>
+          Em repouso ela ensina a outra metade da barra — que dá para soltar
+          um arquivo aqui —, e não o roadmap. Sem crédito de provedor: a
+          instância pode estar lendo com a Groq, a OpenAI ou nenhuma das duas,
+          e esta linha não sabe qual.
 
-        <span className="shrink-0 text-[10px] font-semibold tracking-[0.08em] whitespace-nowrap text-subtle-foreground/70 uppercase">
-          Powered by Groq
-        </span>
-      </div>
+          `aria-live` porque o envio acontece longe do foco: quem usa leitor
+          de tela escolhe o arquivo num diálogo do sistema e volta sem saber
+          se ele chegou. */}
+      <p
+        aria-live="polite"
+        className="mt-2.5 min-w-0 px-1 text-xs leading-relaxed text-subtle-foreground"
+      >
+        {upload.phase === "sending" ? (
+          <span className="text-muted-foreground">
+            Enviando {upload.filename}… a Nexo classifica assim que chegar.
+          </span>
+        ) : upload.phase === "done" ? (
+          <span className="text-muted-foreground">
+            {upload.filename} chegou. O que a Nexo decidir aparece em Atividade
+            da Nexo, logo abaixo.
+          </span>
+        ) : upload.phase === "error" ? (
+          <span className="flex items-center gap-1.5 text-error">
+            <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+            {upload.message}
+          </span>
+        ) : (
+          <>
+            Solte aqui um PDF, áudio, imagem ou texto — a Nexo lê, classifica
+            e guarda.
+          </>
+        )}
+      </p>
 
       {/* Fora do `<p>` acima, e não dentro: o relato tem um campo de texto e
           botões, e `<div>` dentro de `<p>` é HTML inválido — o navegador

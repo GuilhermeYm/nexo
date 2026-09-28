@@ -540,7 +540,7 @@ export async function POST(request: Request) {
 
     // 3.1) Registra o trabalho no feed de Tarefas.
     //
-    // Sem isto o painel "Tarefas" do dashboard fica permanentemente vazio,
+    // Sem isto o painel "Atividade da Nexo" do dashboard fica permanentemente vazio,
     // enquanto o estado vazio dele promete que "cada coisa que a Nexo ler,
     // classificar ou marcar aparece aqui". A linha é o que torna o trabalho
     // do agente visível — e é ela que dá ao usuário como saber que a

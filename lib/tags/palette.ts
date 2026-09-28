@@ -8,7 +8,8 @@
  *
  * As tags criadas na lousa (`POST /api/notes/[id]/tags`) **gravam** essa cor,
  * então elas aparecem coloridas em todo lugar; as antigas, sem cor, só ganham
- * a cor derivada onde `tagTone` é usado — hoje, a página `/dashboard/tags`.
+ * a cor derivada onde `tagTone` é usado — a página `/dashboard/tags` e o
+ * dashboard (Recentes e "Tags mais usadas").
  */
 
 export const TAG_PALETTE = ["1", "2", "3", "4", "5", "6"] as const;

@@ -5,7 +5,7 @@ import {
   ArrowUpRight,
   CircleAlert,
   CircleCheck,
-  Coins,
+  CirclePause,
   FileText,
   FolderTree,
   LoaderCircle,
@@ -79,9 +79,9 @@ const STATUS: Record<string, StatusStyle> = {
   succeeded: { icon: CircleCheck, tone: "text-tag-3-foreground", label: "Concluída" },
   failed: { icon: CircleAlert, tone: "text-error", label: "Falhou" },
   insufficient_credits: {
-    icon: Coins,
+    icon: CirclePause,
     tone: "text-tag-1-foreground",
-    label: "Sem créditos",
+    label: "Parada no limite",
   },
 };
 
@@ -457,7 +457,7 @@ export function TasksFullscreen({
           <header className="flex shrink-0 items-start gap-4 border-b border-border px-4 py-3.5 sm:px-6 sm:py-4">
             <div className="min-w-0 flex-1">
               <h2 id={titleId} className="text-base font-semibold text-foreground">
-                Tarefas
+                Atividade da Nexo
               </h2>
               <p id={`${titleId}-description`} className="mt-0.5 text-sm text-muted-foreground">
                 Tudo o que a Nexo leu, classificou e transcreveu — e como.
@@ -481,7 +481,7 @@ export function TasksFullscreen({
                 className="flex size-9 items-center justify-center rounded-xl text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
               >
                 <X className="size-[18px]" aria-hidden="true" />
-                <span className="sr-only">Fechar a tela cheia de Tarefas</span>
+                <span className="sr-only">Fechar a tela cheia da Atividade da Nexo</span>
               </button>
             </div>
           </header>

@@ -285,7 +285,7 @@ export function NotificationItem({
               }}
               className="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:h-10"
             >
-              {jobStatus ? "Ver em Tarefas" : "Abrir a nota"}
+              {jobStatus ? "Ver na Atividade" : "Abrir a nota"}
               <ArrowUpRight className="size-3.5" aria-hidden="true" />
             </Link>
           )}

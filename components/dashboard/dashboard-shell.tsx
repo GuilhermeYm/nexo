@@ -5,7 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { CommandBar } from "@/components/dashboard/command-bar";
+import {
+  CAPTURE_INPUT_ID,
+  CommandBar,
+} from "@/components/dashboard/command-bar";
 import { DraftNote } from "@/components/dashboard/draft-note";
 import { RecentPanel } from "@/components/dashboard/recent-panel";
 import { Sidebar } from "@/components/dashboard/sidebar";
@@ -13,9 +16,14 @@ import { TasksPanel } from "@/components/dashboard/tasks-panel";
 import { TodayTasks } from "@/components/dashboard/today-tasks";
 import { TopTags } from "@/components/dashboard/top-tags";
 import { HOME_TAB, useOpenTabs } from "@/hooks/use-open-tabs";
+import { useLocalDay } from "@/hooks/use-local-day";
 import { usePersistedFlag } from "@/hooks/use-persisted-flag";
 import { useUnreadCount } from "@/hooks/use-unread-count";
-import { firstName, greetingFor } from "@/lib/dashboard/format";
+import {
+  firstName,
+  formatDayHeading,
+  greetingFor,
+} from "@/lib/dashboard/format";
 import { ErrorReport } from "@/components/errors/error-report";
 import { isErrorCode } from "@/lib/errors/code";
 import { readApiFailure } from "@/lib/api-failure";
@@ -344,7 +352,7 @@ export function DashboardShell({
   }, [router]);
 
   // Os painéis lá embaixo conseguem disparar as duas ações da barra de cima:
-  // "Escrever uma nota" abre o rascunho, "Enviar um arquivo" abre o seletor.
+  // "Escrever um rascunho" abre o rascunho, "Enviar um arquivo" abre o seletor.
   // O mesmo padrão de `registerRefresh` — o filho entrega a função, o shell
   // guarda a referência.
   const openDraft = useRef<(() => void) | null>(null);
@@ -381,12 +389,27 @@ export function DashboardShell({
 
   const greeting = greetingFor(hour);
   const name = firstName(userName);
+  const today = useLocalDay();
 
   return (
     <div
       data-app-viewport=""
       className="flex h-dvh overflow-hidden overscroll-contain bg-secondary"
     >
+      {/* Até o campo de captura eram 28 Tabs: o trilho inteiro e a barra de
+          abas vêm antes dele. O primeiro Tab da página oferece o atalho. */}
+      {tabs.includes(HOME_TAB) && (
+        <a
+          href={`#${CAPTURE_INPUT_ID}`}
+          onClick={(event) => {
+            event.preventDefault();
+            document.getElementById(CAPTURE_INPUT_ID)?.focus();
+          }}
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-xl focus:bg-foreground focus:px-4 focus:py-2.5 focus:text-sm focus:font-medium focus:text-background"
+        >
+          Pular para a busca e o envio
+        </a>
+      )}
       <Sidebar
         open={sidebarOpen}
         drawerOpen={drawerOpen}
@@ -531,36 +554,42 @@ export function DashboardShell({
               onOpenSidebar={revealSidebar}
             />
           ) : (
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-14 sm:py-20">
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 pt-10 pb-14 sm:px-6 sm:pt-16 sm:pb-20">
+              {/* A ordem da página é a ordem do uso: guardar, ver o que a
+                  Nexo fez com isso e reencontrar, e só então o dia e os
+                  atalhos. O resultado da captura (Atividade) e as Recentes
+                  moravam abaixo da Agenda e de uma grade de tags — a
+                  primeira dobra mostrava tudo, menos o que acabou de chegar. */}
               <div
                 data-dashboard-enter=""
-                className="flex animate-dashboard-enter items-center gap-3 motion-reduce:animate-none"
+                className="animate-dashboard-enter motion-reduce:animate-none"
               >
-                <span
-                  aria-hidden="true"
-                  className="flex size-9 items-center justify-center rounded-xl bg-accent text-sm font-bold text-accent-foreground font-[family-name:var(--font-display)]"
-                >
-                  n.
-                </span>
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
+                <h1 className="text-2xl font-semibold tracking-tight text-balance text-foreground sm:text-[28px]">
                   {greeting}
                   {name ? `, ${name}` : ""}
                 </h1>
+                {/* O dia só existe no cliente — o servidor não sabe o fuso
+                    de quem lê (ver `useLocalDay`). Até lá, só a frase. */}
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {today && (
+                    <>
+                      <time dateTime={today} className="text-foreground">
+                        {formatDayHeading(today)}
+                      </time>
+                      <span aria-hidden="true" className="mx-2 text-border">
+                        ·
+                      </span>
+                    </>
+                  )}
+                  Jogue aqui o que chegou; você só volta quando precisar
+                  reencontrar.
+                </p>
               </div>
-
-              <p
-                data-dashboard-enter=""
-                className="mt-2.5 animate-dashboard-enter text-sm leading-relaxed text-muted-foreground motion-reduce:animate-none"
-                style={{ animationDelay: "45ms" }}
-              >
-                Jogue o que chegou aqui dentro. A Nexo lê, classifica e guarda —
-                você só volta quando precisar reencontrar.
-              </p>
 
               <div
                 data-dashboard-enter=""
                 className="mt-7 animate-dashboard-enter motion-reduce:animate-none"
-                style={{ animationDelay: "90ms" }}
+                style={{ animationDelay: "60ms" }}
               >
                 <CommandBar
                   onUploaded={handleUploaded}
@@ -576,35 +605,14 @@ export function DashboardShell({
                 />
               </div>
 
-              <div
-                data-dashboard-enter=""
-                className="animate-dashboard-enter motion-reduce:animate-none"
-                style={{ animationDelay: "145ms" }}
-              >
-                <TodayTasks />
-              </div>
-
-              <TopTags tags={topTags} entranceDelay="200ms" />
-
-              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {/* Recentes primeiro: numa tela estreita as duas colunas viram
+                  uma pilha, e o que se reencontra vem antes do registro do
+                  que a IA fez. */}
+              <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div
                   data-dashboard-enter=""
                   className="animate-dashboard-enter motion-reduce:animate-none"
-                  style={{ animationDelay: "255ms" }}
-                >
-                  <TasksPanel
-                    initial={jobs}
-                    renderedAt={renderedAt}
-                    now={now}
-                    registerRefresh={registerRefresh}
-                    onUpload={handlePickFile}
-                    focusJobId={focusJobId}
-                  />
-                </div>
-                <div
-                  data-dashboard-enter=""
-                  className="animate-dashboard-enter motion-reduce:animate-none"
-                  style={{ animationDelay: "300ms" }}
+                  style={{ animationDelay: "120ms" }}
                 >
                   <RecentPanel
                     initial={notes}
@@ -615,7 +623,31 @@ export function DashboardShell({
                     onCreateNote={handleCreateNote}
                   />
                 </div>
+                <div
+                  data-dashboard-enter=""
+                  className="animate-dashboard-enter motion-reduce:animate-none"
+                  style={{ animationDelay: "165ms" }}
+                >
+                  <TasksPanel
+                    initial={jobs}
+                    renderedAt={renderedAt}
+                    now={now}
+                    registerRefresh={registerRefresh}
+                    onUpload={handlePickFile}
+                    focusJobId={focusJobId}
+                  />
+                </div>
               </div>
+
+              <div
+                data-dashboard-enter=""
+                className="animate-dashboard-enter motion-reduce:animate-none"
+                style={{ animationDelay: "210ms" }}
+              >
+                <TodayTasks />
+              </div>
+
+              <TopTags tags={topTags} entranceDelay="255ms" />
             </div>
           )}
         </main>

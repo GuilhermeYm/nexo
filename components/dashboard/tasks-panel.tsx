@@ -3,7 +3,7 @@
 import {
   CircleAlert,
   CircleCheck,
-  Coins,
+  CirclePause,
   FolderTree,
   LoaderCircle,
   Maximize2,
@@ -75,10 +75,13 @@ const STATUS: Record<string, StatusStyle> = {
     label: "Concluída",
   },
   failed: { icon: CircleAlert, tone: "text-error", label: "Falhou" },
+  // Estado de antes da auto-hospedagem, quando havia teto pago. Nada novo
+  // nasce nele (o limite de hoje avisa pela Entrada), mas linhas antigas
+  // ainda existem — e não podem falar de créditos numa Nexo sem cobrança.
   insufficient_credits: {
-    icon: Coins,
+    icon: CirclePause,
     tone: "text-tag-1-foreground",
-    label: "Sem créditos",
+    label: "Parada no limite",
   },
 };
 
@@ -91,7 +94,8 @@ function lastActivity(jobs: AiJobItem[]): number {
 }
 
 /**
- * "Tarefas" — o que os agentes fizeram com as capturas.
+ * "Atividade da Nexo" — o que os agentes fizeram com as capturas. Não se
+ * chama "Tarefas" porque as tarefas da pessoa são as da Agenda.
  *
  * As tarefas paradas por falta de crédito são **fixadas**: saem numa faixa
  * própria no topo, com a única superfície destacada do painel, porque são as
@@ -202,7 +206,7 @@ export function TasksPanel({
   return (
     <>
     <Panel
-      title="Tarefas"
+      title="Atividade da Nexo"
       count={pinned.length}
       status={status}
       isRefreshing={isRefreshing}
@@ -229,7 +233,7 @@ export function TasksPanel({
             className="flex size-8 items-center justify-center rounded-lg text-subtle-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:size-11"
           >
             <Maximize2 className="size-3.5" aria-hidden="true" />
-            <span className="sr-only">Abrir Tarefas em tela cheia</span>
+            <span className="sr-only">Abrir Atividade da Nexo em tela cheia</span>
           </button>
         </div>
       }
@@ -459,18 +463,6 @@ function JobRow({
             <KindIcon className="size-3" aria-hidden="true" />
             {state.label}
           </span>
-
-          {pinned && job.status === "insufficient_credits" && (
-            <button
-              type="button"
-              disabled
-              title="Disponível quando a assinatura estiver ativa"
-              className="cursor-not-allowed rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground opacity-70"
-            >
-              Retomar
-              {job.creditsCost > 0 && ` · ${job.creditsCost} créditos`}
-            </button>
-          )}
 
           {job.status === "failed" && (
             <button

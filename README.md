@@ -66,7 +66,7 @@ barra do dashboard. PDFs e textos têm o conteúdo extraído; imagens são lidas
 pela IA (descrição e texto que aparece nelas); áudios são transcritos em
 segundo plano quando uma chave de IA está configurada. A partir do conteúdo,
 a Nexo cria título, resumo, tipo e tags. Cada etapa aparece no painel
-"Tarefas". Um `.docx` já pode ser guardado e baixado, mas sua extração de
+"Atividade da Nexo". Um `.docx` já pode ser guardado e baixado, mas sua extração de
 texto ainda não está implementada.
 
 **Organizar** — a lousa de um workspace é uma superfície navegável com

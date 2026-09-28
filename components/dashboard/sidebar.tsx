@@ -215,7 +215,7 @@ export function Sidebar({
         <nav aria-label="Páginas" className="mt-2 px-3">
           {labelsVisible && (
             <div className="mb-1 flex h-4 items-center justify-end pr-2">
-              <span className="text-[10px] leading-none text-hint-foreground" aria-label="Atalho: Alt mais N">
+              <span className="text-[11px] leading-none text-subtle-foreground" aria-label="Atalho: Alt mais N" title="Alt+N abre a lista de páginas">
                 Alt+N
               </span>
             </div>
@@ -299,7 +299,7 @@ export function Sidebar({
                       <span className="text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">
                         Workspaces
                       </span>
-                      <span className="ml-2 text-[10px] text-hint-foreground" aria-label="Atalho: Alt mais W">
+                      <span className="ml-2 text-[11px] text-subtle-foreground" aria-label="Atalho: Alt mais W" title="Alt+W abre a lista de workspaces">
                         Alt+W
                       </span>
                     </SideLabel>

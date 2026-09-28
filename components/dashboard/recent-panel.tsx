@@ -22,6 +22,7 @@ import {
   toIsoString,
 } from "@/lib/dashboard/format";
 import type { RecentNote, WorkspaceSummary } from "@/lib/dashboard/queries";
+import { TAG_CHIP_CLASS, tagTone } from "@/lib/tags/palette";
 import { cn } from "@/lib/utils";
 
 const TABLES = ["notes"] as const;
@@ -35,16 +36,6 @@ function lastTouched(notes: RecentNote[]): number {
     return stamp > newest ? stamp : newest;
   }, 0);
 }
-
-/** Os seis matizes de tag do tema, endereçados pela posição gravada no banco. */
-const TAG_TONE: Record<string, string> = {
-  "1": "bg-tag-1 text-tag-1-foreground",
-  "2": "bg-tag-2 text-tag-2-foreground",
-  "3": "bg-tag-3 text-tag-3-foreground",
-  "4": "bg-tag-4 text-tag-4-foreground",
-  "5": "bg-tag-5 text-tag-5-foreground",
-  "6": "bg-tag-6 text-tag-6-foreground",
-};
 
 /**
  * "Recentes" — as notas que o usuário tocou por último, dele ou da IA.
@@ -95,10 +86,10 @@ export function RecentPanel({
         <EmptyState
           icon={<Inbox className="size-5" aria-hidden="true" />}
           title="Nada guardado ainda"
-          description="Solte um arquivo na barra acima, ou arraste um para dentro dela. O que você guardar e o que a Nexo criar aparecem aqui, do mais recente para o mais antigo."
+          description="Solte um arquivo na barra acima ou escreva um rascunho. O que você guardar e o que a Nexo criar aparecem aqui, do mais recente para o mais antigo."
           action={
             onCreateNote
-              ? { label: "Escrever uma nota", onClick: onCreateNote }
+              ? { label: "Escrever um rascunho", onClick: onCreateNote }
               : undefined
           }
         />
@@ -123,7 +114,7 @@ export function RecentPanel({
           {quiet && (
             <QuietFooter
               label="Faz um tempo desde a última captura."
-              actionLabel={onCreateNote ? "Escrever uma nota" : undefined}
+              actionLabel={onCreateNote ? "Escrever um rascunho" : undefined}
               onAction={onCreateNote}
             />
           )}
@@ -260,10 +251,12 @@ function RecentRow({
               {note.tags.slice(0, 3).map((tag) => (
                 <span
                   key={tag.id}
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                    TAG_TONE[tag.color ?? ""] ??
-                    "bg-secondary text-muted-foreground"
-                  }`}
+                  // A mesma cor que a tag tem em "Tags mais usadas", logo
+                  // abaixo, e na página de Tags: sem cor gravada, a do nome.
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    TAG_CHIP_CLASS[tagTone(tag)]
+                  )}
                 >
                   #{tag.name}
                 </span>

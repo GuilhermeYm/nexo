@@ -52,7 +52,7 @@ interface DraftNoteProps {
   /** O shell mostra o aviso e revalida os painéis. */
   onSaved: (title: string) => void;
   /** Entrega ao shell uma função que abre o rascunho — o estado vazio de
-   *  Recentes a chama para o "Escrever uma nota" funcionar de lá. */
+   *  Recentes a chama para o "Escrever um rascunho" funcionar de lá. */
   registerOpen?: (open: () => void) => void;
 }
 

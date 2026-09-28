@@ -162,7 +162,7 @@ export function AiReviewCard({
           ? `As pastas foram organizadas; ${plural(unfiledCount, "nota não combinou", "notas não combinaram")} com nenhuma e ${unfiledCount === 1 ? "ficou" : "ficaram"} sem pasta.`
           : "As pastas foram organizadas."
         : null,
-      "O detalhe fica em Tarefas.",
+      "O detalhe fica na Atividade da Nexo, no dashboard.",
     ]
       .filter(Boolean)
       .join(" ");
@@ -174,7 +174,7 @@ export function AiReviewCard({
         : phase === "done"
           ? doneText
           : phase === "slow"
-            ? "Ainda em andamento. A lista foi atualizada com o que já terminou; o resto aparece em Tarefas."
+            ? "Ainda em andamento. A lista foi atualizada com o que já terminou; o resto aparece na Atividade da Nexo."
             : "";
 
   if (!visible || !counts) {
@@ -330,7 +330,7 @@ export function AiReviewCard({
                   href="/dashboard"
                   className="mt-3 inline-flex h-9 items-center rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 pointer-coarse:h-11"
                 >
-                  Acompanhar em Tarefas
+                  Acompanhar no dashboard
                 </Link>
               )}
             </div>

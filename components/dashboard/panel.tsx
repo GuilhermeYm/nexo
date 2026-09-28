@@ -30,7 +30,10 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="flex h-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-background">
+    // Altura fixa só lado a lado (lg), onde os dois precisam alinhar. Numa
+    // coluna só, o painel cresce com a lista: rolagem dentro de rolagem, no
+    // toque, prende o dedo no painel e esconde o resto da página.
+    <section className="flex flex-col overflow-hidden rounded-2xl border border-border bg-background lg:h-[420px]">
       <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
 
@@ -85,7 +88,7 @@ export function Panel({
         {action && <span className={status ? "" : "ml-auto"}>{action}</span>}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      <div className="min-h-0 flex-1 lg:overflow-y-auto">{children}</div>
     </section>
   );
 }
@@ -121,7 +124,10 @@ export function EmptyState({
         <button
           type="button"
           onClick={action.onClick}
-          className="mt-1 inline-flex h-9 items-center rounded-full bg-accent px-4 text-sm font-semibold text-accent-foreground transition-colors duration-150 hover:bg-accent/90 pointer-coarse:h-11"
+          // Contorno, não preenchido: na conta nova os três painéis vazios
+          // mostravam três botões pretos iguais disputando com a barra de
+          // captura, que é o primeiro passo de verdade.
+          className="mt-1 inline-flex h-9 items-center rounded-full border border-border px-4 text-sm font-medium text-foreground transition-colors duration-150 hover:bg-secondary pointer-coarse:h-11"
         >
           {action.label}
         </button>

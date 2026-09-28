@@ -10,7 +10,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Painel "Tarefas" — o que os agentes fizeram, estão fazendo, ou pararam de
+ * Painel "Atividade da Nexo" — o que os agentes fizeram, estão fazendo, ou pararam de
  * fazer por falta de crédito.
  */
 export async function GET() {

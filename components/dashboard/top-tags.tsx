@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Hash } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -55,33 +55,22 @@ export function TopTags({
   }, [tags]);
 
   return (
+    // Uma linha de chips, e não mais uma grade de cartões: a grade tinha a
+    // mesma moldura dos painéis e passava de 600px no celular, empurrando
+    // Recentes para longe. É um atalho — cabe numa frase.
     <section
       aria-labelledby="top-tags-title"
       data-dashboard-enter=""
-      className="mt-4 animate-dashboard-enter overflow-hidden rounded-2xl border border-border bg-background motion-reduce:animate-none"
+      className="mt-10 animate-dashboard-enter motion-reduce:animate-none"
       style={{ animationDelay: entranceDelay }}
     >
-      <header className="flex min-h-12 items-center gap-2.5 border-b border-border px-4 py-2">
-        <span
-          aria-hidden="true"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-subtle-foreground"
-        >
-          <Hash className="size-4" />
-        </span>
-        <div className="min-w-0">
-          <h2
-            id="top-tags-title"
-            className="text-sm font-semibold text-foreground"
-          >
-            Tags mais usadas
-          </h2>
-          <p className="text-xs text-subtle-foreground">
-            Em todas as suas notas
-          </p>
-        </div>
+      <header className="flex items-baseline gap-3">
+        <h2 id="top-tags-title" className="text-sm font-semibold text-foreground">
+          Tags mais usadas
+        </h2>
         <Link
           href="/dashboard/tags"
-          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-secondary hover:text-foreground pointer-coarse:py-1.5"
+          className="-my-1 ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-background hover:text-foreground pointer-coarse:py-2"
         >
           Ver todas
           <ArrowUpRight className="size-3.5" aria-hidden="true" />
@@ -89,17 +78,17 @@ export function TopTags({
       </header>
 
       {tags.length === 0 ? (
-        <div className="px-4 py-5 text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           Quando uma nota receber uma tag, ela aparece aqui para facilitar os
           seus reencontros.
-        </div>
+        </p>
       ) : (
-        <ol className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-3">
+        <ol className="mt-3 flex flex-wrap gap-2">
           {tags.map((tag, index) => (
             <li
               key={tag.id}
               data-ranking-change={changedIds.has(tag.id) ? "" : undefined}
-              className={`relative min-w-0 ${
+              className={`relative min-w-0 max-w-full overflow-hidden rounded-full ${
                 changedIds.has(tag.id)
                   ? "animate-ranking-change motion-reduce:animate-none"
                   : "animate-dashboard-enter motion-reduce:animate-none"
@@ -117,20 +106,22 @@ export function TopTags({
                   className="pointer-events-none absolute inset-0 animate-ranking-flash bg-accent/10 motion-reduce:hidden"
                 />
               )}
+              {/* Abre a própria tag, não a lista de todas: é o mesmo destino
+                  que a busca da barra usa para uma tag. */}
               <Link
-                href="/dashboard/tags"
+                href={`/dashboard/tags?tag=${encodeURIComponent(tag.id)}`}
                 aria-label={`Ver a tag ${tag.name}, usada em ${tag.noteCount} ${tag.noteCount === 1 ? "nota" : "notas"}`}
-                className="group relative flex min-h-14 items-center gap-2.5 px-4 py-3 transition-[background-color,transform] duration-150 hover:bg-secondary/70 hover:translate-x-0.5 motion-reduce:hover:translate-x-0"
+                className="group flex h-9 max-w-full items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 transition-colors duration-150 hover:border-subtle-foreground/60 pointer-coarse:h-11"
               >
                 <span
                   aria-hidden="true"
-                  className={`size-2 shrink-0 rounded-full transition-transform duration-150 group-hover:scale-125 motion-reduce:group-hover:scale-100 ${TAG_DOT_CLASS[tagTone(tag)]}`}
+                  className={`size-2 shrink-0 rounded-full ${TAG_DOT_CLASS[tagTone(tag)]}`}
                 />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                <span className="min-w-0 truncate text-sm font-medium text-foreground">
                   #{tag.name}
                 </span>
                 <span className="shrink-0 text-xs tabular-nums text-subtle-foreground group-hover:text-muted-foreground">
-                  {tag.noteCount} {tag.noteCount === 1 ? "nota" : "notas"}
+                  {tag.noteCount}
                 </span>
               </Link>
             </li>

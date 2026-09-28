@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * "Agenda de hoje" — as caixas da lista do dia, no dashboard. Não se chama
- * "Tarefas" porque o painel ao lado já tem esse nome (docs/AGENDA.md).
+ * "Tarefas" para não disputar nome com a Atividade da Nexo, o painel que
+ * registra o que a IA fez (docs/AGENDA.md).
  *
  * Todo o estado nasce no cliente: "hoje" é o dia do relógio de quem olha, e o
  * servidor não sabe o fuso do navegador (ver docs/AGENDA.md). Por isso não
@@ -27,6 +28,8 @@ export function TodayTasks() {
   const today = useLocalDay();
   const [lines, setLines] = useState<TaskLine[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // "Tentar de novo" só incrementa: o efeito abaixo roda outra vez.
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!today) return;
     let controller: AbortController | null = null;
@@ -67,14 +70,14 @@ export function TodayTasks() {
       document.removeEventListener("visibilitychange", onVisible);
       controller?.abort();
     };
-  }, [today]);
+  }, [today, attempt]);
 
   const done = lines?.filter((line) => line.checked).length ?? 0;
 
   return (
     <section
       aria-labelledby="today-tasks-title"
-      className="mt-12 overflow-hidden rounded-2xl border border-border bg-background"
+      className="mt-10 overflow-hidden rounded-2xl border border-border bg-background"
     >
       <header className="flex h-12 items-center gap-2.5 border-b border-border px-4">
         <h2
@@ -99,9 +102,21 @@ export function TodayTasks() {
       </header>
 
       {failed && lines === null ? (
-        <p className="px-4 py-6 text-sm text-muted-foreground">
-          Não foi possível carregar as tarefas de hoje.
-        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-5">
+          <p className="text-sm text-muted-foreground">
+            Não foi possível carregar as tarefas de hoje.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setFailed(false);
+              setAttempt((current) => current + 1);
+            }}
+            className="rounded-full border border-border px-3 py-1 text-xs font-medium text-foreground transition-colors duration-150 hover:bg-secondary pointer-coarse:py-2"
+          >
+            Tentar de novo
+          </button>
+        </div>
       ) : lines === null || !today ? (
         <RowSkeleton rows={3} />
       ) : lines.length === 0 ? (
@@ -115,47 +130,49 @@ export function TodayTasks() {
           }}
         />
       ) : (
+        // A linha inteira leva à Agenda, e a caixa é só desenho. Antes a
+        // caixa de 16px era um link com cara de checkbox: quem clicava para
+        // marcar ia parar em outra página, e o dedo mal acertava o alvo.
+        // Marcar continua sendo coisa da Agenda (ver o topo do arquivo).
         <ul className="max-h-80 divide-y divide-border overflow-y-auto">
           {lines.map((line, index) => (
             <li
               key={index}
               data-dashboard-enter=""
-              className="flex animate-dashboard-enter items-start gap-3 py-2.5 pr-4 motion-reduce:animate-none"
-              style={{
-                paddingLeft: `${1 + line.depth * 1.5}rem`,
-                animationDelay: `${Math.min(index, 5) * 40}ms`,
-              }}
+              className="animate-dashboard-enter motion-reduce:animate-none"
+              style={{ animationDelay: `${Math.min(index, 5) * 40}ms` }}
             >
-              {line.checked ? (
+              <Link
+                href="/dashboard/agenda"
+                title={line.checked ? undefined : "Concluir na Agenda"}
+                className="flex items-start gap-3 py-2.5 pr-4 transition-colors duration-150 hover:bg-secondary/40 pointer-coarse:py-3"
+                style={{ paddingLeft: `${1 + line.depth * 1.5}rem` }}
+              >
                 <span
                   aria-hidden="true"
-                  className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-accent bg-accent text-accent-foreground"
+                  className={cn(
+                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
+                    line.checked
+                      ? "border-accent bg-accent text-accent-foreground"
+                      : "border-border"
+                  )}
                 >
-                  <Check className="size-3" strokeWidth={3} />
+                  {line.checked && <Check className="size-3" strokeWidth={3} />}
                 </span>
-              ) : (
-                <Link
-                  href="/dashboard/agenda"
-                  aria-label={`Abrir a Agenda para concluir: ${line.text}`}
-                  title="Concluir na Agenda"
-                  className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-border text-transparent transition-[background-color,border-color,transform] duration-150 hover:border-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-95 motion-reduce:active:scale-100"
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 text-sm leading-snug break-words",
+                    line.checked
+                      ? "text-subtle-foreground line-through"
+                      : "text-foreground"
+                  )}
                 >
-                  <Check className="size-3" strokeWidth={3} aria-hidden="true" />
-                </Link>
-              )}
-              <span
-                className={cn(
-                  "min-w-0 flex-1 text-sm leading-snug break-words",
-                  line.checked
-                    ? "text-subtle-foreground line-through"
-                    : "text-foreground"
-                )}
-              >
-                <span className="sr-only">
-                  {line.checked ? "Concluída: " : "Pendente: "}
+                  <span className="sr-only">
+                    {line.checked ? "Concluída: " : "Pendente: "}
+                  </span>
+                  {line.text}
                 </span>
-                {line.text}
-              </span>
+              </Link>
             </li>
           ))}
         </ul>

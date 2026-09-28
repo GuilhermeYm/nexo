@@ -86,3 +86,21 @@ export function firstName(fullName: string | null | undefined): string | null {
   if (!trimmed) return null;
   return trimmed.split(/\s+/)[0];
 }
+
+const dayHeading = new Intl.DateTimeFormat("pt-BR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+/**
+ * "Domingo, 28 de setembro" — o dia de quem está lendo, a partir do
+ * `YYYY-MM-DD` de `useLocalDay`. A data é montada como meia-noite local, e não
+ * por `Date.parse`, que leria a string como UTC e voltaria um dia a oeste de
+ * Greenwich.
+ */
+export function formatDayHeading(day: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const text = dayHeading.format(new Date(year, month - 1, date));
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
